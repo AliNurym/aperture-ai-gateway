@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 380" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#070a13" />
+      <stop offset="50%" stop-color="#0d1322" />
+      <stop offset="100%" stop-color="#080c18" />
+    </linearGradient>
+
+    <linearGradient id="solanaGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#9945FF" />
+      <stop offset="50%" stop-color="#00F0FF" />
+      <stop offset="100%" stop-color="#14F195" />
+    </linearGradient>
+
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <style>
+      @keyframes pulseBeam {
+        0% { stroke-dashoffset: 200; opacity: 0.2; }
+        50% { opacity: 1; }
+        100% { stroke-dashoffset: 0; opacity: 0.2; }
+      }
+      @keyframes nodeGlow {
+        0%, 100% { filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.3)); }
+        50% { filter: drop-shadow(0 0 14px rgba(20, 241, 149, 0.6)); }
+      }
+      @keyframes dotMove {
+        0% { transform: translateX(0); }
+        100% { transform: translateX(170px); }
+      }
+      .anim-line {
+        stroke-dasharray: 8 12;
+        animation: pulseBeam 2.5s linear infinite;
+      }
+      .glow-node {
+        animation: nodeGlow 4s ease-in-out infinite alternate;
+      }
+      .title-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-weight: 800; }
+      .mono-text { font-family: 'SF Mono', Consolas, Monaco, monospace; }
+    </style>
+  </defs>
+
+  <!-- Background Canvas -->
+  <rect width="1000" height="380" rx="20" fill="url(#bgGrad)" stroke="#1e293b" stroke-width="2" />
+
+  <!-- Top Title Banner -->
+  <text x="50" y="45" fill="#94a3b8" class="mono-text" font-size="11" letter-spacing="2" font-weight="700">APERTURE AI PROTOCOL &bull; AUTONOMOUS DePIN WORKFLOW</text>
+  <text x="50" y="75" fill="#f8fafc" class="title-text" font-size="20">End-to-End Cryptographic Execution in 400ms Solana Slots</text>
+
+  <!-- Status Chip -->
+  <rect x="790" y="40" width="160" height="30" rx="15" fill="rgba(20, 241, 149, 0.12)" stroke="#14F195" stroke-width="1.2" />
+  <circle cx="810" cy="55" r="4" fill="#14F195" />
+  <text x="822" y="59" fill="#14F195" class="mono-text" font-size="11" font-weight="700">DEVNET ACTIVE</text>
+
+  <!-- ================= CONNECTING PIPELINE WIRES ================= -->
+  <!-- Line 1 -> 2 -->
+  <line x1="210" y1="200" x2="380" y2="200" stroke="#334155" stroke-width="3" />
+  <line x1="210" y1="200" x2="380" y2="200" stroke="#00F0FF" stroke-width="3" class="anim-line" />
+
+  <!-- Line 2 -> 3 -->
+  <line x1="410" y1="200" x2="580" y2="200" stroke="#334155" stroke-width="3" />
+  <line x1="410" y1="200" x2="580" y2="200" stroke="#9945FF" stroke-width="3" class="anim-line" />
+
+  <!-- Line 3 -> 4 -->
+  <line x1="610" y1="200" x2="780" y2="200" stroke="#334155" stroke-width="3" />
+  <line x1="610" y1="200" x2="780" y2="200" stroke="#14F195" stroke-width="3" class="anim-line" />
+
+  <!-- Line 4 -> 5 (Curved to Settlement) -->
+  <path d="M 880 255 L 880 300 Q 880 320 860 320 L 140 320 Q 120 320 120 300 L 120 255" fill="none" stroke="#1e293b" stroke-width="2" stroke-dasharray="4 6" />
+
+  <!-- ================= STAGE 01: CLIENT & ESCROW ================= -->
+  <g class="glow-node" transform="translate(40, 130)">
+    <rect width="170" height="130" rx="14" fill="#0b1120" stroke="#2563eb" stroke-width="1.8" />
+    <rect x="14" y="14" width="28" height="28" rx="8" fill="rgba(37, 99, 235, 0.2)" />
+    <text x="21" y="33" fill="#60a5fa" font-size="14">🔑</text>
+    <text x="50" y="26" fill="#60a5fa" class="mono-text" font-size="10" font-weight="700">STAGE 01</text>
+    <text x="50" y="39" fill="#f8fafc" class="title-text" font-size="13">Web3 Auth & PDA</text>
+    <text x="14" y="68" fill="#94a3b8" class="title-text" font-size="11">Ed25519 Wallet Auth</text>
+    <text x="14" y="85" fill="#94a3b8" class="title-text" font-size="11">0.1 SOL Channel Lock</text>
+    <rect x="14" y="100" width="142" height="18" rx="4" fill="#1e293b" />
+    <text x="22" y="113" fill="#38bdf8" class="mono-text" font-size="9.5">[b"channel", user]</text>
+  </g>
+
+  <!-- ================= STAGE 02: AI SENTINEL ================= -->
+  <g class="glow-node" transform="translate(240, 130)">
+    <rect width="170" height="130" rx="14" fill="#0b1120" stroke="#059669" stroke-width="1.8" />
+    <rect x="14" y="14" width="28" height="28" rx="8" fill="rgba(5, 150, 105, 0.2)" />
+    <text x="21" y="33" fill="#34d399" font-size="14">🛡️</text>
+    <text x="50" y="26" fill="#34d399" class="mono-text" font-size="10" font-weight="700">STAGE 02</text>
+    <text x="50" y="39" fill="#f8fafc" class="title-text" font-size="13">AST Pre-Audit</text>
+    <text x="14" y="68" fill="#94a3b8" class="title-text" font-size="11">Static Bytecode Scan</text>
+    <text x="14" y="85" fill="#94a3b8" class="title-text" font-size="11">Bans Malicious Syscalls</text>
+    <rect x="14" y="100" width="142" height="18" rx="4" fill="#1e293b" />
+    <text x="22" y="113" fill="#34d399" class="mono-text" font-size="9.5">Score: 74/100 (Safe)</text>
+  </g>
+
+  <!-- ================= STAGE 03: PYTH & ANCHOR ================= -->
+  <g class="glow-node" transform="translate(440, 130)">
+    <rect width="170" height="130" rx="14" fill="#0b1120" stroke="#7c3aed" stroke-width="1.8" />
+    <rect x="14" y="14" width="28" height="28" rx="8" fill="rgba(124, 58, 237, 0.2)" />
+    <text x="21" y="33" fill="#a78bfa" font-size="14">⚡</text>
+    <text x="50" y="26" fill="#a78bfa" class="mono-text" font-size="10" font-weight="700">STAGE 03</text>
+    <text x="50" y="39" fill="#f8fafc" class="title-text" font-size="13">Dynamic Burn Rate</text>
+    <text x="14" y="68" fill="#94a3b8" class="title-text" font-size="11">Pyth Hermes $99.81</text>
+    <text x="14" y="85" fill="#94a3b8" class="title-text" font-size="11">Solana Slot Metering</text>
+    <rect x="14" y="100" width="142" height="18" rx="4" fill="#1e293b" />
+    <text x="22" y="113" fill="#a78bfa" class="mono-text" font-size="9.5">Rate: 1,490 L/s</text>
+  </g>
+
+  <!-- ================= STAGE 04: SILICON WORKER ================= -->
+  <g class="glow-node" transform="translate(640, 130)">
+    <rect width="170" height="130" rx="14" fill="#0b1120" stroke="#00F0FF" stroke-width="1.8" />
+    <rect x="14" y="14" width="28" height="28" rx="8" fill="rgba(0, 240, 255, 0.2)" />
+    <text x="21" y="33" fill="#38bdf8" font-size="14">💻</text>
+    <text x="50" y="26" fill="#38bdf8" class="mono-text" font-size="10" font-weight="700">STAGE 04</text>
+    <text x="50" y="39" fill="#f8fafc" class="title-text" font-size="13">NVIDIA RTX 3050</text>
+    <text x="14" y="68" fill="#94a3b8" class="title-text" font-size="11">12.0 TFLOPS Silicon</text>
+    <text x="14" y="85" fill="#94a3b8" class="title-text" font-size="11">Live NVML (50°C)</text>
+    <rect x="14" y="100" width="142" height="18" rx="4" fill="#1e293b" />
+    <text x="22" y="113" fill="#00F0FF" class="mono-text" font-size="9.5">Streaming Stdout...</text>
+  </g>
+
+  <!-- ================= STAGE 05: ON-CHAIN SETTLEMENT ================= -->
+  <g class="glow-node" transform="translate(810, 130)">
+    <rect width="150" height="130" rx="14" fill="#0b1120" stroke="#14F195" stroke-width="1.8" />
+    <rect x="14" y="14" width="28" height="28" rx="8" fill="rgba(20, 241, 149, 0.2)" />
+    <text x="21" y="33" fill="#14F195" font-size="14">📜</text>
+    <text x="50" y="26" fill="#14F195" class="mono-text" font-size="10" font-weight="700">STAGE 05</text>
+    <text x="50" y="39" fill="#f8fafc" class="title-text" font-size="13">NFT Settlement</text>
+    <text x="14" y="68" fill="#94a3b8" class="title-text" font-size="11">Burn Reset to 0</text>
+    <text x="14" y="85" fill="#94a3b8" class="title-text" font-size="11">Refund Unspent SOL</text>
+    <rect x="14" y="100" width="122" height="18" rx="4" fill="#1e293b" />
+    <text x="20" y="113" fill="#14F195" class="mono-text" font-size="9.5">Proof: 4qA2...URYX</text>
+  </g>
+
+  <!-- Return Flow Caption -->
+  <text x="500" y="340" text-anchor="middle" fill="#64748b" class="mono-text" font-size="11">
+    Autonomous Return: Burned Lamports Settled &bull; Unspent Escrow Funds Immediately Refunded to User
+  </text>
+</svg>

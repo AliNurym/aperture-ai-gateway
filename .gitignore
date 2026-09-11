@@ -1,0 +1,115 @@
+# ==============================================================================
+# Aperture AI — Comprehensive Git Ignore Specification
+# Solana Anchor | Python FastAPI & NVML | React Vite DePIN Grid
+# ==============================================================================
+
+# --- Node & Frontend Bundling ---
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+dist-ssr/
+frontend/dist-ssr/
+build/
+.vite/
+frontend/.vite/
+*.local
+
+# --- NPM / Yarn / PNPM Logs ---
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.log
+
+# --- Python & Sandboxed Execution ---
+__pycache__/
+*/__pycache__/
+*/*/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/venv/
+backend/.venv/
+venv/
+.venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+*.sqlite3
+*.db
+database.db
+
+# Temporary compute executor and worker outputs
+task_*.py
+node_log_*.txt
+results_*.txt
+node_log_task-*.txt
+
+# --- Solana & Rust Anchor Artifacts ---
+target/
+programs/target/
+.anchor/
+test-ledger/
+deploy/
+programs/deploy/
+
+# --- Cryptographic Keypairs & Secrets ---
+*.keypair.json
+*id.json
+backend/oracle_keypair.json
+*.pem
+*.key
+
+# --- Environment & Configuration Secrets ---
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# --- IDE & Editor Metadata ---
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# --- Operating System Files ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
