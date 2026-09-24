@@ -2,15 +2,32 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
-import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
-import idl from './assets/aperture_gateway.json';
+import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 const PROGRAM_ID = new PublicKey("C2q9yxux7b7bxFF64pkZUV6g2Vcs2bQ1FS4GUQy512wv");
 
+async function anchorInstructionData(name, value) {
+  const input = new TextEncoder().encode(`global:${name}`);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", input));
+  const discriminator = digest.slice(0, 8);
+  if (value === undefined) return discriminator;
+
+  const data = new Uint8Array(16);
+  data.set(discriminator, 0);
+  let remaining = BigInt(value);
+  for (let index = 0; index < 8; index += 1) {
+    data[8 + index] = Number(remaining & 0xffn);
+    remaining >>= 8n;
+  }
+  return data;
+}
+
 export default function Dashboard({ isDemoMode = true, setIsDemoMode, onBack }) {
   const [walletBalance, setWalletBalance] = useState(0.0);
   const [channelBalance, setChannelBalance] = useState(0.5);
+  const [channelState, setChannelState] = useState(null);
+  const [protocolConfig, setProtocolConfig] = useState(null);
   const [customDeposit, setCustomDeposit] = useState("0.1");
   const [burnRate, setBurnRate] = useState(0);
   const [solPrice, setSolPrice] = useState(99.73);
@@ -21,6 +38,7 @@ export default function Dashboard({ isDemoMode = true, setIsDemoMode, onBack }) 
   const [currentStep, setCurrentStep] = useState(0); // 0: Idle, 1: AST Audit, 2: Pricing Oracle, 3: GPU Dispatch, 4: Settled
   const [logs, setLogs] = useState([]);
   const [currentTaskId, setCurrentTaskId] = useState(null);
+  const [taskAccessToken, setTaskAccessToken] = useState(null);
   const [auditInfo, setAuditInfo] = useState(null);
   const [settlementReceipt, setSettlementReceipt] = useState(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
@@ -28,6 +46,7 @@ export default function Dashboard({ isDemoMode = true, setIsDemoMode, onBack }) 
   const [faucetLoading, setFaucetLoading] = useState(false);
   const [faucetToast, setFaucetToast] = useState(null);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [channelTxLoading, setChannelTxLoading] = useState(false);
 
   const terminalEndRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -102,7 +121,7 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
       if (res.data && res.data.price) {
         setSolPrice(parseFloat(res.data.price) || 99.73);
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   useEffect(() => {
@@ -113,26 +132,36 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
 
   // Sync balances
   const syncBalances = async () => {
-    const activeWallet = publicKey ? publicKey.toBase58() : (isDemoMode ? "DEMO_DEVNET_SOLANA_GUEST" : null);
-    if (!activeWallet) return;
-
-    if (publicKey) {
-      try {
-        const bal = await connection.getBalance(publicKey);
-        setWalletBalance(bal / LAMPORTS_PER_SOL);
-      } catch (e) {}
+    if (isDemoMode) {
+      setChannelState(null);
+      setChannelBalance(previous => previous > 0 ? previous : 0.5);
+      return;
+    }
+    if (!publicKey) {
+      setWalletBalance(0);
+      setChannelBalance(0);
+      setChannelState(null);
+      setProtocolConfig(null);
+      return;
     }
 
     try {
-      const res = await axios.get(`${API_URL}/balance/${activeWallet}`);
-      if (res.data && res.data.balance > 0) {
-        setChannelBalance(parseFloat(res.data.balance) || 0);
-      } else {
-        if (isDemoMode && channelBalance <= 0) {
-          setChannelBalance(0.500);
-        }
-      }
-    } catch (e) {}
+      const [walletLamports, balanceResponse, configResponse] = await Promise.all([
+        connection.getBalance(publicKey),
+        axios.get(`${API_URL}/balance/${publicKey.toBase58()}`),
+        axios.get(`${API_URL}/channel-config`)
+      ]);
+      const balance = balanceResponse.data;
+      const config = configResponse.data;
+      setWalletBalance(walletLamports / LAMPORTS_PER_SOL);
+      setChannelBalance(Number(balance?.balance) || 0);
+      setChannelState(balance?.initialized ? balance : null);
+      setProtocolConfig(config || null);
+    } catch (e) {
+      setChannelBalance(0);
+      setChannelState(null);
+      setProtocolConfig(null);
+    }
   };
 
   useEffect(() => {
@@ -142,13 +171,13 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
   // Live gas burn counter
   useEffect(() => {
     let timer;
-    if (status === 'RUNNING' && burnRate > 0) {
+    if (!isDemoMode && status === 'RUNNING' && burnRate > 0) {
       timer = setInterval(() => {
         setChannelBalance(prev => Math.max(0, prev - (burnRate / 10)));
       }, 100);
     }
     return () => clearInterval(timer);
-  }, [status, burnRate]);
+  }, [status, burnRate, isDemoMode]);
 
   const handleBenchmarkSelect = (id) => {
     setSelectedBenchmark(id);
@@ -206,7 +235,19 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
   };
 
   const requestDevnetAirdrop = async () => {
-    const target = publicKey ? publicKey.toBase58() : "DEMO_DEVNET_SOLANA_GUEST";
+    if (isDemoMode) {
+      setChannelBalance(previous => previous + 1.0);
+      addLog("Added 1.0 SOL of illustrative fuel to this browser demo session.", 'success');
+      setFaucetToast("Demo Fuel Added");
+      setTimeout(() => setFaucetToast(null), 3500);
+      return;
+    }
+    if (!publicKey) {
+      setVisible(true);
+      return;
+    }
+
+    const target = publicKey.toBase58();
     setFaucetLoading(true);
     addLog(`Requesting 1.0 SOL Devnet airdrop for ${target.slice(0, 8)}...`, 'info');
     try {
@@ -219,12 +260,11 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
         setFaucetToast("1.0 SOL Airdrop Successful");
         setTimeout(() => setFaucetToast(null), 3500);
         setTimeout(syncBalances, 2500);
+      } else {
+        addLog("Devnet faucet did not grant SOL to this wallet.", 'error');
       }
     } catch (e) {
-      setChannelBalance(prev => prev + 1.0);
-      addLog(`Credited 1.0 SOL to session compute fuel tank.`, 'success');
-      setFaucetToast("1.0 SOL Fuel Credited");
-      setTimeout(() => setFaucetToast(null), 3500);
+      addLog(`Devnet airdrop failed: ${e.response?.data?.detail || e.message}`, 'error');
     } finally {
       setFaucetLoading(false);
     }
@@ -237,42 +277,122 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
       return;
     }
 
-    addLog(`Locking ${amount} SOL into payment channel PDA...`, 'info');
-
-    if (publicKey && !isDemoMode) {
-      try {
-        const [channelPda] = PublicKey.findProgramAddressSync(
-          [Buffer.from("channel"), publicKey.toBuffer()],
-          PROGRAM_ID
-        );
-
-        const tx = new Transaction().add(
-          SystemProgram.transfer({
-            fromPubkey: publicKey,
-            toPubkey: channelPda,
-            lamports: Math.round(amount * LAMPORTS_PER_SOL),
-          })
-        );
-        const latestBlockhash = await connection.getLatestBlockhash();
-        tx.recentBlockhash = latestBlockhash.blockhash;
-        tx.feePayer = publicKey;
-
-        const txSig = await sendTransaction(tx, connection);
-        addLog(`Deposit confirmed on-chain. TX: ${txSig.slice(0, 12)}...`, 'success');
-        setShowDepositModal(false);
-        setTimeout(syncBalances, 3000);
-        return;
-      } catch (err) {
-        addLog(`Wallet note: ${err.message}. Applied to session tank.`, 'warning');
-      }
+    if (isDemoMode) {
+      setChannelBalance(previous => previous + amount);
+      addLog(`Added ${amount} SOL of illustrative fuel to the browser demo session.`, 'success');
+      setShowDepositModal(false);
+      return;
     }
 
-    setChannelBalance(prev => prev + amount);
-    addLog(`Payment channel funded with ${amount} SOL.`, 'success');
-    setShowDepositModal(false);
+    if (!publicKey || !sendTransaction) {
+      setVisible(true);
+      return;
+    }
+
+    setChannelTxLoading(true);
+    addLog(`Preparing a ${amount} SOL payment-channel transaction...`, 'info');
+    try {
+      const [balanceResponse, configResponse] = await Promise.all([
+        axios.get(`${API_URL}/balance/${publicKey.toBase58()}`),
+        axios.get(`${API_URL}/channel-config`)
+      ]);
+      const channel = balanceResponse.data;
+      const config = configResponse.data;
+      if (!config?.initialized) {
+        throw new Error("The gateway oracle and treasury config has not been initialized.");
+      }
+
+      const programId = new PublicKey(config.program_id || PROGRAM_ID);
+      const [configPda] = PublicKey.findProgramAddressSync([Buffer.from("config")], programId);
+      const [channelPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("channel"), publicKey.toBuffer()],
+        programId
+      );
+      const lamports = BigInt(Math.round(amount * LAMPORTS_PER_SOL));
+      const opening = !channel?.initialized;
+      const instruction = new TransactionInstruction({
+        programId,
+        keys: opening ? [
+          { pubkey: configPda, isSigner: false, isWritable: false },
+          { pubkey: channelPda, isSigner: false, isWritable: true },
+          { pubkey: publicKey, isSigner: true, isWritable: true },
+          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }
+        ] : [
+          { pubkey: channelPda, isSigner: false, isWritable: true },
+          { pubkey: publicKey, isSigner: true, isWritable: true },
+          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }
+        ],
+        data: await anchorInstructionData(opening ? "open_channel" : "top_up", lamports)
+      });
+
+      const transaction = new Transaction().add(instruction);
+      const latest = await connection.getLatestBlockhash("confirmed");
+      transaction.feePayer = publicKey;
+      transaction.recentBlockhash = latest.blockhash;
+      const signature = await sendTransaction(transaction, connection);
+      const confirmation = await connection.confirmTransaction({ ...latest, signature }, "confirmed");
+      if (confirmation.value.err) throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+
+      addLog(`${opening ? "Payment channel opened" : "Payment channel topped up"}. Confirmed transaction: ${signature}`, 'success');
+      setShowDepositModal(false);
+      await syncBalances();
+    } catch (err) {
+      addLog(`Channel deposit failed: ${err.response?.data?.detail || err.message}. No local balance was added.`, 'error');
+    } finally {
+      setChannelTxLoading(false);
+    }
   };
 
-  const runSimulatedFallback = (effectiveWallet) => {
+  const handleCloseChannel = async () => {
+    if (isDemoMode) {
+      addLog("Demo fuel is local to this browser session and has no on-chain refund.", 'warning');
+      return;
+    }
+    if (!publicKey || !sendTransaction || !protocolConfig?.initialized) {
+      addLog("Connect the funded wallet and load the live protocol configuration first.", 'error');
+      return;
+    }
+    if (status === 'RUNNING' || status === 'AUDITING') {
+      addLog("Stop the active task before closing its payment channel.", 'warning');
+      return;
+    }
+
+    setChannelTxLoading(true);
+    try {
+      const programId = new PublicKey(protocolConfig.program_id || PROGRAM_ID);
+      const [configPda] = PublicKey.findProgramAddressSync([Buffer.from("config")], programId);
+      const [channelPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("channel"), publicKey.toBuffer()],
+        programId
+      );
+      const instruction = new TransactionInstruction({
+        programId,
+        keys: [
+          { pubkey: configPda, isSigner: false, isWritable: false },
+          { pubkey: channelPda, isSigner: false, isWritable: true },
+          { pubkey: publicKey, isSigner: true, isWritable: true },
+          { pubkey: new PublicKey(protocolConfig.treasury), isSigner: false, isWritable: true }
+        ],
+        data: await anchorInstructionData("close_channel")
+      });
+      const transaction = new Transaction().add(instruction);
+      const latest = await connection.getLatestBlockhash("confirmed");
+      transaction.feePayer = publicKey;
+      transaction.recentBlockhash = latest.blockhash;
+      const signature = await sendTransaction(transaction, connection);
+      const confirmation = await connection.confirmTransaction({ ...latest, signature }, "confirmed");
+      if (confirmation.value.err) throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+
+      addLog(`Payment channel closed and remaining funds refunded. Transaction: ${signature}`, 'success');
+      await syncBalances();
+    } catch (err) {
+      addLog(`Could not close payment channel: ${err.response?.data?.detail || err.message}`, 'error');
+    } finally {
+      setChannelTxLoading(false);
+    }
+  };
+
+  const runSimulatedFallback = () => {
     // 1. AST Sandbox Security check for client simulation
     if (code.includes('import os') || code.includes('subprocess') || code.includes('sys.exit') || code.includes('socket')) {
       setStatus('BLOCKED');
@@ -297,7 +417,6 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
     const burnRateLamports = Math.round(400 + (complexity / 100) * 1100);
     const simulatedBurnRate = burnRateLamports / 1e9;
     const simulatedTaskId = `sim-${Math.random().toString(16).slice(2, 8)}`;
-    const proofSig = "5" + Array.from({length: 86}, () => "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"[Math.floor(Math.random()*58)]).join("");
 
     setAuditInfo({
       scores: {
@@ -313,35 +432,38 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
 
     addLog(`AI Sentinel Audit: Trust Verified (Complexity: ${complexity}/100)`, 'success');
     addLog(`Dynamic Rate: ${burnRateLamports} Lamports/sec ($${((simulatedBurnRate * solPrice) * 3600).toFixed(3)}/hr)`, 'success');
-    addLog(`Dispatched to Silicon Node: NODE-HOST-GPU-01 (RTX 3050)`, 'info');
+    addLog(`Demo simulation started for ${simulatedTaskId}. Python code will not execute in this mode.`, 'info');
 
     let step = 0;
     const simTimer = setInterval(() => {
       step++;
       if (step === 1) {
-        addLog(`>> Connected to physical GPU bus (12ms ping, 50.0°C)...`, 'terminal');
+        addLog(`>> Demo step 1/3: showing the example workload flow...`, 'terminal');
       } else if (step === 2) {
-        addLog(`>> Allocating 0.4 GB VRAM / 4.0 GB total (FP32 12.0 TFLOPS)...`, 'terminal');
+        addLog(`>> Demo step 2/3: illustrative worker dispatch...`, 'terminal');
       } else if (step === 3) {
-        addLog(`>> Execution chunk [1/1]: Processed 500 tensor iterations in 312ms`, 'terminal');
+        addLog(`>> Demo step 3/3: sample output preview...`, 'terminal');
       } else if (step >= 4) {
         clearInterval(simTimer);
         pollIntervalRef.current = null;
 
-        addLog(`Task ${simulatedTaskId} completed successfully. Autonomous settlement finalized on Solana Devnet.`, 'success');
+        addLog(`Demo simulation finished. No Python ran and no SOL moved.`, 'success');
         setStatus('SETTLED');
         setCurrentStep(4);
         setBurnRate(0);
 
         setSettlementReceipt({
           taskId: simulatedTaskId,
-          proof: `https://explorer.solana.com/tx/${proofSig}?cluster=devnet`,
+          proof: null,
+          settlementType: "SIMULATION",
+          executionStatus: "simulated",
+          costSol: 0,
           burnRate: simulatedBurnRate,
           burnRateLamports: burnRateLamports,
           solPrice,
           complexity: complexity,
-          verdict: `Aperture Sentinel: Dynamic Lamport settlement verified on Devnet.`,
-          nodeId: "NODE-HOST-GPU-01 (NVIDIA RTX 3050)",
+          verdict: `Illustrative demo flow. This workload was not executed or settled.`,
+          nodeId: null,
           timestamp: new Date().toISOString()
         });
         setShowReceiptModal(true);
@@ -353,69 +475,97 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
   };
 
   const runTask = async () => {
-    const effectiveWallet = publicKey ? publicKey.toBase58() : (isDemoMode ? "DEMO_DEVNET_SOLANA_GUEST" : null);
-    if (!effectiveWallet) {
+    if (isDemoMode) {
+      if (channelBalance < 0.0005) {
+        addLog("Demo fuel is empty. Add illustrative fuel to continue.", 'warning');
+        setShowDepositModal(true);
+        return;
+      }
+      runSimulatedFallback();
+      return;
+    }
+    if (!publicKey) {
       setVisible(true);
       return;
     }
 
-    if (channelBalance < 0.0005) {
-      addLog("Insufficient fuel in payment channel. Please top-up SOL.", 'error');
-      setShowDepositModal(true);
-      return;
-    }
-
-    // Clear any previous running polling interval
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
-
-    setStatus('AUDITING');
-    setCurrentStep(1);
-    addLog('AI-Sentinel: Static AST security & complexity audit initiated...', 'info');
-
-    // Correct JS array of 64 zeroes (fixing previous [0] * 64 NaN bug)
-    let signatureArray = new Array(64).fill(0);
-    const authMessage = "Sign to authenticate execution on Aperture DePIN.";
-
-    if (publicKey && signMessage && !isDemoMode) {
-      try {
-        const signatureBytes = await signMessage(new TextEncoder().encode(authMessage));
-        signatureArray = Array.from(signatureBytes);
-      } catch (err) {
-        addLog("Signature bypassed, running in evaluation mode.", 'warning');
-      }
-    }
-
     try {
+      if (!signMessage) throw new Error("This wallet does not support message signing.");
+      const [balanceResponse, configResponse] = await Promise.all([
+        axios.get(`${API_URL}/balance/${publicKey.toBase58()}`),
+        axios.get(`${API_URL}/channel-config`)
+      ]);
+      const liveBalance = balanceResponse.data;
+      if (!liveBalance?.initialized || Number(liveBalance.balance) <= 0) {
+        setChannelBalance(0);
+        setChannelState(liveBalance?.initialized ? liveBalance : null);
+        addLog("Open and fund a payment channel before starting a live task.", 'warning');
+        setShowDepositModal(true);
+        return;
+      }
+      if (!configResponse.data?.initialized) {
+        throw new Error("The gateway protocol config has not been initialized by its operator.");
+      }
+      setChannelBalance(Number(liveBalance.balance));
+      setChannelState(liveBalance);
+      setProtocolConfig(configResponse.data);
+
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+
+      setStatus('AUDITING');
+      setCurrentStep(1);
+      addLog('AI Sentinel: checking workload policy and requesting wallet authorization...', 'info');
+
+      const challengeResponse = await axios.post(`${API_URL}/execute/challenge`, {
+        code,
+        wallet: publicKey.toBase58()
+      });
+      let signatureBytes;
+      try {
+        signatureBytes = await signMessage(new TextEncoder().encode(challengeResponse.data.message));
+      } catch {
+        setStatus('IDLE');
+        setCurrentStep(0);
+        addLog("Wallet authorization was cancelled. The task was not queued.", 'warning');
+        return;
+      }
+
       const res = await axios.post(`${API_URL}/execute`, {
         code,
-        wallet: effectiveWallet,
-        signature: signatureArray,
-        message: authMessage
+        wallet: publicKey.toBase58(),
+        signature: Array.from(signatureBytes),
+        message: challengeResponse.data.message,
+        authorization_nonce: challengeResponse.data.nonce,
+        authorization_expires_at: challengeResponse.data.expires_at
       });
 
-      const { task_id, burn_rate, burn_rate_lamports, complexity_score, ai_analysis, on_chain_proof } = res.data;
+      const { task_id, task_access_token, burn_rate, burn_rate_lamports, complexity_score, ai_analysis } = res.data;
+      if (!task_access_token) throw new Error("Gateway response is missing its task access token.");
 
       setAuditInfo(ai_analysis);
       setBurnRate(burn_rate);
       setCurrentTaskId(task_id);
+      setTaskAccessToken(task_access_token);
       setStatus('RUNNING');
       setCurrentStep(3);
 
       addLog(`AI Sentinel Audit: Trust Verified (Complexity: ${complexity_score}/100)`, 'success');
       addLog(`Dynamic Rate: ${(burn_rate * 1e9).toFixed(0)} Lamports/sec ($${((burn_rate * solPrice) * 3600).toFixed(3)}/hr)`, 'success');
-      addLog(`Dispatched to physical worker: NODE-HOST-GPU-01 (RTX 3050)`, 'info');
+      addLog("Task accepted by the gateway and assigned to an authenticated worker queue.", 'info');
 
-      // Polling for execution result and real-time stdout streaming
       let isSettled = false;
+      let isPolling = false;
       let streamOffset = 0;
       pollIntervalRef.current = setInterval(async () => {
-        if (isSettled) return;
+        if (isSettled || isPolling) return;
+        isPolling = true;
         try {
-          // 1. Fetch live incremental stdout stream from physical GPU
-          const streamRes = await axios.get(`${API_URL}/stream_log/${task_id}?offset=${streamOffset}`);
+          const streamRes = await axios.get(`${API_URL}/stream_log/${task_id}`, {
+            params: { offset: streamOffset, access_token: task_access_token }
+          });
           if (streamRes.data && streamRes.data.lines && streamRes.data.lines.length > 0) {
             streamRes.data.lines.forEach(chunk => {
               chunk.split('\n').forEach(l => {
@@ -425,7 +575,6 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
             streamOffset = streamRes.data.next_offset;
           }
 
-          // 2. Check if task completed or concluded
           if (streamRes.data && streamRes.data.is_completed) {
             isSettled = true;
             if (pollIntervalRef.current) {
@@ -434,32 +583,48 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
             }
 
             const output = streamRes.data.output || "";
-            
+
             // Check if aborted by user
             if (output === "EXECUTION_ABORTED_BY_USER") {
               addLog("Task execution was aborted by user.", "warning");
               setStatus("IDLE");
               setCurrentStep(0);
               setBurnRate(0);
+              setCurrentTaskId(null);
+              setTaskAccessToken(null);
               syncBalances();
               return;
             }
 
-            setStatus('SETTLED');
+            const receipt = streamRes.data.receipt || {};
+            const executionStatus = receipt.execution_status || "unknown";
+            const taskSucceeded = executionStatus === "completed" && Number(receipt.exit_code) === 0;
+            setStatus(taskSucceeded ? 'SETTLED' : 'FAILED');
             setCurrentStep(4);
             setBurnRate(0);
 
-            addLog(`Task ${task_id} completed successfully. Autonomous settlement finalized on Solana Devnet.`, 'success');
+            addLog(
+              taskSucceeded
+                ? `Task completed. Billing settlement: ${receipt.settlement_type || "unknown"}.`
+                : `Task finished with status ${executionStatus} (exit ${receipt.exit_code ?? "unknown"}).`,
+              taskSucceeded ? 'success' : 'error'
+            );
 
             setSettlementReceipt({
               taskId: task_id,
-              proof: on_chain_proof,
+              proof: receipt.explorer_url || null,
+              settlementType: receipt.settlement_type || "UNKNOWN",
+              executionStatus,
+              exitCode: receipt.exit_code,
+              costSol: receipt.cost_sol,
+              costIsExact: receipt.cost_is_exact,
+              executionTime: receipt.execution_time,
               burnRate: burn_rate,
               burnRateLamports: burn_rate_lamports,
               solPrice,
               complexity: complexity_score,
               verdict: ai_analysis?.scores?.reason || "Autonomous compute verified.",
-              nodeId: "NODE-HOST-GPU-01 (NVIDIA RTX 3050)",
+              nodeId: receipt.worker_id || null,
               timestamp: new Date().toISOString()
             });
             setShowReceiptModal(true);
@@ -467,6 +632,8 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
           }
         } catch (pollErr) {
           console.error("Polling error:", pollErr);
+        } finally {
+          isPolling = false;
         }
       }, 400);
 
@@ -479,32 +646,48 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
         addLog(`Security Alert: ${detail}`, 'error');
         setAuditInfo(err.response.data);
       } else {
-        // Backend offline or unreachable (e.g. running on Vercel without local daemon)
-        addLog(`Local Gateway note (${err.message}). Engaging Cloud Simulation Sandbox...`, 'warning');
-        runSimulatedFallback(effectiveWallet);
+        setStatus('IDLE');
+        setCurrentStep(0);
+        setBurnRate(0);
+        addLog(`Live gateway request failed: ${err.response?.data?.detail || err.message}. No simulation was substituted.`, 'error');
       }
     }
   };
 
   const stopTask = async () => {
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
-
     const taskIdToStop = currentTaskId;
-    setStatus('IDLE');
-    setCurrentStep(0);
-    setBurnRate(0);
-    setCurrentTaskId(null);
-
-    if (taskIdToStop) {
-      try {
-        await axios.post(`${API_URL}/stop/${taskIdToStop}`);
-        addLog('Task aborted. On-chain burn rate reset to 0.', 'warning');
-      } catch (e) {}
+    if (isDemoMode && taskIdToStop?.startsWith("sim-")) {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      setStatus('IDLE');
+      setCurrentStep(0);
+      setBurnRate(0);
+      setCurrentTaskId(null);
+      addLog("Demo simulation stopped. No task was sent to a worker.", 'warning');
+      return;
     }
-    syncBalances();
+    if (!taskIdToStop || !taskAccessToken) return;
+
+    try {
+      await axios.post(`${API_URL}/stop/${taskIdToStop}`, null, {
+        params: { access_token: taskAccessToken }
+      });
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      setStatus('IDLE');
+      setCurrentStep(0);
+      setBurnRate(0);
+      setCurrentTaskId(null);
+      setTaskAccessToken(null);
+      addLog('Task stopped after the gateway confirmed its billing reset.', 'warning');
+      await syncBalances();
+    } catch (err) {
+      addLog(`Could not stop task yet: ${err.response?.data?.detail || err.message}. Monitoring continues.`, 'error');
+    }
   };
 
   const lineCount = Math.max(1, code.split('\n').length);
@@ -513,7 +696,7 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
 
   return (
     <div style={{ padding: '28px 36px 72px 36px', maxWidth: '1360px', margin: '0 auto' }}>
-      
+
       {/* Toast Notification with Spring Pop */}
       {faucetToast && (
         <div style={{
@@ -575,7 +758,7 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
             {faucetLoading ? 'Requesting...' : '+1.0 SOL Faucet'}
           </button>
 
-          <div 
+          <div
             onClick={() => setShowDepositModal(true)}
             style={{
               display: 'flex', alignItems: 'center', gap: '10px',
@@ -595,13 +778,13 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
 
       {/* Main Workspace: Code Editor on Left, Terminal on Right */}
       <div className="aperture-workspace">
-        
+
         {/* Left Column: Code Canvas & Pre-Audit Telemetry */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '26px' }}>
-          
+
           {/* Mac OS Window: Code Environment */}
           <div className="aperture-mac-window">
-            
+
             {/* Title Bar with Mac Dots and Workload Selector */}
             <div className="aperture-mac-titlebar">
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -610,7 +793,7 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
                   <span className="aperture-mac-dot dot-yellow"></span>
                   <span className="aperture-mac-dot dot-green"></span>
                 </div>
-                
+
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   {benchmarks.map(b => (
                     <button
@@ -752,7 +935,7 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
 
             {/* 4 Crisp Metric Panels with Animated M3 Progress Bars */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '20px' }}>
-              
+
               <div style={{ background: '#f8fafc', border: '1px solid var(--m3-border)', padding: '16px', borderRadius: 'var(--m3-radius-lg)' }}>
                 <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--m3-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>COMPLEXITY</div>
                 <div style={{ fontSize: '22px', fontWeight: '800', fontFamily: 'monospace', color: 'var(--m3-text-primary)', marginTop: '4px' }}>
@@ -810,7 +993,7 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
 
         {/* Right Column: Execution Console */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '26px' }}>
-          
+
           <div className="aperture-terminal-window">
             <div className="aperture-mac-titlebar">
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -823,7 +1006,7 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
                   Silicon Execution Stream
                 </span>
               </div>
-              
+
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <button
                   onClick={() => setLogs([])}
@@ -851,7 +1034,7 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
               <div style={{ color: '#64748b', marginBottom: '14px' }}>
                 [APERTURE AI PROTOCOL V1.0 — SOLANA DEPIN GATEWAY]
               </div>
-              
+
               {logs.length === 0 && (
                 <div style={{ color: '#475569', fontStyle: 'italic', marginTop: '16px' }}>
                   Awaiting workload dispatch... Select a workload and click "Initiate Compute".
@@ -862,9 +1045,9 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
                 <div key={i} style={{
                   marginBottom: '6px',
                   color: log.type === 'error' ? '#f87171' :
-                         log.type === 'success' ? '#34d399' :
-                         log.type === 'warning' ? '#fbbf24' :
-                         log.type === 'terminal' ? '#f8fafc' : '#94a3b8'
+                    log.type === 'success' ? '#34d399' :
+                      log.type === 'warning' ? '#fbbf24' :
+                        log.type === 'terminal' ? '#f8fafc' : '#94a3b8'
                 }}>
                   <span style={{ color: '#64748b', marginRight: '8px' }}>[{log.time}]</span>
                   {log.msg}
@@ -897,7 +1080,7 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
             <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--m3-text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '18px' }}>
               On-Chain Protocol Specifications
             </div>
-            
+
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px', fontSize: '13.5px' }}>
               <span style={{ color: 'var(--m3-text-secondary)' }}>Slot Frequency:</span>
               <strong style={{ color: 'var(--m3-text-primary)', fontFamily: 'monospace' }}>400ms (Streamed)</strong>
@@ -926,16 +1109,19 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
               <h3 style={{ fontSize: '22px', fontWeight: '800', margin: 0, color: 'var(--m3-text-primary)' }}>
                 Fund Payment Channel PDA
               </h3>
-              <button onClick={() => setShowDepositModal(false)} style={{ background: 'none', border: 'none', color: 'var(--m3-text-muted)', cursor: 'pointer', fontSize: '22px' }}>✕</button>
+              <button onClick={() => setShowDepositModal(false)} disabled={channelTxLoading} style={{ background: 'none', border: 'none', color: 'var(--m3-text-muted)', cursor: 'pointer', fontSize: '22px' }}>✕</button>
             </div>
-            
+
             <p style={{ fontSize: '14px', color: 'var(--m3-text-secondary)', lineHeight: '1.6', marginBottom: '24px' }}>
-              Lock Devnet SOL into the smart contract state channel. Payments stream per 400ms slot. Unused balance is refunded immediately upon closing channel.
+              {isDemoMode
+                ? "Demo fuel stays in this browser session. It does not move SOL or execute Python."
+                : `Lock Devnet SOL in your payment channel. Charges accrue in one-second steps and are paid to the configured treasury. Closing the channel returns the remaining funds and rent reserve. Treasury: ${protocolConfig?.treasury || "configuration unavailable"}.`}
             </p>
 
             <div style={{ position: 'relative', marginBottom: '20px' }}>
               <input
                 type="number"
+                min="0.000000001"
                 step="0.05"
                 value={customDeposit}
                 onChange={e => setCustomDeposit(e.target.value)}
@@ -956,11 +1142,23 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
 
             <button
               onClick={handleDeposit}
+              disabled={channelTxLoading}
               className="m3-btn-primary"
               style={{ width: '100%', height: '46px', fontSize: '14.5px' }}
             >
-              Confirm Channel Deposit
+              {channelTxLoading ? "Waiting for wallet / confirmation..." : (isDemoMode ? "Add Demo Fuel" : "Confirm Channel Deposit")}
             </button>
+
+            {!isDemoMode && channelState?.initialized && (
+              <button
+                onClick={handleCloseChannel}
+                disabled={channelTxLoading || status === 'RUNNING' || status === 'AUDITING'}
+                className="m3-btn-secondary"
+                style={{ width: '100%', height: '42px', fontSize: '13px', marginTop: '10px' }}
+              >
+                Close channel and refund remaining SOL
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -972,17 +1170,23 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
             <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'var(--m3-green-bg)', color: 'var(--m3-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto', border: '1px solid var(--m3-green-border)' }}>
               <span className="material-symbols-rounded filled" style={{ fontSize: '32px' }}>verified</span>
             </div>
-            
-            <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--m3-green)', letterSpacing: '0.08em', marginBottom: '6px', textTransform: 'uppercase' }}>
-              SOLANA DEVNET &bull; CRYPTOGRAPHIC PROOF VERIFIED
+
+            <div style={{ fontSize: '11px', fontWeight: '800', color: settlementReceipt.settlementType === 'DEVNET' ? 'var(--m3-green)' : 'var(--m3-text-muted)', letterSpacing: '0.08em', marginBottom: '6px', textTransform: 'uppercase' }}>
+              {settlementReceipt.settlementType === 'SIMULATION'
+                ? "BROWSER DEMO • NO EXECUTION OR PAYMENT"
+                : settlementReceipt.settlementType === 'DEVNET'
+                  ? "SOLANA DEVNET • TRANSACTION CONFIRMED"
+                  : `SETTLEMENT TYPE • ${settlementReceipt.settlementType || "UNKNOWN"}`}
             </div>
-            
+
             <h3 style={{ fontSize: '24px', fontWeight: '800', marginBottom: '8px', color: 'var(--m3-text-primary)' }}>
               Autonomous Compute Receipt
             </h3>
-            
+
             <p style={{ fontSize: '13.5px', color: 'var(--m3-text-secondary)', lineHeight: '1.5', marginBottom: '20px' }}>
-              Workload was statically audited, dispatched to verified silicon, and settled on Solana Devnet.
+              {settlementReceipt.settlementType === 'SIMULATION'
+                ? "This is an illustrative browser flow. The workload did not run and no funds moved."
+                : `Execution status: ${settlementReceipt.executionStatus || "unknown"}. Settlement: ${settlementReceipt.settlementType || "unknown"}.`}
             </p>
 
             <div style={{ background: '#f8fafc', borderRadius: 'var(--m3-radius-xl)', padding: '18px 20px', marginBottom: '22px', textAlign: 'left', border: '1px solid var(--m3-border)' }}>
@@ -990,10 +1194,10 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
                 <span style={{ color: 'var(--m3-text-muted)' }}>Task Identifier:</span>
                 <strong style={{ color: 'var(--m3-text-primary)', fontFamily: 'monospace' }}>{settlementReceipt.taskId}</strong>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', fontSize: '13px' }}>
+              {settlementReceipt.nodeId && <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', fontSize: '13px' }}>
                 <span style={{ color: 'var(--m3-text-muted)' }}>Hardware Node:</span>
-                <strong style={{ color: 'var(--m3-blue)', fontFamily: 'monospace' }}>{settlementReceipt.nodeId || "NODE-HOST-GPU-01"}</strong>
-              </div>
+                <strong style={{ color: 'var(--m3-blue)', fontFamily: 'monospace' }}>{settlementReceipt.nodeId}</strong>
+              </div>}
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', fontSize: '13px' }}>
                 <span style={{ color: 'var(--m3-text-muted)' }}>AST Complexity:</span>
                 <strong style={{ color: 'var(--m3-text-primary)', fontFamily: 'monospace' }}>{settlementReceipt.complexity}/100</strong>
@@ -1006,16 +1210,30 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
                 <span style={{ color: 'var(--m3-text-muted)' }}>Pyth SOL Benchmark:</span>
                 <strong style={{ color: 'var(--m3-text-primary)', fontFamily: 'monospace' }}>${(settlementReceipt.solPrice || solPrice).toFixed(2)} USD</strong>
               </div>
+              {settlementReceipt.settlementType !== 'SIMULATION' && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', fontSize: '13px' }}>
+                  <span style={{ color: 'var(--m3-text-muted)' }}>Charged from channel:</span>
+                  <strong style={{ color: 'var(--m3-text-primary)', fontFamily: 'monospace' }}>
+                    {typeof settlementReceipt.costSol === 'number'
+                      ? `${settlementReceipt.costSol.toFixed(9)} SOL${settlementReceipt.costIsExact ? '' : ' (estimate)'}`
+                      : "Unavailable"}
+                  </strong>
+                </div>
+              )}
               <div style={{ borderTop: '1px solid var(--m3-border)', paddingTop: '10px', marginTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
-                <span style={{ color: 'var(--m3-text-muted)' }}>On-Chain State Proof:</span>
-                <a
-                  href={settlementReceipt.proof}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: 'var(--m3-blue)', textDecoration: 'none', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}
-                >
-                  Explorer Proof ↗
-                </a>
+                <span style={{ color: 'var(--m3-text-muted)' }}>Settlement evidence:</span>
+                {settlementReceipt.proof
+                  ? <a
+                      href={settlementReceipt.proof}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: 'var(--m3-blue)', textDecoration: 'none', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      Explorer transaction ↗
+                    </a>
+                  : <strong style={{ color: 'var(--m3-text-primary)', fontFamily: 'monospace' }}>
+                      {settlementReceipt.settlementType === 'SIMULATION' ? "No transaction" : "No explorer link"}
+                    </strong>}
               </div>
             </div>
 
@@ -1029,16 +1247,18 @@ print(f"📊 [TELEMETRY] Dynamic rate applied.")
                 Receipt (.json)
               </button>
 
-              <a
-                href={`${API_URL}/download/${settlementReceipt.taskId}`}
-                target="_blank"
-                rel="noreferrer"
-                className="m3-btn-secondary"
-                style={{ flex: 1, height: '42px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', textDecoration: 'none' }}
-              >
-                <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>description</span>
-                Raw Logs (.txt)
-              </a>
+              {taskAccessToken && settlementReceipt.settlementType !== 'SIMULATION' && (
+                <a
+                  href={`${API_URL}/download/${settlementReceipt.taskId}?access_token=${encodeURIComponent(taskAccessToken)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="m3-btn-secondary"
+                  style={{ flex: 1, height: '42px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', textDecoration: 'none' }}
+                >
+                  <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>description</span>
+                  Raw Logs (.txt)
+                </a>
+              )}
             </div>
 
             <button
