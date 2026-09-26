@@ -663,7 +663,7 @@ pub struct StartTask<'info> {
     pub treasury: UncheckedAccount<'info>,
     #[account(mut)]
     pub passport: Option<Account<'info, AgentPassport>>,
-    #[account(init, payer = oracle, space = 8 + TaskReceipt::INIT_SPACE, seeds = [b"task", &task_hash], bump)]
+    #[account(init, payer = oracle, space = 8 + TaskReceipt::INIT_SPACE, seeds = [b"task".as_ref(), task_hash.as_ref()], bump)]
     pub receipt: Account<'info, TaskReceipt>,
     pub system_program: Program<'info, System>,
 }
@@ -682,7 +682,7 @@ pub struct StopTask<'info> {
     pub treasury: UncheckedAccount<'info>,
     #[account(mut)]
     pub passport: Option<Account<'info, AgentPassport>>,
-    #[account(mut, seeds = [b"task", &task_hash], bump = receipt.bump)]
+    #[account(mut, seeds = [b"task".as_ref(), task_hash.as_ref()], bump = receipt.bump)]
     pub receipt: Account<'info, TaskReceipt>,
 }
 
