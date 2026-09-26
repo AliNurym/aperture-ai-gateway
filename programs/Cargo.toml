@@ -1,7 +1,7 @@
 [package]
 name = "aperture-gateway"
-version = "0.2.0"
-description = "Aperture AI payment-channel program"
+version = "0.4.0"
+description = "Aperture delegated agent allowances and bounded task payment program"
 edition = "2021"
 
 [lib]

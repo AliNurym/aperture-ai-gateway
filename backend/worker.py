@@ -1,363 +1,304 @@
-import os
-import sys
-import time
-import uuid
-import subprocess
-import threading
-import platform
+"""Authenticated worker coordinator with isolated jobs and a durable result outbox."""
+
+from __future__ import annotations
+
 import argparse
-import warnings
-import requests
+import codecs
+import hashlib
+import math
+import os
+import platform
+import socket
 import tempfile
+import threading
+import time
+from pathlib import Path
+
+import requests
 from dotenv import load_dotenv
 
-warnings.filterwarnings("ignore")
+from worker_journal import WorkerInstanceLock, WorkerJournal, container_name
+from worker_identity import WorkerIdentity
+from worker_sandbox import DockerSandbox, MAX_OUTPUT_BYTES, MAX_RUNTIME_SECONDS, TrustedLocalExecutor
 
-if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-        sys.stderr.reconfigure(encoding='utf-8')
-    except Exception:
-        pass
 
-load_dotenv()
-
-parser = argparse.ArgumentParser(description="Aperture DePIN Worker Node")
-parser.add_argument("--node-id", type=str, default=None, help="Custom identifier for this node")
-parser.add_argument("--wallet", type=str, default=None, help="Payout Solana address")
-parser.add_argument("--gateway", type=str, default="http://127.0.0.1:8000", help="Gateway URL")
-parser.add_argument("--token", type=str, default=None, help="Shared gateway worker token")
-parser.add_argument("--allow-unsafe-local-execution", action="store_true", help="Allow direct host execution for local development only")
+load_dotenv(Path(__file__).with_name(".env"))
+parser = argparse.ArgumentParser(description="Aperture authenticated compute worker")
+parser.add_argument("--node-id", default=None)
+parser.add_argument("--gateway", default=None, help="Gateway URL; defaults to GATEWAY_API_URL")
+parser.add_argument("--token", default=None, help="Prefer APERTURE_WORKER_TOKEN in the environment")
+parser.add_argument("--wallet", default=None, help="Reserved provider payout address; payouts are not implemented")
+parser.add_argument("--allow-unsafe-local-execution", action="store_true", help="Execute trusted development workloads directly on the host")
 args, _ = parser.parse_known_args()
-
-# --- WORKER CONFIGURATION ---
-API_URL = args.gateway or os.getenv("GATEWAY_API_URL", "http://127.0.0.1:8000")
-NODE_ID = args.node_id or os.getenv("APERTURE_NODE_ID", f"NODE-HOST-GPU-{uuid.uuid4().hex[:4].upper()}")
-PAYOUT_WALLET = args.wallet or "7wFo7q4EHfKrBNpL4XLXXWAi9TcE6BD27ZoQoBqtFcNQ"
+API_URL = (args.gateway or os.getenv("GATEWAY_API_URL") or "http://127.0.0.1:8000").rstrip("/")
+NODE_ID = args.node_id or os.getenv("APERTURE_NODE_ID") or f"NODE-CPU-{socket.gethostname()}"
 WORKER_TOKEN = args.token or os.getenv("APERTURE_WORKER_TOKEN", "")
 ALLOW_UNSAFE_LOCAL_EXECUTION = args.allow_unsafe_local_execution or os.getenv("APERTURE_ALLOW_UNSAFE_LOCAL_EXECUTION", "false").lower() == "true"
-
-
-def worker_token_is_configured(token: str) -> bool:
-    normalized = (token or "").strip().lower()
-    return len(token or "") >= 16 and normalized not in {
-        "replace-with-a-long-random-secret",
-        "change-me",
-        "example-token",
-    }
-
+STATE_ROOT = Path(os.getenv("APERTURE_WORKER_STATE_DIR", str(Path.home() / ".aperture-worker" / hashlib.sha256(NODE_ID.encode()).hexdigest()[:16])))
+SANDBOX_IMAGE = os.getenv("APERTURE_SANDBOX_IMAGE", "aperture-task:local")
 current_status = "ONLINE (IDLE)"
-MAX_OUTPUT_BYTES = 1_000_000
-MAX_MEMORY_BYTES = 512 * 1024 * 1024
+WORKER_IDENTITY = None
+
+
+def worker_token_is_configured(token):
+    return len((token or "").strip()) >= 16 and (token or "").strip().lower() not in {
+        "replace-with-a-long-random-secret", "change-me", "example-token",
+    }
 
 
 def worker_headers():
-    return {
-        "X-Aperture-Worker-Token": WORKER_TOKEN,
-        "X-Aperture-Worker-Id": NODE_ID,
-    }
-
-
-def execution_limits():
-    """Best-effort Unix resource limits; production should use a sandboxed container."""
-    if os.name != "posix":
-        return None
-    import resource
-
-    def apply():
-        resource.setrlimit(resource.RLIMIT_AS, (MAX_MEMORY_BYTES, MAX_MEMORY_BYTES))
-        resource.setrlimit(resource.RLIMIT_CPU, (180, 180))
-
-    return apply
+    return {"X-Aperture-Worker-Token": WORKER_TOKEN, "X-Aperture-Worker-Id": NODE_ID}
 
 
 def detect_hardware():
-    """Report detected hardware; unavailable metrics remain unavailable."""
-    gpu_name = f"CPU worker ({platform.processor() or 'processor details unavailable'})"
-    vram_total = 0.0
-    tflops = 0.0
-
-    try:
-        import pynvml
-        pynvml.nvmlInit()
-        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-        gpu_name = pynvml.nvmlDeviceGetName(handle)
-        mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
-        vram_total = round(mem.total / (1024**3), 1)
-    except Exception:
-        pass
-
-    return gpu_name, vram_total, tflops
+    # Task images expose CPU only. A GPU on the coordinator does not mean jobs
+    # have access to it, so the advertised execution capability stays honest.
+    return f"CPU worker ({platform.processor() or platform.machine()})", 0.0, 0.0
 
 
 GPU_NAME, VRAM_TOTAL, TFLOPS = detect_hardware()
 
 
-def get_live_telemetry():
-    """Samples real-time physical metrics directly from NVML."""
-    metrics = {
-        "gpu_temp": None,
-        "gpu_util": None,
-        "vram_used": None,
-        "vram_total": VRAM_TOTAL,
-        "power_watts": None
+def register_heartbeat(stop_event):
+    while not stop_event.is_set():
+        try:
+            requests.post(f"{API_URL}/register_node", json={
+                "node_id": NODE_ID, "gpu_name": GPU_NAME, "vram_total": 0.0,
+                "vram_used": None, "gpu_temp": None, "gpu_util": None,
+                "power_watts": None, "tflops": 0.0, "status": current_status,
+                "worker_pubkey": WORKER_IDENTITY.pubkey if WORKER_IDENTITY else None,
+                "execution_mode": "trusted_local" if ALLOW_UNSAFE_LOCAL_EXECUTION else "docker",
+            }, headers=worker_headers(), timeout=4)
+        except requests.RequestException:
+            pass
+        stop_event.wait(5)
+
+
+def task_runtime(task, now=None):
+    """Use both signed maximum runtime and the server's absolute lease deadline."""
+    now = time.time() if now is None else now
+    maximum = float(task.get("max_runtime_seconds", MAX_RUNTIME_SECONDS))
+    deadline = float(task.get("execution_deadline", task.get("deadline_unix", now + maximum)))
+    if not math.isfinite(maximum) or maximum <= 0 or maximum > MAX_RUNTIME_SECONDS or not math.isfinite(deadline):
+        raise ValueError("Gateway returned invalid execution bounds.")
+    return max(0.0, min(maximum, deadline - now))
+
+
+def result_payload(task, output, duration, exit_code, executor):
+    return {
+        "task_id": task["task_id"], "lease_id": task.get("lease_id"),
+        "output": output, "full_log": output, "exit_code": exit_code,
+        "execution_time": duration, "source_hash": task.get("source_hash", task.get("code_sha256")),
+        "output_hash": hashlib.sha256(output.encode("utf-8")).hexdigest(),
+        "execution_mode": executor.backend, "isolation": executor.isolation,
     }
-    try:
-        import pynvml
-        pynvml.nvmlInit()
-        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-        temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
-        util = pynvml.nvmlDeviceGetUtilizationRates(handle)
-        mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
-        metrics["gpu_temp"] = float(temp)
-        metrics["gpu_util"] = int(util.gpu)
-        metrics["vram_used"] = round(mem.used / (1024**3), 2)
-        metrics["vram_total"] = round(mem.total / (1024**3), 2)
-        try:
-            power = pynvml.nvmlDeviceGetPowerUsage(handle)
-            metrics["power_watts"] = round(power / 1000.0, 1)
-        except Exception:
-            pass
-    except Exception:
-        pass
-    return metrics
 
 
-def register_heartbeat():
-    """Background thread to announce node availability and live telemetry to the Gateway."""
-    while True:
-        try:
-            telemetry = get_live_telemetry()
-            payload = {
-                "node_id": NODE_ID,
-                "gpu_name": GPU_NAME,
-                "vram_total": telemetry["vram_total"],
-                "vram_used": telemetry["vram_used"],
-                "gpu_temp": telemetry["gpu_temp"],
-                "gpu_util": telemetry["gpu_util"],
-                "power_watts": telemetry["power_watts"],
-                "tflops": TFLOPS,
-                "status": current_status
-            }
-            requests.post(f"{API_URL}/register_node", json=payload, headers=worker_headers(), timeout=4)
-        except Exception:
-            pass
-        time.sleep(5)
+def execute_task(task, executor, state_root=STATE_ROOT, http=requests):
+    """Stream bounded stdout while a separate monitor checks gateway cancellation.
 
-
-def run_python_code_with_heartbeat(code: str, task_id: str, wallet: str = None):
-    """
-    Executes Python payload in an isolated subprocess, streaming real-time stdout
-    chunks to the gateway and enforcing runtime gas checks and execution timeouts.
+    Deadline enforcement does not wait for an HTTP request or a line break.
+    Docker tasks have no network, host credentials, writable image or Docker socket.
     """
     global current_status
     current_status = "ACTIVE (COMPUTING)"
+    code = task["code"]
+    code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
+    if code_hash != task.get("source_hash", task.get("code_sha256")):
+        raise ValueError("Task source does not match the gateway's admitted source hash.")
+    allowed_duration = task_runtime(task)
+    if allowed_duration <= 0:
+        current_status = "ONLINE (IDLE)"
+        return result_payload(task, "[EXECUTION_DEADLINE_EXPIRED]\n", 0.0, 124, executor)
 
-    task_dir = tempfile.TemporaryDirectory(prefix="aperture-task-")
-    temp_filename = os.path.join(task_dir.name, "payload.py")
-    with open(temp_filename, "w", encoding="utf-8") as f:
-        f.write(code)
+    staging = Path(state_root) / "staging"
+    staging.mkdir(parents=True, exist_ok=True)
+    task_name = container_name(NODE_ID, task["task_id"])
+    output = bytearray()
+    output_lock = threading.Lock()
+    stop_event = threading.Event()
+    output_exceeded = threading.Event()
+    cancellation = threading.Event()
+    process = None
+    started = time.perf_counter()
+    reason = None
+    forced_exit = None
 
-    start_time = time.perf_counter()
-    output_lines = []
-
-    print(f"⚙️ [EXEC] Launching isolated subprocess for task {task_id}...")
-
-    # Isolated interpreter, ephemeral task directory, stripped secret-bearing environment.
-    safe_env = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT", "WINDIR", "COMSPEC") if key in os.environ}
-    safe_env["PYTHONIOENCODING"] = "utf-8"
-    process = subprocess.Popen(
-        [sys.executable, "-I", temp_filename],
-        cwd=task_dir.name,
-        env=safe_env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        universal_newlines=True,
-        encoding="utf-8",
-        errors="replace",
-        preexec_fn=execution_limits(),
-    )
-
-    def reader():
-        output_bytes = 0
-        for line in iter(process.stdout.readline, ''):
-            output_bytes += len(line.encode("utf-8", errors="replace"))
-            output_lines.append(line)
-            if output_bytes > MAX_OUTPUT_BYTES:
-                output_lines.append("\n[OUTPUT LIMIT EXCEEDED: process terminated]\n")
-                process.kill()
-                break
-        process.stdout.close()
-
-    t = threading.Thread(target=reader, daemon=True)
-    t.start()
-
-    # Streamer & Watchdog Loop
-    max_duration_seconds = 180  # 3 minutes maximum per task
-    last_sent_idx = 0
-    last_cancellation_check = 0.0
-
-    while t.is_alive() or process.poll() is None:
-        t.join(timeout=0.3)
-        elapsed = time.perf_counter() - start_time
-
-        # Resetting the billing rate must also stop the local process; poll
-        # the gateway under the worker's lease before charging more compute.
-        if elapsed - last_cancellation_check >= 1.0:
-            last_cancellation_check = elapsed
-            try:
-                status = requests.get(f"{API_URL}/worker_task_status/{task_id}", headers=worker_headers(), timeout=1.5)
-                if status.status_code == 200 and status.json().get("cancelled"):
-                    process.kill()
-                    output_lines.append("\n[EXECUTION_CANCELLED_BY_SUBMITTER]\n")
-                    break
-            except Exception:
-                # A transient gateway failure is not authorization to change
-                # task state; the existing hard timeout still bounds runtime.
-                pass
-
-        # Stream new output lines to gateway
-        if len(output_lines) > last_sent_idx:
-            chunk = output_lines[last_sent_idx:]
-            last_sent_idx = len(output_lines)
-            try:
-                streamed = requests.post(f"{API_URL}/stream_log", json={
-                    "task_id": task_id,
-                    "lines": chunk,
-                    "node_id": NODE_ID
-                }, headers=worker_headers(), timeout=1.5)
-                if streamed.status_code == 409:
-                    process.kill()
-                    output_lines.append("\n[EXECUTION_CANCELLED_BY_SUBMITTER]\n")
-                    break
-            except Exception:
-                pass
-
-        # Check gas tank if wallet is known
-        if wallet and elapsed > 5.0 and int(elapsed) % 6 == 0:
-            try:
-                res = requests.get(f"{API_URL}/balance/{wallet}", timeout=3)
-                if res.status_code == 200:
-                    balance = res.json().get("balance", 0.0)
-                    if balance < 0.0001:
-                        print(f"🚨 [GAS WATCHDOG] Task {task_id} terminated: Payment channel depleted.")
-                        process.kill()
-                        output_lines.append("\n\n🚨 [APERTURE SENTINEL ALERT]: Task halted - Payment channel gas depleted (< 0.0001 SOL).")
-                        break
-            except Exception:
-                pass
-
-        # Timeout limit
-        if elapsed > max_duration_seconds:
-            print(f"🚨 [WATCHDOG] Task {task_id} exceeded maximum runtime limit ({max_duration_seconds}s). Terminating.")
-            process.kill()
-            output_lines.append(f"\n\n🚨 [TIMEOUT EXCEEDED]: Execution surpassed max limit of {max_duration_seconds} seconds.")
-            break
-
-    # Send any remaining lines
-    if len(output_lines) > last_sent_idx:
-        chunk = output_lines[last_sent_idx:]
+    with tempfile.TemporaryDirectory(prefix="job-", dir=staging) as directory:
+        task_directory = Path(directory)
+        task_directory.chmod(0o755)
+        source = task_directory / "payload.py"
+        source.write_text(code, encoding="utf-8", newline="")
+        source.chmod(0o444)
         try:
-            requests.post(f"{API_URL}/stream_log", json={
-                "task_id": task_id,
-                "lines": chunk,
-                "node_id": NODE_ID
-            }, headers=worker_headers(), timeout=2)
-        except Exception:
-            pass
+            process = executor.launch(task_directory, task_name)
 
-    # Reap before cleaning its working directory, particularly on Windows.
-    process.wait(timeout=5)
-    t.join(timeout=2)
-    execution_time = min(180.0, round(time.perf_counter() - start_time, 4))
-    current_status = "ONLINE (IDLE)"
+            def read_output():
+                try:
+                    while True:
+                        chunk = process.stdout.read(4096)
+                        if not chunk:
+                            break
+                        with output_lock:
+                            room = MAX_OUTPUT_BYTES - 256 - len(output)
+                            output.extend(chunk[:max(0, room)])
+                        if len(chunk) > room:
+                            output_exceeded.set()
+                            break
+                finally:
+                    process.stdout.close()
 
-    full_output = "".join(output_lines)
-    if not full_output.strip() and process.returncode == 0:
-        full_output = "Task executed successfully with no stdout output (did you include print() statements?)."
+            def monitor():
+                decoder = codecs.getincrementaldecoder("utf-8")("replace")
+                sent = 0
+                while not stop_event.wait(0.5):
+                    try:
+                        response = http.get(
+                            f"{API_URL}/worker_task_status/{task['task_id']}",
+                            headers=worker_headers(), timeout=1.5,
+                        )
+                        if response.status_code == 200:
+                            status = response.json()
+                            if status.get("cancelled") or status.get("terminal") or status.get("budget_exhausted"):
+                                cancellation.set()
+                                return
+                            if task.get("lease_id") and status.get("lease_id", task["lease_id"]) != task["lease_id"]:
+                                cancellation.set()
+                                return
+                        elif response.status_code in {401, 403, 404, 409}:
+                            cancellation.set()
+                            return
+                    except requests.RequestException:
+                        pass
+                    with output_lock:
+                        chunk = bytes(output[sent:])
+                        sent = len(output)
+                    if chunk:
+                        try:
+                            response = http.post(
+                                f"{API_URL}/stream_log", headers=worker_headers(), timeout=1.5,
+                                json={"task_id": task["task_id"], "node_id": NODE_ID,
+                                      "lease_id": task.get("lease_id"), "lines": [decoder.decode(chunk)]},
+                            )
+                            if response.status_code in {401, 403, 404, 409}:
+                                cancellation.set()
+                                return
+                        except requests.RequestException:
+                            pass
 
-    task_dir.cleanup()
+            reader_thread = threading.Thread(target=read_output, daemon=True)
+            monitor_thread = threading.Thread(target=monitor, daemon=True)
+            reader_thread.start()
+            monitor_thread.start()
+            while process.poll() is None:
+                elapsed = time.perf_counter() - started
+                if output_exceeded.is_set():
+                    reason, forced_exit = "[OUTPUT_LIMIT_EXCEEDED]", 137
+                elif cancellation.is_set():
+                    reason, forced_exit = "[EXECUTION_CANCELLED_BY_GATEWAY]", 130
+                elif elapsed >= allowed_duration or time.time() >= float(task.get("execution_deadline", task.get("deadline_unix", math.inf))):
+                    reason, forced_exit = "[EXECUTION_DEADLINE_EXCEEDED]", 124
+                if reason:
+                    executor.stop(process, task_name)
+                    break
+                time.sleep(0.02)
+            process.wait(timeout=12)
+            reader_thread.join(timeout=3)
+            if output_exceeded.is_set() and not reason:
+                reason, forced_exit = "[OUTPUT_LIMIT_EXCEEDED]", 137
+        finally:
+            stop_event.set()
+            if process is not None and process.poll() is None:
+                executor.stop(process, task_name)
+                process.wait(timeout=12)
+            current_status = "ONLINE (IDLE)"
 
-    return full_output, execution_time, process.returncode
+    duration = min(float(task.get("max_runtime_seconds", MAX_RUNTIME_SECONDS)), round(time.perf_counter() - started, 4))
+    with output_lock:
+        full_output = bytes(output).decode("utf-8", errors="replace")
+    full_output = full_output.encode("utf-8")[:MAX_OUTPUT_BYTES - 256].decode("utf-8", errors="ignore")
+    if reason:
+        full_output += f"\n{reason}\n"
+    return result_payload(task, full_output, duration, forced_exit if forced_exit is not None else process.returncode, executor)
+
+
+def recover_interrupted(journal, executor, identity=None):
+    for task, started in journal.running():
+        executor.recover(container_name(NODE_ID, task["task_id"]))
+        duration = min(float(task.get("max_runtime_seconds", MAX_RUNTIME_SECONDS)), max(0, time.time() - started))
+        payload = result_payload(
+            task, "[WORKER_RESTARTED: execution interrupted; task was not re-executed]\n",
+            round(duration, 4), 125, executor,
+        )
+        journal.finish(task["task_id"], identity.attest(task, payload, NODE_ID) if identity else payload)
+
+
+def flush_results(journal, http=requests):
+    global current_status
+    for payload in journal.pending():
+        current_status = "ACTIVE (SETTLEMENT PENDING)"
+        try:
+            response = http.post(f"{API_URL}/submit_result", json=payload, headers=worker_headers(), timeout=10)
+            if response.status_code == 200:
+                journal.acknowledge(payload["task_id"])
+                print(f"[SETTLED] {payload['task_id']} ({payload['execution_time']}s)")
+            else:
+                journal.retry(payload["task_id"], f"gateway HTTP {response.status_code}")
+        except requests.RequestException as exc:
+            journal.retry(payload["task_id"], type(exc).__name__)
+    if not journal.blocked():
+        current_status = "ONLINE (IDLE)"
 
 
 def main():
-    print("=" * 60)
-    print(f"⚡ APERTURE DePIN COMPUTE NODE ONLINE: {NODE_ID}")
-    vram_display = f"{VRAM_TOTAL} GB VRAM" if VRAM_TOTAL > 0 else "VRAM unavailable"
-    print(f"💻 Detected hardware: {GPU_NAME} | {vram_display}")
-    print(f"📡 Connected Gateway: {API_URL}")
+    global WORKER_IDENTITY
     if not worker_token_is_configured(WORKER_TOKEN):
         raise SystemExit("Set APERTURE_WORKER_TOKEN to a unique 16+ character secret; example values are rejected.")
-    if not ALLOW_UNSAFE_LOCAL_EXECUTION:
-        raise SystemExit("Direct host execution is disabled. Use a containerized worker, or pass --allow-unsafe-local-execution for local development only.")
-    print("=" * 60)
-
-    # Start heartbeat background thread
-    hb_thread = threading.Thread(target=register_heartbeat, daemon=True)
-    hb_thread.start()
-
-    consecutive_errors = 0
-
-    while True:
-        try:
-            response = requests.get(f"{API_URL}/get_task", headers=worker_headers(), timeout=5)
-            if response.status_code != 200:
-                consecutive_errors += 1
-                if consecutive_errors % 10 == 1:
-                    print(f"⚠️ Gateway unreachable (HTTP {response.status_code}). Retrying...")
-                time.sleep(3)
-                continue
-
-            consecutive_errors = 0
-            task = response.json()
-
-            if task and task.get("task_id"):
-                task_id = task["task_id"]
-                code = task["code"]
-                wallet = task.get("wallet")
-
-                print("\n" + "-" * 50)
-                print(f"📦 [PAYLOAD RECEIVED] Task ID: {task_id}")
-                print(f"👤 Submitter: {wallet[:12] if wallet else 'Anonymous'}...")
-                print("Executing on the local development host...")
-
-                raw_output, duration, exit_code = run_python_code_with_heartbeat(code, task_id, wallet)
-
-                # Format output for frontend terminal display
-                lines = raw_output.splitlines()
-                display_output = raw_output
-                if len(lines) > 25:
-                    display_output = "\n".join(lines[:20])
-                    display_output += f"\n\n[📊] OUTPUT TRUNCATED ({len(lines)} total lines). Full log archived."
-
-                # Send result back to Gateway
-                payload = {
-                    "task_id": task_id,
-                    "output": display_output,
-                    "execution_time": duration,
-                    "full_log": raw_output,
-                    "exit_code": exit_code,
-                }
-
-                settle_res = requests.post(f"{API_URL}/submit_result", json=payload, headers=worker_headers(), timeout=10)
-                if settle_res.status_code == 200:
-                    data = settle_res.json()
-                    print(f"✅ [TASK SETTLED] Task: {task_id} | Time: {duration}s | Cost: {data.get('cost_sol', 0)} SOL")
-                    if data.get("receipt_signature"):
-                        print(f"📜 [RECEIPT] Proof Signature: {data.get('receipt_signature')[:24]}...")
-                else:
-                    print(f"❌ [SETTLEMENT FAILED]: {settle_res.text}")
-
-        except requests.exceptions.ConnectionError:
-            time.sleep(3)
-        except Exception as e:
-            print(f"🚨 Worker Loop Note: {e}")
-            time.sleep(2)
-
-        time.sleep(1)
+    executor = TrustedLocalExecutor() if ALLOW_UNSAFE_LOCAL_EXECUTION else DockerSandbox(
+        SANDBOX_IMAGE, STATE_ROOT, os.getenv("APERTURE_SANDBOX_HOST_ROOT"),
+    )
+    executor.preflight()
+    instance_lock = WorkerInstanceLock(STATE_ROOT)
+    journal = WorkerJournal(STATE_ROOT)
+    WORKER_IDENTITY = WorkerIdentity(STATE_ROOT)
+    stop_event = threading.Event()
+    try:
+        recover_interrupted(journal, executor, WORKER_IDENTITY)
+        print(f"Aperture worker {NODE_ID} | {executor.backend} | gateway {API_URL}")
+        if ALLOW_UNSAFE_LOCAL_EXECUTION:
+            print("TRUSTED LOCAL DEVELOPMENT: Python executes on this host without a security sandbox.")
+        threading.Thread(target=register_heartbeat, args=(stop_event,), daemon=True).start()
+        while True:
+            try:
+                flush_results(journal)
+                if journal.blocked():
+                    stop_event.wait(1)
+                    continue
+                response = requests.get(f"{API_URL}/get_task", headers=worker_headers(), timeout=5)
+                if response.status_code == 200:
+                    task = response.json()
+                    if task and task.get("task_id"):
+                        if not task.get("source_hash", task.get("code_sha256")):
+                            raise ValueError("Gateway is incompatible: admitted source hash is required.")
+                        journal_task = {key: value for key, value in task.items() if key != "code"}
+                        journal.begin(journal_task)
+                        try:
+                            payload = execute_task(task, executor)
+                        except Exception as exc:
+                            payload = result_payload(task, f"[EXECUTION_FAILED: {type(exc).__name__}]\n", 0.0, 125, executor)
+                        journal.finish(task["task_id"], WORKER_IDENTITY.attest(task, payload, NODE_ID))
+                        flush_results(journal)
+            except requests.RequestException:
+                pass
+            except Exception as exc:
+                print(f"[WORKER] {type(exc).__name__}: {exc}")
+            stop_event.wait(1)
+    except KeyboardInterrupt:
+        print("Worker stopping; unresolved execution/results will recover from the journal.")
+    finally:
+        stop_event.set()
+        journal.close()
+        instance_lock.close()
 
 
 if __name__ == "__main__":

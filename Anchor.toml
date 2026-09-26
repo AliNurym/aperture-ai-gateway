@@ -3,7 +3,7 @@ seeds = false
 skip-lint = false
 
 [programs.devnet]
-aperture_gateway = "C2q9yxux7b7bxFF64pkZUV6g2Vcs2bQ1FS4GUQy512wv"
+aperture_gateway = "A5HfdyRWy77i5DxhTMBa1ZinxVGZbVZnb35EvXUvkNzQ"
 
 [provider]
 cluster = "Devnet"

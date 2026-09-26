@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aperture-agent-client"
+version = "0.2.0"
+description = "Budgeted Python compute client with owner-issued agent delegation"
+requires-python = ">=3.11"
+dependencies = ["requests>=2.31", "PyNaCl>=1.5", "base58>=2.1", "solders>=0.21"]
+
+[tool.setuptools]
+packages = ["aperture_client"]
+package-dir = {"" = "python"}

@@ -3,6 +3,10 @@ services:
     build: ./backend
     env_file:
       - ./backend/.env
+    environment:
+      APERTURE_STATE_DB: /var/lib/aperture/gateway.sqlite3
+    volumes:
+      - gateway-state:/var/lib/aperture
     ports:
       - "127.0.0.1:8000:8000"
     restart: unless-stopped
@@ -13,3 +17,37 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+
+  # Trusted coordinator: the Docker socket gives host-level Docker control.
+  # It is available only when the worker profile is explicitly started.
+  worker:
+    profiles: ["worker"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    env_file:
+      - ./backend/.env
+    environment:
+      GATEWAY_API_URL: http://gateway:8000
+      APERTURE_NODE_ID: NODE-CPU-COMPOSE
+      APERTURE_WORKER_STATE_DIR: /var/lib/aperture-worker
+      APERTURE_SANDBOX_HOST_ROOT: ${APERTURE_WORKER_STATE_PATH:-/tmp/aperture-worker}
+      APERTURE_SANDBOX_IMAGE: aperture-task:local
+      APERTURE_ALLOW_UNSAFE_LOCAL_EXECUTION: "false"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${APERTURE_WORKER_STATE_PATH:-/tmp/aperture-worker}:/var/lib/aperture-worker
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  gateway-state:

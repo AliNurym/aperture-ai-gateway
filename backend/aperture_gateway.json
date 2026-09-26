@@ -1,54 +1,392 @@
 {
-  "version": "0.3.0",
+  "version": "0.4.0",
   "name": "aperture_gateway",
   "instructions": [
     {
       "name": "initializeConfig",
       "accounts": [
-        { "name": "config", "isMut": true, "isSigner": false },
-        { "name": "authority", "isMut": true, "isSigner": true },
-        { "name": "systemProgram", "isMut": false, "isSigner": false }
+        {
+          "name": "config",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "authority",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
       ],
-      "args": [{ "name": "treasury", "type": "publicKey" }]
+      "args": [
+        {
+          "name": "treasury",
+          "type": "publicKey"
+        }
+      ]
     },
     {
       "name": "openChannel",
       "accounts": [
-        { "name": "config", "isMut": false, "isSigner": false },
-        { "name": "channel", "isMut": true, "isSigner": false },
-        { "name": "user", "isMut": true, "isSigner": true },
-        { "name": "systemProgram", "isMut": false, "isSigner": false }
+        {
+          "name": "config",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "channel",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
       ],
-      "args": [{ "name": "initialDeposit", "type": "u64" }]
+      "args": [
+        {
+          "name": "initialDeposit",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "topUp",
       "accounts": [
-        { "name": "channel", "isMut": true, "isSigner": false },
-        { "name": "user", "isMut": true, "isSigner": true },
-        { "name": "systemProgram", "isMut": false, "isSigner": false }
+        {
+          "name": "channel",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
       ],
-      "args": [{ "name": "amount", "type": "u64" }]
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "updateBurnRate",
       "accounts": [
-        { "name": "config", "isMut": false, "isSigner": false },
-        { "name": "channel", "isMut": true, "isSigner": false },
-        { "name": "aiAgent", "isMut": false, "isSigner": true },
-        { "name": "treasury", "isMut": true, "isSigner": false }
+        {
+          "name": "config",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "channel",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "aiAgent",
+          "isMut": false,
+          "isSigner": true
+        },
+        {
+          "name": "treasury",
+          "isMut": true,
+          "isSigner": false
+        }
       ],
-      "args": [{ "name": "newRate", "type": "u64" }]
+      "args": [
+        {
+          "name": "newRate",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "registerAgent",
+      "args": [
+        {
+          "name": "metadataHash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "maxCost",
+          "type": "u64"
+        },
+        {
+          "name": "maxRuntime",
+          "type": "u32"
+        },
+        {
+          "name": "validUntil",
+          "type": "i64"
+        },
+        {
+          "name": "totalBudget",
+          "type": "u64"
+        }
+      ],
+      "accounts": [
+        {
+          "name": "passport",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "owner",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "agent",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ]
+    },
+    {
+      "name": "updateAgent",
+      "args": [
+        {
+          "name": "metadataHash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "maxCost",
+          "type": "u64"
+        },
+        {
+          "name": "maxRuntime",
+          "type": "u32"
+        },
+        {
+          "name": "validUntil",
+          "type": "i64"
+        },
+        {
+          "name": "totalBudget",
+          "type": "u64"
+        }
+      ],
+      "accounts": [
+        {
+          "name": "passport",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "owner",
+          "isMut": false,
+          "isSigner": true
+        }
+      ]
+    },
+    {
+      "name": "revokeAgent",
+      "args": [],
+      "accounts": [
+        {
+          "name": "passport",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "owner",
+          "isMut": false,
+          "isSigner": true
+        }
+      ]
+    },
+    {
+      "name": "startTask",
+      "args": [
+        {
+          "name": "taskHash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "sourceHash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "agent",
+          "type": "publicKey"
+        },
+        {
+          "name": "rate",
+          "type": "u64"
+        },
+        {
+          "name": "maxCost",
+          "type": "u64"
+        },
+        {
+          "name": "maxRuntime",
+          "type": "u32"
+        }
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "channel",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "oracle",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "treasury",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "passport",
+          "isMut": true,
+          "isSigner": false,
+          "isOptional": true
+        },
+        {
+          "name": "receipt",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ]
+    },
+    {
+      "name": "stopTask",
+      "args": [
+        {
+          "name": "taskHash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "channel",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "oracle",
+          "isMut": false,
+          "isSigner": true
+        },
+        {
+          "name": "treasury",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "passport",
+          "isMut": true,
+          "isSigner": false,
+          "isOptional": true
+        },
+        {
+          "name": "receipt",
+          "isMut": true,
+          "isSigner": false
+        }
+      ]
     },
     {
       "name": "closeChannel",
+      "args": [],
       "accounts": [
-        { "name": "config", "isMut": false, "isSigner": false },
-        { "name": "channel", "isMut": true, "isSigner": false },
-        { "name": "user", "isMut": true, "isSigner": true },
-        { "name": "treasury", "isMut": true, "isSigner": false }
-      ],
-      "args": []
+        {
+          "name": "config",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "channel",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "treasury",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "passport",
+          "isMut": true,
+          "isSigner": false,
+          "isOptional": true
+        },
+        {
+          "name": "receipt",
+          "isMut": true,
+          "isSigner": false,
+          "isOptional": true
+        }
+      ]
     }
   ],
   "accounts": [
@@ -57,10 +395,26 @@
       "type": {
         "kind": "struct",
         "fields": [
-          { "name": "authority", "type": "publicKey" },
-          { "name": "oracle", "type": "publicKey" },
-          { "name": "treasury", "type": "publicKey" },
-          { "name": "bump", "type": "u8" }
+          {
+            "name": "authority",
+            "type": "publicKey"
+          },
+          {
+            "name": "oracle",
+            "type": "publicKey"
+          },
+          {
+            "name": "treasury",
+            "type": "publicKey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "version",
+            "type": "u16"
+          }
         ]
       }
     },
@@ -69,35 +423,400 @@
       "type": {
         "kind": "struct",
         "fields": [
-          { "name": "user", "type": "publicKey" },
-          { "name": "oracle", "type": "publicKey" },
-          { "name": "balance", "type": "u64" },
-          { "name": "burnRate", "type": "u64" },
-          { "name": "lastUpdateTime", "type": "i64" },
-          { "name": "bump", "type": "u8" }
+          {
+            "name": "user",
+            "type": "publicKey"
+          },
+          {
+            "name": "oracle",
+            "type": "publicKey"
+          },
+          {
+            "name": "balance",
+            "type": "u64"
+          },
+          {
+            "name": "burnRate",
+            "type": "u64"
+          },
+          {
+            "name": "lastUpdateTime",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "agent",
+            "type": "publicKey"
+          },
+          {
+            "name": "taskHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "taskMaxCost",
+            "type": "u64"
+          },
+          {
+            "name": "taskDeadline",
+            "type": "i64"
+          },
+          {
+            "name": "taskStartedAt",
+            "type": "i64"
+          },
+          {
+            "name": "lastTaskHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "lastCharged",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AgentPassport",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "publicKey"
+          },
+          {
+            "name": "agent",
+            "type": "publicKey"
+          },
+          {
+            "name": "metadataHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "maxCost",
+            "type": "u64"
+          },
+          {
+            "name": "maxRuntime",
+            "type": "u32"
+          },
+          {
+            "name": "validUntil",
+            "type": "i64"
+          },
+          {
+            "name": "totalBudget",
+            "type": "u64"
+          },
+          {
+            "name": "spent",
+            "type": "u64"
+          },
+          {
+            "name": "reserved",
+            "type": "u64"
+          },
+          {
+            "name": "revoked",
+            "type": "bool"
+          },
+          {
+            "name": "revokedAt",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TaskReceipt",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "publicKey"
+          },
+          {
+            "name": "agent",
+            "type": "publicKey"
+          },
+          {
+            "name": "taskHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "sourceHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "rate",
+            "type": "u64"
+          },
+          {
+            "name": "maxCost",
+            "type": "u64"
+          },
+          {
+            "name": "startedAt",
+            "type": "i64"
+          },
+          {
+            "name": "deadline",
+            "type": "i64"
+          },
+          {
+            "name": "settledAt",
+            "type": "i64"
+          },
+          {
+            "name": "chargedLamports",
+            "type": "u64"
+          },
+          {
+            "name": "settled",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
         ]
       }
     }
   ],
   "events": [
     {
-      "name": "BurnRateUpdatedEvent",
+      "name": "TaskStartedEvent",
       "fields": [
-        { "name": "user", "type": "publicKey", "index": false },
-        { "name": "newRate", "type": "u64", "index": false },
-        { "name": "chargedAmount", "type": "u64", "index": false },
-        { "name": "remainingBalance", "type": "u64", "index": false },
-        { "name": "timestamp", "type": "i64", "index": false }
+        {
+          "name": "owner",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "agent",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "taskHash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          },
+          "index": false
+        },
+        {
+          "name": "maxCost",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "deadline",
+          "type": "i64",
+          "index": false
+        },
+        {
+          "name": "rate",
+          "type": "u64",
+          "index": false
+        }
+      ]
+    },
+    {
+      "name": "TaskSettledEvent",
+      "fields": [
+        {
+          "name": "owner",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "agent",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "taskHash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          },
+          "index": false
+        },
+        {
+          "name": "chargedLamports",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "settledAt",
+          "type": "i64",
+          "index": false
+        }
       ]
     }
   ],
   "errors": [
-    { "code": 6000, "name": "MathOverflow", "msg": "Arithmetic overflow occurred during balance calculation" },
-    { "code": 6001, "name": "InsufficientBalance", "msg": "Channel has insufficient balance for operation" },
-    { "code": 6002, "name": "UnauthorizedOracle", "msg": "Only the channel's configured oracle may update its burn rate" },
-    { "code": 6003, "name": "InvalidOracle", "msg": "A payment channel requires a valid oracle public key" },
-    { "code": 6004, "name": "InvalidTreasury", "msg": "The configured treasury public key is invalid" },
-    { "code": 6005, "name": "BurnRateTooHigh", "msg": "The requested burn rate exceeds the protocol maximum" },
-    { "code": 6006, "name": "ChannelBusy", "msg": "A payment channel cannot be topped up while a task is running" }
-  ]
+    {
+      "code": 6000,
+      "name": "MathOverflow",
+      "msg": "Arithmetic overflow occurred during balance calculation"
+    },
+    {
+      "code": 6001,
+      "name": "InsufficientBalance",
+      "msg": "Channel has insufficient balance for operation"
+    },
+    {
+      "code": 6002,
+      "name": "UnauthorizedOracle",
+      "msg": "Only the configured oracle may authorize task payment state"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidOracle",
+      "msg": "The channel oracle does not match protocol configuration"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidTreasury",
+      "msg": "The configured treasury public key is invalid"
+    },
+    {
+      "code": 6005,
+      "name": "BurnRateTooHigh",
+      "msg": "The requested burn rate is zero or exceeds the protocol maximum"
+    },
+    {
+      "code": 6006,
+      "name": "ChannelBusy",
+      "msg": "The payment channel has an active task"
+    },
+    {
+      "code": 6007,
+      "name": "ConfigAuthorityNotConfigured",
+      "msg": "Build with APERTURE_CONFIG_AUTHORITY set to the intended protocol authority"
+    },
+    {
+      "code": 6008,
+      "name": "UnauthorizedConfigAuthority",
+      "msg": "Only the authority pinned into this build may initialize config"
+    },
+    {
+      "code": 6009,
+      "name": "InvalidVersion",
+      "msg": "A version 2 protocol configuration is required"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidPolicy",
+      "msg": "Agent policy has invalid cost or total budget"
+    },
+    {
+      "code": 6011,
+      "name": "InvalidRuntime",
+      "msg": "Runtime exceeds its allowed bound or is zero"
+    },
+    {
+      "code": 6012,
+      "name": "PassportExpired",
+      "msg": "The agent permission has expired"
+    },
+    {
+      "code": 6013,
+      "name": "AllowanceExceeded",
+      "msg": "Agent allowance would be exceeded"
+    },
+    {
+      "code": 6014,
+      "name": "PassportBusy",
+      "msg": "An active reservation prevents policy update"
+    },
+    {
+      "code": 6015,
+      "name": "InvalidHash",
+      "msg": "Hash values must be nonzero"
+    },
+    {
+      "code": 6016,
+      "name": "InvalidPassport",
+      "msg": "The supplied passport or its PDA is invalid"
+    },
+    {
+      "code": 6017,
+      "name": "UnauthorizedOwner",
+      "msg": "Only the registered owner may manage this agent or channel"
+    },
+    {
+      "code": 6018,
+      "name": "InvalidAgent",
+      "msg": "The agent public key is invalid or mismatched"
+    },
+    {
+      "code": 6019,
+      "name": "PassportRevoked",
+      "msg": "The agent permission has been revoked"
+    },
+    {
+      "code": 6020,
+      "name": "TaskMismatch",
+      "msg": "Task state or receipt does not match the active task"
+    },
+    {
+      "code": 6021,
+      "name": "InvalidReservation",
+      "msg": "The task reservation accounting is inconsistent"
+    },
+    {
+      "code": 6022,
+      "name": "BoundedTaskRequired",
+      "msg": "Use start_task and stop_task for bounded task payment"
+    },
+    {
+      "code": 6023,
+      "name": "MissingReceipt",
+      "msg": "An active task receipt is required to close this channel"
+    }
+  ],
+  "metadata": {
+    "address": "A5HfdyRWy77i5DxhTMBa1ZinxVGZbVZnb35EvXUvkNzQ",
+    "protocolVersion": 2
+  }
 }

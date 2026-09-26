@@ -1,5 +1,13 @@
 export const WORKLOADS = [
   {
+    id: "risk",
+    name: "Agent batch risk scoring",
+    category: "Agent analytics",
+    icon: "shield",
+    description: "Rank a fixed portfolio with reproducible Monte Carlo loss estimates.",
+    code: '# Agent tool: deterministic batch scenario scoring\nimport random\nimport statistics\nimport json\n\nrng = random.Random(42)\nportfolios = [("balanced", 0.45, 0.08), ("growth", 0.75, 0.14), ("conservative", 0.20, 0.04)]\nresults = []\nfor name, exposure, volatility in portfolios:\n    losses = [max(0, -(exposure * rng.gauss(0.01, volatility))) for _ in range(20000)]\n    ordered = sorted(losses)\n    tail = ordered[int(len(ordered) * 0.95):]\n    results.append({"portfolio": name, "loss_p95": round(ordered[int(len(ordered) * 0.95)], 6), "tail_mean": round(statistics.fmean(tail), 6)})\nresults.sort(key=lambda item: item["tail_mean"])\nprint(json.dumps({"seed": 42, "scenarios_per_portfolio": 20000, "ranking": results}, sort_keys=True))\n',
+  },
+  {
     id: "math",
     name: "Numerical analysis",
     category: "Mathematics",

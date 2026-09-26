@@ -9,19 +9,21 @@
 5. Download the JSON result or save the log.
 6. Choose **Policy rejection** and run again. The demo stops at the restricted-import example.
 7. Return to Overview to see session activity. Check Worker network: without a gateway it should show a useful offline state, not imaginary workers.
-8. Resize the window to check the mobile navigation and editor.
+8. Open Agent passports to inspect the owner-signing and permission-boundary UI. Without a wallet/backend it remains clearly disconnected.
+9. Resize the window to check the mobile navigation and editor.
 
 The browser policy example is illustrative pattern matching, not a Python parser or a security boundary.
 
 ## Connected Devnet walkthrough
 
-1. Configure `backend/.env` from `backend/.env.example` with a unique worker token and oracle signer. Leave backend demo mode disabled.
-2. Deploy and verify the matching Anchor program and configure a payment channel before submitting a real workload.
-3. Start the gateway and an authenticated worker in a suitable development environment. Direct host workers should receive only your own trusted code.
-4. Connect a Solana wallet and select **Devnet gateway** in Studio.
-5. Choose a small allowlisted Python workload, then **Sign & submit**. Declining the signature must prevent submission.
-6. Inspect gateway output and the result. The receipt retains worker identity, exit code and settlement type.
-7. Follow an Explorer link only when transaction evidence was returned. Failed chain settlement is not a Devnet success.
+1. Create a new Devnet v2 deployment using the installation instructions in README. The current v2 Program ID has not been deployed yet.
+2. Configure backend/.env from backend/.env.example with the matching config authority/oracle signer, treasury, a unique worker token, and the v2 program ID. Keep demo mode disabled.
+3. Initialize the protocol config; verify the program ID, config PDA, authority, oracle, treasury and protocol version 2 through the gateway.
+4. Start the gateway and a worker configured with the isolated Docker image. Direct host execution is only for code the operator trusts.
+5. Connect a Solana wallet. In Agent passports, issue a policy for a separate agent public key with explicit limits and expiry, then confirm the wallet and Devnet transaction.
+6. Deposit Devnet SOL into the idle payment channel. In Studio, select Devnet gateway, request and review the exact quote, then sign acceptance.
+7. Inspect the authenticated worker result, hashes, signed receipt, persistent on-chain TaskReceipt, and confirmed charge. A declined signature or policy rejection must stop before dispatch.
+8. Follow an Explorer link only when the gateway returns the actual confirmed transaction. OFF_CHAIN and SIMULATION are not Devnet settlements.
 
 ## Useful checks
 

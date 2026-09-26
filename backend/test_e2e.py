@@ -1,92 +1,53 @@
-import requests
-import time
-import sys
+"""Offline end-to-end flow with real Ed25519 keys and real CPU execution.
+
+No server request or chain transaction is made when this module is imported.
+Docker isolation is separately verified by the opt-in worker tests and CI.
+"""
 import hashlib
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import Mock
+import base58
+from nacl.signing import VerifyKey
 
-if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
+import test_api_security as security
+import worker
+from worker_identity import WorkerIdentity
+from worker_sandbox import TrustedLocalExecutor
 
-BASE = 'http://127.0.0.1:8000'
+class OfflineExecutionIntegrationTests(unittest.TestCase):
+    def test_delegated_budgeted_task_runs_and_receipt_verifies(self):
+        harness = security.GatewayApiSecurityTests()
+        harness.setUp()
+        try:
+            harness.passport()
+            admitted = harness.admit(agent=harness.agent)
+            task = harness.claim()
+            http = Mock()
+            http.get.return_value = Mock(status_code=200, json=lambda: {'cancelled': False})
+            http.post.return_value = Mock(status_code=200)
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                identity = WorkerIdentity(root)
+                harness.store.put('workers', 'test-worker', {'worker_pubkey': identity.pubkey})
+                result = worker.execute_task(task, TrustedLocalExecutor(), root, http)
+                signed = identity.attest(task, result, 'test-worker')
+                submitted = harness.client.post('/submit_result', headers=harness.headers, json=signed)
+            self.assertEqual(submitted.status_code, 200, submitted.text)
+            receipt = submitted.json()
+            self.assertEqual(result['output'].strip(), '42')
+            self.assertEqual(receipt['agent_pubkey'], str(harness.agent.pubkey()))
+            self.assertEqual(receipt['execution_mode'], 'trusted_local')
+            self.assertEqual(receipt['source_hash'], hashlib.sha256(task['code'].encode()).hexdigest())
+            self.assertEqual(receipt['output_hash'], hashlib.sha256(result['full_log'].encode()).hexdigest())
+            VerifyKey(base58.b58decode(receipt['gateway_pubkey'])).verify(receipt['signed_message'].encode(), bytes(receipt['gateway_signature']))
+            replay = harness.client.post('/submit_result', headers=harness.headers, json=signed)
+            self.assertEqual(replay.json()['receipt_sha256'], receipt['receipt_sha256'])
+            capability = {'access_token': admitted['task_access_token']}
+            self.assertEqual(harness.client.get(f"/result/{task['task_id']}", params=capability).json()['status'], 'completed')
+        finally:
+            harness.tearDown()
 
-
-def signed_message(wallet: str, code: str) -> str:
-    digest = hashlib.sha256(code.encode("utf-8")).hexdigest()
-    return f"Aperture execution request\nwallet:{wallet}\ncode_sha256:{digest}"
-
-print('1. Checking /stats...')
-s = requests.get(f'{BASE}/stats').json()
-print('   Stats tasks completed:', s.get('tasks_completed'))
-print('   SOL Price:', f"${s.get('sol_price', 0):.2f}")
-print('   Hardware Telemetry:', s.get('hardware'))
-
-print('\n2. Checking /active_nodes...')
-nodes = requests.get(f'{BASE}/active_nodes').json()
-print(f'   Active nodes count: {len(nodes)}')
-for n in nodes:
-    print(f'   - Node: {n.get("node_id")} | GPU: {n.get("gpu_name")} | Temp: {n.get("gpu_temp")}°C | Load: {n.get("gpu_util")}% | VRAM: {n.get("vram_used")}/{n.get("vram_total")}GB')
-
-print('\n3. Testing execution of Matrix Mult benchmark...')
-payload = {
-    'code': '''import time, random
-N = 50
-A = [[random.random() for _ in range(N)] for _ in range(N)]
-B = [[random.random() for _ in range(N)] for _ in range(N)]
-C = [[sum(A[i][k]*B[k][j] for k in range(N)) for j in range(N)] for i in range(N)]
-print(f'COMPUTED {N}x{N} MATRIX MULTIPLICATION')
-''',
-    'wallet': 'DEMO_DEVNET_SOLANA_GUEST',
-    'signature': [0]*64,
-}
-payload['message'] = signed_message(payload['wallet'], payload['code'])
-res = requests.post(f'{BASE}/execute', json=payload).json()
-task_id = res['task_id']
-task_access_token = res['task_access_token']
-print(f'   Task initiated: {task_id}')
-print(f'   Burn rate: {res["burn_rate"]} SOL/sec ({res["burn_rate_lamports"]} lamports/sec)')
-print(f'   Complexity Score: {res["complexity_score"]}/100')
-print(f'   On-chain proof: {res.get("on_chain_proof")}')
-
-print('\n4. Waiting for GPU worker to process & testing real-time stream logs...')
-completed = False
-for i in range(15):
-    time.sleep(1)
-    # Check stream log
-    stream_res = requests.get(f'{BASE}/stream_log/{task_id}', params={'access_token': task_access_token}).json()
-    if stream_res.get('lines'):
-        print(f'   📡 Streamed chunk ({len(stream_res["lines"])} lines): {stream_res["lines"][0].strip()[:60]}...')
-    
-    status_res = requests.get(f'{BASE}/result/{task_id}', params={'access_token': task_access_token}).json()
-    if status_res.get('status') == 'completed':
-        print('   ✅ Worker execution settled:')
-        print('   Output:\n', status_res['output'])
-        completed = True
-        break
-    print(f'   ... executing on silicon ({i+1}s)')
-
-if not completed:
-    print('   ⚠️ Task waiting for worker daemon (start worker.py to process)')
-
-print('\n5. Testing Neural Network Forward Pass from /benchmarks...')
-benchmarks = requests.get(f'{BASE}/benchmarks').json()
-nn_bench = next((b for b in benchmarks if b['id'] == 'neural_forward'), None)
-if nn_bench:
-    print(f'   Found Neural Benchmark: {nn_bench["name"]}')
-    nn_res = requests.post(f'{BASE}/execute', json={
-        'code': nn_bench['code'],
-        'wallet': 'DEMO_DEVNET_SOLANA_GUEST',
-        'signature': [0]*64,
-        'message': signed_message('DEMO_DEVNET_SOLANA_GUEST', nn_bench['code'])
-    }).json()
-    print(f'   NN Task ID: {nn_res["task_id"]} | Complexity: {nn_res["complexity_score"]}/100 | Burn: {nn_res["burn_rate_lamports"]} L/s')
-
-print('\n6. Testing AI Sentinel security block (malicious probe)...')
-malicious = {
-    'code': 'import os\nos.system("rm -rf /")',
-    'wallet': 'DEMO_DEVNET_SOLANA_GUEST',
-    'signature': [0]*64,
-}
-malicious['message'] = signed_message(malicious['wallet'], malicious['code'])
-sec_res = requests.post(f'{BASE}/execute', json=malicious)
-print(f'   Security response status code: {sec_res.status_code} (Expected 403)')
-print('   Detail:', sec_res.json().get('detail'))
-print('\n🎉 All End-to-End System Tests Completed Successfully!')
+if __name__ == '__main__':
+    unittest.main()

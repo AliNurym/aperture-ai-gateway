@@ -3,6 +3,7 @@ import axios from "axios";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import Dashboard from "./Dashboard";
+import Agents from "./Agents";
 import Icon from "./components/Icon";
 import { WORKLOADS } from "./utils/workloads";
 import logo from "./assets/aperture-mark-v3.png";
@@ -26,6 +27,13 @@ const PAGES = [
     icon: "code",
     title: "Compute Studio",
     subtitle: "From a few lines of Python to an inspectable result.",
+  },
+  {
+    id: "agents",
+    label: "Agent passports",
+    icon: "shield",
+    title: "Know Your Agent",
+    subtitle: "Owner-issued identity. Clear authority. Bounded spending.",
   },
   {
     id: "network",
@@ -64,7 +72,10 @@ function readHistory() {
 export default function App() {
   const { connected } = useWallet();
   const [page, setPage] = useState(currentPage);
-  const [mode, setMode] = useState("demo");
+  const [mode, setMode] = useState(() => {
+    try { return sessionStorage.getItem("aperture-active:" + API_URL) ? "gateway" : "demo"; }
+    catch { return "demo"; }
+  });
   const [busy, setBusy] = useState(false);
   const [selection, setSelection] = useState(null);
   const [history, setHistory] = useState(readHistory);
@@ -131,7 +142,7 @@ export default function App() {
         run,
         ...previous.filter((item) => item.id !== run.id),
       ].slice(0, 20);
-      // Only metadata persists: workloads, output and access tokens stay in memory.
+      // History stores only metadata. Active task recovery uses separate tab storage.
       try {
         sessionStorage.setItem("aperture-runs", JSON.stringify(next));
       } catch {
@@ -315,10 +326,9 @@ export default function App() {
                   ],
                   [
                     "chip",
-                    "Registered capacity",
+                    "Execution capability",
                     online
-                      ? (telemetry.stats?.hardware?.total_tflops ?? 0) +
-                        " TFLOPS"
+                      ? "Python CPU"
                       : "—",
                     "Reported by registered workers",
                   ],
@@ -326,7 +336,7 @@ export default function App() {
                     "check",
                     "Completed workloads",
                     online ? (telemetry.stats?.tasks_completed ?? 0) : "—",
-                    "During the current gateway session",
+                    "Recorded by the gateway",
                   ],
                 ].map(([icon, label, value, caption]) => (
                   <div className="console-metric" key={label}>
@@ -481,7 +491,9 @@ export default function App() {
                 {mode === "demo"
                   ? "An interactive estimate. Python is not executed and no payments are made."
                   : connected
-                    ? "Sign each workload with your wallet. Requires a configured gateway and channel."
+                    ? telemetry.health?.demo_mode
+                      ? "Connected gateway executes Python with off-chain development settlement. No SOL payment."
+                      : "Review price and limits, then sign. Requires a configured gateway and Devnet channel."
                     : "Connect a wallet to authorize a Devnet workload."}
               </p>
             </div>
@@ -492,6 +504,8 @@ export default function App() {
               onRecord={recordRun}
             />
           </section>
+
+          {page === "agents" && <Agents />}
 
           {page === "network" && (
             <>
@@ -671,9 +685,8 @@ export default function App() {
                   <span>03 · WORKER</span>
                   <code>start_worker.bat</code>
                   <p>
-                    Local workers execute Python on your machine. Use them only
-                    with your own trusted workloads; use an isolated environment
-                    for untrusted code.
+                    Build the task image first with docker build -f backend/Dockerfile.sandbox -t aperture-task:local backend.
+                    Workers use a separate Docker sandbox for each job, with no network and a fixed resource budget.
                   </p>
                 </div>
               </section>
@@ -682,7 +695,7 @@ export default function App() {
                 {[
                   [
                     "Sign",
-                    "Your wallet authorizes one specific workload using a single-use challenge.",
+                    "Review the quoted rate, maximum spend and runtime. Your wallet authorizes that exact source and quote.",
                   ],
                   [
                     "Review",

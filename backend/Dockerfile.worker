@@ -1,0 +1,9 @@
+FROM python:3.12-slim
+
+# This trusted coordinator controls Docker. Its socket is never mounted in jobs.
+RUN apt-get update && apt-get install -y --no-install-recommends docker.io && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+RUN pip install --no-cache-dir requests==2.32.5 python-dotenv==1.1.1 PyNaCl==1.5.0 base58==2.1.1
+COPY worker.py worker_sandbox.py worker_journal.py worker_identity.py ./
+ENV APERTURE_WORKER_STATE_DIR=/var/lib/aperture-worker
+CMD ["python", "-u", "worker.py"]

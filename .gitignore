@@ -58,10 +58,15 @@ wheels/
 htmlcov/
 *.sqlite3
 *.db
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite3.lock
+.aperture/
 database.db
 
 # Temporary compute executor and worker outputs
-task_*.py
+task_task-*.py
+backend/task_task-*.py
 node_log_*.txt
 results_*.txt
 node_log_task-*.txt

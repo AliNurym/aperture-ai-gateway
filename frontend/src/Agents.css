@@ -1,0 +1,24 @@
+.agents-intro { margin-bottom: 23px; }
+.agents-intro h2 { max-width: 650px; margin: 14px 0; line-height: 1.5; }
+.agents-intro p, .agents-form p { color: #786787; font-size: 13px; line-height: 1.8; margin: 12px 0; }
+.agents-grid { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(300px, 1.2fr); gap: 23px; align-items: start; }
+.agents-form label, .studio-budget label { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; color: #786787; font-size: 12px; }
+.agents-form input, .studio-budget input { width: 100%; min-width: 0; background: #fcf9fe; color: #4d3c5d; border: 1px solid #e9e0f1; border-radius: 10px; padding: 11px 12px; font: 13px "Roboto", sans-serif; }
+.agents-form input:disabled { opacity: 0.6; }
+.agents-owner, .agent-passport code { overflow-wrap: anywhere; font: 11px/1.8 "Roboto Mono", Consolas, monospace; }
+.agents-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.agent-passport { border-top: 1px solid #e9e0f1; margin-top: 18px; padding-top: 18px; }
+.agent-passport h3 { font-size: 15px; }
+.agent-passport code { display: block; color: #8a6c9b; margin: 14px 0; }
+.agent-passport dl > div { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; font-size: 12px; }
+.agent-passport dt { color: #786787; }
+.agent-passport dd { text-align: right; }
+.agents-actions { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 14px; }
+.studio-quote { padding: 16px; margin-top: 15px; background: #f6f0fb; border-radius: 12px; }
+.studio-quote strong { display: block; margin-bottom: 8px; }
+.studio-quote p { margin: 8px 0; }
+.studio-quote button { margin-top: 10px; }
+.studio-receipt-evidence { font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.studio-receipt-evidence dt { color: #786787; }
+.studio-receipt-evidence dd { font-family: "Roboto Mono", Consolas, monospace; margin-bottom: 10px; }
+@media (max-width: 850px) { .agents-grid { grid-template-columns: 1fr; } }

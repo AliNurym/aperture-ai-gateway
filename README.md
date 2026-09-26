@@ -48,11 +48,18 @@ Keep `APERTURE_DEMO_MODE=false`. The browser demo is independent of this backend
 The protocol initializer is pinned to `APERTURE_CONFIG_AUTHORITY` at program build time. Choose and protect that signing wallet first, set the same public key in `backend/.env`, and build the program from the project root with that environment variable:
 
 ```powershell
+# v2 uses a new program address because the previous Devnet config account has
+# an incompatible layout. This checkout's program key is local and git-ignored.
+New-Item -ItemType Directory .\target\deploy -Force | Out-Null
+Copy-Item .\.aperture\devnet\program.json .\target\deploy\aperture_gateway-keypair.json
 $env:APERTURE_CONFIG_AUTHORITY = "<protected signing-wallet public key>"
 anchor build
+anchor deploy
 ```
 
-Set `BACKEND_PRIVATE_KEY` to the matching private key in `backend/.env`, then deploy and verify this guarded program before initializing the protocol config. A source edit does not change an existing on-chain deployment; do not run the initializer against a program that was not built with this authority check. After verification, run the command from `backend/`:
+The v2 Program ID in the source and Anchor config is A5HfdyRWy77i5DxhTMBa1ZinxVGZbVZnb35EvXUvkNzQ. The ignored program keypair was generated for this local checkout; copy it to Anchor's ignored target/deploy location before building, and keep a secure backup. For a different checkout, generate a new keypair and update every configured program ID consistently. The program-address key signs deployment; it is separate from the protected authority/oracle key. The existing checkout does not have a Devnet deployment or initialized v2 config yet.
+
+Set `APERTURE_CONFIG_AUTHORITY` to the public key of the signing wallet and `BACKEND_PRIVATE_KEY` to its matching local private key in `backend/.env`. It must be available at program build time and later sign `initialize_config`. Build and deploy before initializing. A source edit does not change an existing on-chain deployment; do not run the initializer against a program that was not built with this authority check. After deployment, verify the new program's executable account and configured address, then run this command from `backend/`:
 
 ```powershell
 .\venv\Scripts\python.exe .\init_protocol_config.py
@@ -69,12 +76,13 @@ python -m venv venv
 
 API documentation is at **http://127.0.0.1:8000/docs**; readiness is at `/health`.
 
-The worker launcher explicitly enables direct host execution for trusted local development. This is not a security sandbox. Use an isolated container/VM for untrusted workloads. Source checks and time limits do not replace operating-system isolation.
+Workers use a separate Docker container per task by default. The task has no network, runs as an unprivileged user, sees only its read-only input, and has CPU, memory, process, output and time limits. The Docker socket belongs to the trusted coordinator only; the coordinator process still controls the host Docker daemon. Use an isolated VM or host for mutually untrusted operators. Host execution requires an explicit trusted-development flag and is never enabled by the launcher by default.
 
 ## Workspace
 
 - **Overview:** gateway availability, reported worker capacity, sample workloads and recent runs.
-- **Compute Studio:** Python editing/import, copy/reset, explicit mode selection, progress, cancellation, output, JSON results and session history.
+- **Compute Studio:** Python editing/import, copy/reset, quote review, explicit cost/runtime limits, progress, cancellation, output, signed receipt export and session history.
+- **Agent passports:** owner-issued, revocable delegation for a separate public agent key, with the `python.execute` capability, per-run caps, total allowance and expiry. This is a cryptographic delegation record, not legal KYC or a verified human identity.
 - **Worker network:** current heartbeats and reported hardware metrics. Unavailable telemetry is not replaced with invented data.
 - **Getting started:** setup instructions and an explanation of the execution flow.
 
@@ -86,7 +94,11 @@ A process exiting with a nonzero status is reported as failed. The gateway retai
 
 Result types include `SIMULATION`, `DEVNET`, `OFF_CHAIN`, `NONE` and `UNKNOWN`. Explorer links are shown only when the gateway supplies transaction evidence. A disconnected client cannot assume that a submitted task was cancelled.
 
-The gateway queue, logs and receipts currently live in bounded process memory. Deploying the revised Anchor program, durable storage, transaction reconciliation and stronger worker isolation remain necessary before production use. This repository is a development prototype, not a mainnet service.
+Gateway quotes, jobs, worker outbox, and receipts use local SQLite and survive process restarts. The gateway requires one process per database file and a persistent writable state volume. Run Docker Compose with a configured `backend/.env`; the worker is a separately started trusted coordinator (`docker compose --profile worker up --build`). Build its per-task image first using the launcher instructions. The gate rejects Devnet work until a compatible v2 program and matching protocol configuration are available. The v2 program requires a new deployment because the earlier account layout is not compatible; close old channels with their original deployment first. This is a Devnet development prototype, not a mainnet service.
+
+## Owner delegated Python agents
+
+Install the local client with `python -m pip install -e .\sdk` and follow [the Python agent SDK guide](docs/python-agent-sdk.md) to create a separate agent key, issue an owner-signed passport, review bounded quotes, and verify worker and gateway receipts. The example computes a deterministic synthetic Monte Carlo risk distribution. It uses CPU only and does not call a paid model API.
 
 ## Verification
 
@@ -95,9 +107,16 @@ Run from the project root with backend dependencies installed:
 ```powershell
 python -m unittest discover -s backend -p 'test_*security.py'
 python backend/test_task_results.py
+python backend/test_solana_client.py
+python -m unittest discover -s sdk/tests -v
 npm run lint --prefix frontend
 npm run build --prefix frontend
 ```
+
+CI also validates Compose, builds the isolated task image and runs the Docker
+isolation tests. The contract job builds the SBF artifact and exercises real
+instructions against a temporary local Solana validator. These local-chain
+checks do not assert that the separate Devnet deployment has been completed.
 
 The result tests exercise failed Python execution, successful execution, task-capability enforcement, receipt polling and invalid worker result handling. Security tests cover authorization, task leases and source policy. RPC calls are mocked in automated tests; they are not proof of a live chain deployment.
 

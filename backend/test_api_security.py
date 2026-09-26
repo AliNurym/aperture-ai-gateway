@@ -1,293 +1,343 @@
-"""HTTP-level tests for gateway trust boundaries (no Solana RPC required)."""
-
-import os
+"""Meaningful offline regressions for signed delegation, budgets and recovery."""
+import asyncio
 import json
+import os
+import tempfile
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-os.environ["APERTURE_WORKER_TOKEN"] = "test-worker-secret"
-os.environ["APERTURE_DEMO_MODE"] = "false"
-
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from solders.keypair import Keypair
+from solders.pubkey import Pubkey
+import base58
+from nacl.signing import VerifyKey
 
-os.environ["BACKEND_PRIVATE_KEY"] = json.dumps(list(bytes(Keypair())))
-import main
-from task_auth import execution_message
+from agent_identity import canonical_json, receipt_message, sha256_text
+from gateway import Gateway
+from state_store import StateStore
+from worker_identity import receipt_bytes
 
+TOKEN = 'test-worker-secret'
+
+class FakeSolana:
+    def __init__(self):
+        self.ai_signer = Keypair()
+        self.program_id = Pubkey.new_unique()
+        self.treasury = Pubkey.new_unique()
+        self.get_protocol_config = AsyncMock(return_value={'treasury': self.treasury})
+        self.get_channel_state = AsyncMock(return_value={'balance_lamports': 1_000_000_000, 'effective_balance_lamports': 1_000_000_000, 'burn_rate_lamports': 0})
+        self.get_agent_passport = AsyncMock(return_value=None)
+        self.prepare_start_task = AsyncMock(return_value={'signature': str(Keypair().sign_message(b'prepare')), 'transaction': 'signed-public-bytes', 'last_valid_block_height': 100})
+        self.send_prepared_start = AsyncMock(return_value='start-confirmed')
+        self.stop_task = AsyncMock(return_value={'signature': 'stop-confirmed', 'charged_lamports': 1000, 'evidence': 'confirmed_task_receipt'})
+        self.agent_instruction = lambda action, policy: {'kind': action, 'program_id': str(self.program_id), 'data': [], 'data_base64': '', 'accounts': []}
 
 class GatewayApiSecurityTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.client = TestClient(main.app)
-        cls.worker_headers = {
-            "X-Aperture-Worker-Token": "test-worker-secret",
-            "X-Aperture-Worker-Id": "test-worker-a",
-        }
+    def setUp(self):
+        self.store = StateStore(':memory:')
+        self.chain = FakeSolana()
+        self.core = Gateway(self.chain, True, TOKEN, self.store)
+        self.app = FastAPI()
+        self.app.include_router(self.core.router)
+        self.client = TestClient(self.app)
+        self.owner = Keypair()
+        self.agent = Keypair()
+        self.worker = Keypair()
+        self.headers = {'X-Aperture-Worker-Token': TOKEN, 'X-Aperture-Worker-Id': 'test-worker'}
+        self.store.put('workers', 'test-worker', {'worker_pubkey': str(self.worker.pubkey())})
+        self.price_patch = patch('ai_engine.get_sol_price_from_pyth', return_value=185.0)
+        self.price_patch.start()
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.client.close()
+    def tearDown(self):
+        self.price_patch.stop()
+        self.client.close()
+        self.store.close()
 
-    def test_security_headers_are_present(self):
-        response = self.client.get("/")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
-        self.assertEqual(response.headers["x-frame-options"], "DENY")
+    def quote(self, owner=None, agent=None, code="print(6 * 7)", budget=100_000, runtime=10):
+        return self.client.post('/quotes', json={'wallet': str((owner or self.owner).pubkey()), 'agent_pubkey': str((agent or owner or self.owner).pubkey()), 'code': code, 'max_cost_lamports': budget, 'max_runtime_seconds': runtime})
 
-    def test_health_does_not_expose_secrets(self):
-        with patch.object(main.solana_client, "get_protocol_config", new=AsyncMock(return_value=None)):
-            response = self.client.get("/health")
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()["worker_auth_configured"])
-        self.assertNotIn("test-worker-secret", response.text)
+    def signed_run(self, quote, signer=None, code="print(6 * 7)"):
+        return {'quote_id': quote['quote_id'], 'wallet': quote['wallet'], 'agent_pubkey': quote['agent_pubkey'], 'code': code, 'message': quote['message'], 'signature': list(bytes((signer or self.owner).sign_message(quote['message'].encode())))}
 
-    def test_example_worker_token_is_rejected(self):
-        original_token = main.WORKER_TOKEN
-        try:
-            main.WORKER_TOKEN = "replace-with-a-long-random-secret"
-            self.assertFalse(self.client.get("/health").json()["worker_auth_configured"])
-            response = self.client.get("/get_task", headers={
-                "X-Aperture-Worker-Token": main.WORKER_TOKEN,
-                "X-Aperture-Worker-Id": "worker",
-            })
-            self.assertEqual(response.status_code, 503)
-        finally:
-            main.WORKER_TOKEN = original_token
+    def admit(self, **kwargs):
+        quote = self.quote(**kwargs)
+        self.assertEqual(quote.status_code, 200, quote.text)
+        signer = kwargs.get('agent') or kwargs.get('owner') or self.owner
+        response = self.client.post('/execute', json=self.signed_run(quote.json(), signer, kwargs.get('code', "print(6 * 7)")))
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
 
-    def test_rate_limit_rejects_excess_requests_in_window(self):
-        original_buckets = dict(main.request_rate_buckets)
-        try:
-            main.request_rate_buckets.clear()
-            main.enforce_rate_limit("execute", "test-client", 2)
-            main.enforce_rate_limit("execute", "test-client", 2)
-            with self.assertRaises(main.HTTPException) as blocked:
-                main.enforce_rate_limit("execute", "test-client", 2)
-            self.assertEqual(blocked.exception.status_code, 429)
-        finally:
-            main.request_rate_buckets.clear()
-            main.request_rate_buckets.update(original_buckets)
+    def claim(self):
+        response = self.client.get('/get_task', headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
 
-    def test_worker_queue_requires_authentication(self):
-        self.assertEqual(self.client.get("/get_task").status_code, 401)
-        self.assertEqual(self.client.get("/get_task", headers={"X-Aperture-Worker-Token": "wrong"}).status_code, 401)
-        self.assertEqual(self.client.get("/get_task", headers=self.worker_headers).status_code, 200)
+    def result(self, task, output='42\n', duration=0.1, exit_code=0):
+        payload = {'task_id': task['task_id'], 'lease_id': task['lease_id'], 'source_hash': task['source_hash'], 'output_hash': sha256_text(output), 'output': output, 'full_log': output, 'execution_time': duration, 'exit_code': exit_code, 'execution_mode': 'docker', 'worker_pubkey': str(self.worker.pubkey())}
+        receipt = {'domain': 'aperture.worker.result.v1', 'task_id': task['task_id'], 'lease_id': task['lease_id'], 'source_hash': task['source_hash'], 'output_hash': sha256_text(output), 'execution_mode': 'docker', 'execution_time_ms': round(duration * 1000), 'exit_code': exit_code, 'worker_id': 'test-worker', 'worker_pubkey': str(self.worker.pubkey()), 'agent_pubkey': task['agent_pubkey'], 'quote_id': task['quote_id']}
+        payload.update(worker_receipt=receipt, worker_signature=base58.b58encode(bytes(self.worker.sign_message(receipt_bytes(receipt)))).decode())
+        return payload
 
-    def test_unknown_task_cannot_be_streamed_or_settled(self):
-        stream = self.client.post("/stream_log", headers=self.worker_headers, json={"task_id": "task-unknown", "lines": ["hello"]})
-        result = self.client.post("/submit_result", headers=self.worker_headers, json={"task_id": "task-unknown", "output": "hello", "execution_time": 0.1})
-        self.assertEqual(stream.status_code, 404)
-        self.assertEqual(result.status_code, 404)
+    def passport(self, action='register', **kwargs):
+        request = {'action': action, 'owner': str(self.owner.pubkey()), 'agent_pubkey': str(self.agent.pubkey()), 'name': 'Budgeted research agent', 'max_cost_lamports': 100_000, 'max_runtime_seconds': 10, 'total_budget_lamports': 200_000, 'expires_at': int(time.time()) + 3600, 'capabilities': ['python.execute'], **kwargs}
+        challenge = self.client.post('/agents/challenge', json=request)
+        self.assertEqual(challenge.status_code, 200, challenge.text)
+        body = challenge.json()
+        auth = {'nonce': body['nonce'], 'message': body['message'], 'signature': list(bytes(self.owner.sign_message(body['message'].encode())))}
+        response = self.client.post('/agents', json=auth)
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json(), auth
 
-    def test_request_signature_message_must_match_payload(self):
-        challenge = self.client.post("/execute/challenge", json={"code": "print('hello')", "wallet": "DEMO_DEVNET_SOLANA_GUEST"}).json()
-        response = self.client.post("/execute", json={
-            "code": "print('hello')",
-            "wallet": "DEMO_DEVNET_SOLANA_GUEST",
-            "signature": [0] * 64,
-            "message": "a stale signature message",
-            "authorization_nonce": challenge["nonce"],
-            "authorization_expires_at": challenge["expires_at"],
-        })
-        self.assertEqual(response.status_code, 401)
+    def test_quote_signature_binds_all_budget_and_domain_fields(self):
+        quote = self.quote().json()
+        bound = json.loads(quote['message'].split('\n')[-1])
+        for field in ('wallet', 'agent_pubkey', 'code_sha256', 'rate_lamports', 'max_cost_lamports', 'max_runtime_seconds', 'expires_at', 'program_id', 'network', 'gateway_pubkey', 'treasury'):
+            self.assertEqual(bound[field], quote[field])
 
-    def test_authenticated_worker_can_complete_a_known_task(self):
-        wallet = "11111111111111111111111111111111"
-        code = "import math\nprint(math.sqrt(9))"
-        payload = {
-            "code": code,
-            "wallet": wallet,
-            "signature": [1] * 64,
-        }
-        challenge = self.client.post("/execute/challenge", json={"code": code, "wallet": wallet}).json()
-        payload.update({
-            "message": execution_message(wallet, code, challenge["nonce"], challenge["expires_at"]),
-            "authorization_nonce": challenge["nonce"],
-            "authorization_expires_at": challenge["expires_at"],
-        })
-        with patch("main.verify_signature", return_value=True), patch.object(main.solana_client, "get_channel_state", new=AsyncMock(return_value={"balance_lamports": 1_000_000_000})), patch.object(main.solana_client, "update_burn_rate", new=AsyncMock(return_value="devnet-test-signature")):
-            submitted = self.client.post("/execute", json=payload)
-            self.assertEqual(submitted.status_code, 200)
-            task_id = submitted.json()["task_id"]
-            task_access_token = submitted.json()["task_access_token"]
+    def test_exact_replay_returns_original_job_without_second_dispatch(self):
+        quote = self.quote().json()
+        payload = self.signed_run(quote)
+        first = self.client.post('/execute', json=payload).json()
+        second = self.client.post('/execute', json=payload).json()
+        self.assertEqual(first['task_id'], second['task_id'])
+        self.assertEqual(first['task_access_token'], second['task_access_token'])
+        self.assertEqual(len(self.store.list('jobs')), 1)
 
-            claimed = self.client.get("/get_task", headers=self.worker_headers)
-            self.assertEqual(claimed.status_code, 200)
-            self.assertEqual(claimed.json()["task_id"], task_id)
+    def test_source_tamper_and_unrelated_wallet_signature_rejected(self):
+        quote = self.quote().json()
+        payload = self.signed_run(quote, self.agent)
+        self.assertEqual(self.client.post('/execute', json=payload).status_code, 401)
+        payload = self.signed_run(quote)
+        payload['code'] = 'print(1)'
+        self.assertEqual(self.client.post('/execute', json=payload).status_code, 401)
 
-            streamed = self.client.post("/stream_log", headers=self.worker_headers, json={"task_id": task_id, "node_id": "test-worker-a", "lines": ["3.0\n"]})
-            self.assertEqual(streamed.status_code, 200)
+    def test_quote_bound_budget_tamper_rejected(self):
+        quote = self.quote().json()
+        payload = self.signed_run(quote)
+        payload['message'] = quote['message'].replace('100000', '200000')
+        self.assertEqual(self.client.post('/execute', json=payload).status_code, 401)
 
-            settled = self.client.post("/submit_result", headers=self.worker_headers, json={"task_id": task_id, "output": "3.0\n", "full_log": "3.0\n", "execution_time": 0.1})
-            self.assertEqual(settled.status_code, 200)
-            self.assertEqual(settled.json()["settlement_type"], "DEVNET")
+    def test_expired_quote_rejects_new_execution(self):
+        quote = self.quote().json()
+        self.store.put('quotes', quote['quote_id'], {**quote, 'expires_at': int(time.time()) - 1})
+        self.assertEqual(self.client.post('/execute', json=self.signed_run(quote)).status_code, 401)
 
-        result = self.client.get(f"/result/{task_id}?access_token={task_access_token}")
-        self.assertEqual(result.json()["status"], "completed")
+    def test_legacy_unbounded_execution_body_is_rejected(self):
+        self.assertEqual(self.client.post('/execute', json={'wallet': str(self.owner.pubkey()), 'code': 'print(1)', 'signature': [0] * 64, 'message': 'execute'}).status_code, 422)
 
-    def test_execution_authorization_cannot_be_replayed(self):
-        wallet = "11111111111111111111111111111111"
-        code = "print('once')"
-        challenge = self.client.post("/execute/challenge", json={"code": code, "wallet": wallet}).json()
-        payload = {
-            "code": code,
-            "wallet": wallet,
-            "signature": [1] * 64,
-            "message": challenge["message"],
-            "authorization_nonce": challenge["nonce"],
-            "authorization_expires_at": challenge["expires_at"],
-        }
-        with patch("main.verify_signature", return_value=True), patch.object(main.solana_client, "get_channel_state", new=AsyncMock(return_value={"balance_lamports": 1_000_000_000})), patch.object(main.solana_client, "update_burn_rate", new=AsyncMock(return_value="devnet-test-signature")):
-            first = self.client.post("/execute", json=payload)
-            self.assertEqual(first.status_code, 200)
-            self.assertEqual(self.client.post("/execute", json=payload).status_code, 401)
-        task_id = first.json()["task_id"]
-        main.active_tasks_rates.pop(task_id, None)
-        main.pending_tasks[:] = [task for task in main.pending_tasks if task["task_id"] != task_id]
+    def test_source_policy_blocks_host_access_before_quote(self):
+        self.assertEqual(self.quote(code="import os\nos.system('id')").status_code, 403)
 
-    def test_payment_channel_rejects_parallel_tasks(self):
-        wallet = "11111111111111111111111111111111"
-        main.active_tasks_rates["task-existing"] = {"wallet": wallet}
-        try:
-            code = "print('parallel')"
-            challenge = self.client.post("/execute/challenge", json={"code": code, "wallet": wallet}).json()
-            payload = {"code": code, "wallet": wallet, "signature": [1] * 64, "message": challenge["message"], "authorization_nonce": challenge["nonce"], "authorization_expires_at": challenge["expires_at"]}
-            with patch("main.verify_signature", return_value=True):
-                self.assertEqual(self.client.post("/execute", json=payload).status_code, 409)
-        finally:
-            main.active_tasks_rates.pop("task-existing", None)
+    def test_budget_covers_minimum_and_runtime_is_effectively_capped(self):
+        self.assertEqual(self.quote(budget=1).status_code, 422)
+        quote = self.quote(budget=1000, runtime=180).json()
+        self.assertLessEqual(quote['effective_runtime_seconds'] * quote['rate_lamports'], quote['max_cost_lamports'])
 
-    def test_task_output_requires_its_capability_token(self):
-        task_id = "task-private-output"
-        token = "private-capability-token"
-        main.active_tasks_rates[task_id] = {"wallet": "wallet", "access_token": token}
-        try:
-            self.assertEqual(self.client.get(f"/stream_log/{task_id}").status_code, 404)
-            self.assertEqual(self.client.get(f"/stream_log/{task_id}?access_token=wrong").status_code, 404)
-            self.assertEqual(self.client.get(f"/stream_log/{task_id}?access_token={token}").status_code, 200)
-            self.assertEqual(self.client.post(f"/stop/{task_id}").status_code, 404)
-        finally:
-            main.active_tasks_rates.pop(task_id, None)
+    def test_payment_channel_cannot_admit_parallel_tasks(self):
+        self.admit()
+        second = self.quote().json()
+        self.assertEqual(self.client.post('/execute', json=self.signed_run(second)).status_code, 409)
 
-    def test_failed_live_settlement_keeps_task_available_for_retry(self):
-        task_id = "task-off-chain"
-        main.active_tasks_rates[task_id] = {
-            "wallet": "11111111111111111111111111111111",
-            "rate_sol": 0.000001,
-            "ai_verdict": "allowed",
-            "access_token": "off-chain-capability",
-        }
-        main.claimed_tasks[task_id] = {"task": {"task_id": task_id}, "worker_id": "test-worker-a", "claimed_at": time.time()}
-        try:
-            with patch.object(main.solana_client, "update_burn_rate", new=AsyncMock(return_value=None)):
-                response = self.client.post("/submit_result", headers=self.worker_headers, json={"task_id": task_id, "output": "done", "execution_time": 1})
-            self.assertEqual(response.status_code, 503)
-            self.assertIn(task_id, main.active_tasks_rates)
-            self.assertIn(task_id, main.claimed_tasks)
-        finally:
-            main.active_tasks_rates.pop(task_id, None)
-            main.claimed_tasks.pop(task_id, None)
+    def test_owner_passport_authorization_cannot_be_replayed(self):
+        passport, auth = self.passport()
+        self.assertEqual(passport['attestation'], 'OWNER_SIGNED_OFF_CHAIN')
+        self.assertEqual(self.client.post('/agents', json=auth).status_code, 409)
 
-    def test_demo_settlement_is_explicitly_off_chain(self):
-        task_id = "task-demo-off-chain"
-        main.active_tasks_rates[task_id] = {
-            "wallet": "11111111111111111111111111111111",
-            "rate_sol": 0.000001,
-            "ai_verdict": "allowed",
-            "access_token": "demo-capability",
-        }
-        main.claimed_tasks[task_id] = {"task": {"task_id": task_id}, "worker_id": "test-worker-a", "claimed_at": time.time()}
-        original_demo_mode = main.DEMO_MODE
-        try:
-            main.DEMO_MODE = True
-            with patch.object(main.solana_client, "update_burn_rate", new=AsyncMock(return_value=None)):
-                response = self.client.post("/submit_result", headers=self.worker_headers, json={"task_id": task_id, "output": "done", "execution_time": 1})
-            self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["settlement_type"], "OFF_CHAIN")
-            self.assertIsNone(response.json()["explorer_url"])
-        finally:
-            main.DEMO_MODE = original_demo_mode
-            main.active_tasks_rates.pop(task_id, None)
-            main.claimed_tasks.pop(task_id, None)
+    def test_owner_cannot_overwrite_another_owners_passport(self):
+        self.passport()
+        request = {'action': 'register', 'owner': str(Keypair().pubkey()), 'agent_pubkey': str(self.agent.pubkey()), 'expires_at': int(time.time()) + 100}
+        self.assertEqual(self.client.post('/agents/challenge', json=request).status_code, 403)
 
-    def test_expired_worker_lease_stops_billing_without_duplicate_execution(self):
-        task_id = "task-expired-lease"
-        task = {"task_id": task_id, "code": "print(1)", "wallet": "11111111111111111111111111111111"}
-        main.active_tasks_rates[task_id] = {"wallet": task["wallet"], "access_token": "expired-capability"}
-        main.claimed_tasks[task_id] = {"task": task, "worker_id": "crashed-worker", "claimed_at": time.time() - main.TASK_LEASE_SECONDS - 1}
-        try:
-            with patch.object(main.solana_client, "update_burn_rate", new=AsyncMock(return_value="stop-signature")):
-                response = self.client.get("/get_task", headers=self.worker_headers)
-            self.assertEqual(response.status_code, 200)
-            self.assertIsNone(response.json()["task_id"])
-            self.assertEqual(main.completed_tasks[task_id], "EXECUTION_LEASE_EXPIRED")
-        finally:
-            main.claimed_tasks.pop(task_id, None)
-            main.active_tasks_rates.pop(task_id, None)
+    def test_delegated_agent_requires_passport_and_signs_own_job(self):
+        self.assertEqual(self.quote(agent=self.agent).status_code, 403)
+        self.passport()
+        self.admit(agent=self.agent)
 
-    def test_worker_cannot_settle_another_workers_lease(self):
-        task_id = "task-owned-by-another-worker"
-        main.active_tasks_rates[task_id] = {"wallet": "wallet", "rate_sol": 0, "access_token": "token"}
-        main.claimed_tasks[task_id] = {"task": {"task_id": task_id}, "worker_id": "worker-a", "claimed_at": time.time()}
-        other_worker_headers = {
-            "X-Aperture-Worker-Token": "test-worker-secret",
-            "X-Aperture-Worker-Id": "worker-b",
-        }
-        try:
-            response = self.client.post("/submit_result", headers=other_worker_headers, json={"task_id": task_id, "output": "nope", "execution_time": 1})
-            self.assertEqual(response.status_code, 409)
-        finally:
-            main.active_tasks_rates.pop(task_id, None)
-            main.claimed_tasks.pop(task_id, None)
+    def test_capability_and_spend_limits_are_enforced(self):
+        self.passport()
+        self.assertEqual(self.quote(agent=self.agent, budget=100001).status_code, 403)
+        self.assertEqual(self.quote(agent=self.agent, runtime=11).status_code, 403)
+        request = {'action': 'register', 'owner': str(self.owner.pubkey()), 'agent_pubkey': str(Keypair().pubkey()), 'expires_at': int(time.time()) + 100, 'capabilities': ['network.execute']}
+        self.assertEqual(self.client.post('/agents/challenge', json=request).status_code, 422)
 
-    def test_cancellation_is_visible_only_to_the_leasing_worker(self):
-        task_id = "task-cancelled"
-        access_token = "cancel-capability"
-        main.active_tasks_rates[task_id] = {"wallet": "wallet", "access_token": access_token}
-        main.claimed_tasks[task_id] = {"task": {"task_id": task_id}, "worker_id": "test-worker-a", "claimed_at": time.time()}
-        try:
-            with patch.object(main.solana_client, "update_burn_rate", new=AsyncMock(return_value="devnet-test-signature")):
-                stopped = self.client.post(f"/stop/{task_id}?access_token={access_token}")
-            self.assertEqual(stopped.status_code, 200)
-            status = self.client.get(f"/worker_task_status/{task_id}", headers=self.worker_headers)
-            self.assertEqual(status.status_code, 200)
-            self.assertTrue(status.json()["cancelled"])
-            other_headers = {"X-Aperture-Worker-Token": "test-worker-secret", "X-Aperture-Worker-Id": "worker-b"}
-            self.assertEqual(self.client.get(f"/worker_task_status/{task_id}", headers=other_headers).status_code, 404)
-        finally:
-            main.active_tasks_rates.pop(task_id, None)
-            main.claimed_tasks.pop(task_id, None)
-            main.cancelled_tasks.pop(task_id, None)
+    def test_agent_expiry_is_checked_after_quote_before_admission(self):
+        self.passport()
+        quote = self.quote(agent=self.agent).json()
+        passport = self.store.get('agents', str(self.agent.pubkey()))
+        self.store.put('agents', str(self.agent.pubkey()), {**passport, 'expires_at': int(time.time()) - 1})
+        self.assertEqual(self.client.post('/execute', json=self.signed_run(quote, self.agent)).status_code, 403)
 
-    def test_completed_artifact_retention_is_bounded(self):
-        original_limit = main.MAX_COMPLETED_TASKS
-        snapshots = [dict(mapping) for mapping in (
-            main.completed_tasks,
-            main.completed_task_access,
-            main.completed_task_times,
-            main.full_logs,
-            main.streamed_logs,
-            main.streamed_log_bytes,
-        )]
-        try:
-            main.MAX_COMPLETED_TASKS = 2
-            for mapping in (main.completed_tasks, main.completed_task_access, main.completed_task_times, main.full_logs, main.streamed_logs, main.streamed_log_bytes):
-                mapping.clear()
-            for task_id in ("task-old", "task-middle", "task-new"):
-                main.store_completed_task(task_id, task_id, task_id, f"cap-{task_id}")
-            self.assertNotIn("task-old", main.completed_tasks)
-            self.assertEqual(set(main.completed_tasks), {"task-middle", "task-new"})
-            self.assertNotIn("task-old", main.full_logs)
-        finally:
-            main.MAX_COMPLETED_TASKS = original_limit
-            for mapping, snapshot in zip(
-                (main.completed_tasks, main.completed_task_access, main.completed_task_times, main.full_logs, main.streamed_logs, main.streamed_log_bytes),
-                snapshots,
-            ):
-                mapping.clear()
-                mapping.update(snapshot)
+    def test_revocation_cancels_queued_job_and_rejects_future_quotes(self):
+        self.passport()
+        admitted = self.admit(agent=self.agent)
+        self.passport(action='revoke')
+        job = self.store.get('jobs', admitted['task_id'])
+        self.assertTrue(job['cancelled'])
+        self.assertEqual(job['state'], 'completed')
+        self.assertEqual(self.quote(agent=self.agent).status_code, 403)
 
+    def test_policy_changes_invalidate_outstanding_quotes(self):
+        self.passport()
+        quote = self.quote(agent=self.agent).json()
+        self.passport(action='update', max_cost_lamports=90000)
+        self.assertEqual(self.client.post('/execute', json=self.signed_run(quote, self.agent)).status_code, 403)
 
-if __name__ == "__main__":
+    def test_agent_lifetime_budget_checks_actual_spend(self):
+        self.passport(total_budget_lamports=100000)
+        passport = self.store.get('agents', str(self.agent.pubkey()))
+        quote = self.quote(agent=self.agent).json()
+        run = self.client.post('/execute', json=self.signed_run(quote, self.agent)).json()
+        task = self.claim()
+        self.core.demo_mode = False
+        self.assertEqual(self.client.post('/submit_result', headers=self.headers, json=self.result(task)).status_code, 200)
+        self.core.demo_mode = True
+        self.assertEqual(self.quote(agent=self.agent, budget=100000).status_code, 403)
+        self.assertEqual(self.quote(agent=self.agent, budget=99000).status_code, 200)
+
+    def test_live_channel_effective_balance_must_cover_maximum(self):
+        self.core.demo_mode = False
+        quote = self.quote().json()
+        self.chain.get_channel_state.return_value = {'balance_lamports': 1000000, 'effective_balance_lamports': 1, 'burn_rate_lamports': 0}
+        self.assertEqual(self.client.post('/execute', json=self.signed_run(quote)).status_code, 409)
+
+    def test_live_delegation_requires_matching_onchain_policy(self):
+        passport, _ = self.passport()
+        self.core.demo_mode = False
+        self.assertEqual(self.quote(agent=self.agent).status_code, 403)
+        self.chain.get_agent_passport.return_value = {'owner': passport['owner'], 'revoked': False, 'valid_until': passport['expires_at'], 'metadata_hash': passport['metadata_hash'], 'max_cost_lamports': passport['max_cost_lamports'], 'max_runtime_seconds': passport['max_runtime_seconds'], 'spent_lamports': 0, 'reserved_lamports': 0, 'total_budget_lamports': passport['total_budget_lamports']}
+        self.assertEqual(self.quote(agent=self.agent).status_code, 200)
+
+    def test_worker_requires_auth_and_stable_registration_before_claim(self):
+        self.assertEqual(self.client.get('/get_task').status_code, 401)
+        headers = {**self.headers, 'X-Aperture-Worker-Id': 'unregistered'}
+        self.assertEqual(self.client.get('/get_task', headers=headers).status_code, 409)
+
+    def test_only_leasing_worker_can_send_results(self):
+        self.admit()
+        task = self.claim()
+        headers = {**self.headers, 'X-Aperture-Worker-Id': 'worker-other'}
+        self.assertEqual(self.client.post('/submit_result', headers=headers, json=self.result(task)).status_code, 404)
+
+    def test_result_checks_hash_signature_and_lease(self):
+        self.admit()
+        task = self.claim()
+        payload = self.result(task)
+        payload['lease_id'] = 'stale'
+        self.assertEqual(self.client.post('/submit_result', headers=self.headers, json=payload).status_code, 409)
+        payload = self.result(task)
+        payload['output_hash'] = '00' * 32
+        self.assertEqual(self.client.post('/submit_result', headers=self.headers, json=payload).status_code, 422)
+        payload = self.result(task)
+        payload['worker_signature'] = base58.b58encode(bytes(64)).decode()
+        self.assertEqual(self.client.post('/submit_result', headers=self.headers, json=payload).status_code, 401)
+
+    def test_result_is_durable_before_settlement_and_reconciles_without_worker(self):
+        self.core.demo_mode = False
+        admitted = self.admit()
+        task = self.claim()
+        self.chain.stop_task.return_value = None
+        response = self.client.post('/submit_result', headers=self.headers, json=self.result(task))
+        self.assertEqual(response.status_code, 202)
+        job = self.store.get('jobs', task['task_id'])
+        self.assertEqual(job['result']['output'], '42\n')
+        self.assertEqual(job['state'], 'settlement_pending')
+        job['next_settlement_attempt'] = 0
+        self.store.save_job(job)
+        self.chain.stop_task.return_value = {'signature': 'retry-confirmed', 'charged_lamports': 1000, 'evidence': 'confirmed_task_receipt'}
+        asyncio.run(self.core.recover_once())
+        self.assertEqual(self.store.get('jobs', task['task_id'])['state'], 'completed')
+
+    def test_canonical_receipt_is_signed_and_worker_attestation_retained(self):
+        admitted = self.admit()
+        task = self.claim()
+        response = self.client.post('/submit_result', headers=self.headers, json=self.result(task))
+        receipt = response.json()
+        self.assertEqual(receipt['source_hash'], sha256_text(task['code']))
+        self.assertEqual(receipt['output_hash'], sha256_text('42\n'))
+        VerifyKey(base58.b58decode(receipt['gateway_pubkey'])).verify(receipt['signed_message'].encode(), bytes(receipt['gateway_signature']))
+        signed_fields = json.loads(receipt['signed_message'].split('\n', 1)[1])
+        for key, value in signed_fields.items():
+            self.assertEqual(receipt[key], value)
+        self.assertEqual(receipt['settlement_type'], 'OFF_CHAIN')
+        self.assertIsNone(receipt['charged_lamports'])
+        self.assertIn('worker_signature', receipt)
+
+    def test_result_duplicates_are_idempotent_and_different_result_rejected(self):
+        self.admit()
+        task = self.claim()
+        payload = self.result(task)
+        first = self.client.post('/submit_result', headers=self.headers, json=payload).json()
+        second = self.client.post('/submit_result', headers=self.headers, json=payload).json()
+        self.assertEqual(first['receipt_sha256'], second['receipt_sha256'])
+        self.assertEqual(self.client.post('/submit_result', headers=self.headers, json=self.result(task, output='other')).status_code, 409)
+
+    def test_private_results_require_capability(self):
+        admitted = self.admit()
+        for route in ('result', 'stream_log', 'download', 'receipt'):
+            self.assertEqual(self.client.get(f"/{route}/{admitted['task_id']}").status_code, 404)
+            self.assertEqual(self.client.get(f"/{route}/{admitted['task_id']}?access_token=wrong").status_code, 404)
+        self.assertEqual(self.client.get(f"/result/{admitted['task_id']}?access_token={admitted['task_access_token']}").status_code, 200)
+
+    def test_independent_deadline_recovery_does_not_reexecute(self):
+        self.admit()
+        task = self.claim()
+        job = self.store.get('jobs', task['task_id'])
+        job['deadline_unix'] = time.time() - 1
+        self.store.save_job(job)
+        asyncio.run(self.core.recover_once())
+        self.assertEqual(self.store.get('jobs', task['task_id'])['receipt']['execution_status'], 'failed')
+        self.assertIsNone(self.claim()['task_id'])
+
+    def test_cancelled_worker_outbox_receives_terminal_ack(self):
+        admitted = self.admit()
+        task = self.claim()
+        self.client.post(f"/stop/{task['task_id']}", params={'access_token': admitted['task_access_token']})
+        result = self.client.post('/submit_result', headers=self.headers, json=self.result(task))
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()['execution_status'], 'cancelled')
+
+    def test_start_intent_is_persisted_before_broadcast(self):
+        self.core.demo_mode = False
+        self.admit()
+        async def send(prepared):
+            job = self.store.list('jobs')[0]
+            self.assertEqual(job['state'], 'starting')
+            self.assertEqual(job['prepared_start'], prepared)
+            return 'start-confirmed'
+        self.chain.send_prepared_start.side_effect = send
+        self.claim()
+
+    def test_restart_fails_closed_without_duplicate_execution(self):
+        self.admit()
+        task = self.claim()
+        asyncio.run(self.core.recover_once(restart=True))
+        self.assertEqual(self.store.get('jobs', task['task_id'])['state'], 'completed')
+        self.assertTrue(self.store.get('jobs', task['task_id'])['cancelled'])
+        self.assertIsNone(self.claim()['task_id'])
+
+class DurableStoreTests(unittest.TestCase):
+    def test_reopen_preserves_receipt_nonce_and_wallet_reservation(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'gateway.sqlite3'
+            store = StateStore(path)
+            store.put('quotes', 'quote', {'quote_id': 'quote'})
+            store.admit('quote', {'task_id': 'task', 'wallet': 'owner', 'state': 'running', 'receipt': {'source_hash': 'source'}}, 10)
+            store.close()
+            restored = StateStore(path)
+            self.assertEqual(restored.get('jobs', 'task')['receipt']['source_hash'], 'source')
+            with self.assertRaises(ValueError):
+                restored.admit('quote', {'task_id': 'other', 'wallet': 'owner', 'state': 'queued'}, 10)
+            restored.close()
+
+    def test_clean_clone_required_auth_module_is_not_ignored(self):
+        import subprocess
+        root = Path(__file__).resolve().parent.parent
+        response = subprocess.run(['git', 'check-ignore', '--no-index', 'backend/task_auth.py'], cwd=root, capture_output=True, text=True)
+        self.assertEqual(response.returncode, 1, response.stdout)
+        self.assertTrue((root / 'backend' / 'task_auth.py').exists())
+
+if __name__ == '__main__':
     unittest.main()

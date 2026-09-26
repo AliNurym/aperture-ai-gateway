@@ -123,7 +123,7 @@ class CodeComplexityVisitor(ast.NodeVisitor):
     # A deny-list alone is not a sandbox: newly discovered stdlib modules and
     # indirect imports would otherwise execute on a worker. Keep workloads
     # intentionally small and deterministic until they run in containers.
-    ALLOWED_MODULES = {"math", "random", "time", "hashlib", "statistics", "decimal", "fractions"}
+    ALLOWED_MODULES = {"math", "random", "time", "hashlib", "statistics", "decimal", "fractions", "json"}
 
     def __init__(self):
         self.security_violations = []

@@ -5,7 +5,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . ./
-RUN useradd --create-home --uid 10001 aperture && chown -R aperture:aperture /app
+RUN useradd --create-home --uid 10001 aperture && mkdir -p /var/lib/aperture && chown -R aperture:aperture /app /var/lib/aperture
 USER aperture
 
 EXPOSE 8000

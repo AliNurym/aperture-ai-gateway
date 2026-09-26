@@ -1,311 +1,69 @@
+"""Aperture gateway: bounded execution, KYA delegation, durable receipts."""
 import os
-import sys
-import uuid
-import secrets
 import time
-import asyncio
-import hmac
-import math
-import base58
-import requests
-from dotenv import load_dotenv
-
-if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-        sys.stderr.reconfigure(encoding='utf-8')
-    except Exception:
-        pass
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, JSONResponse
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, List
 from contextlib import asynccontextmanager
-from nacl.signing import VerifyKey
-from nacl.exceptions import BadSignatureError
-
-from ai_engine import analyze_code_ast, analyze_code_complexity, get_sol_price_from_pyth
+from typing import Optional
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from ai_engine import analyze_code_ast, get_sol_price_from_pyth
 from solana_client import KEYPAIR_PATH, SolanaClient
-from task_auth import execution_message
+from gateway import Gateway
 
 load_dotenv()
-
 APP_ENV = os.getenv("APERTURE_ENV", "development").lower()
 DEMO_MODE = os.getenv("APERTURE_DEMO_MODE", "false").lower() == "true"
 WORKER_TOKEN = os.getenv("APERTURE_WORKER_TOKEN", "")
-HELIUS_API_KEY = os.getenv("HELIUS_API_KEY", "")
-HELIUS_URL = f"https://devnet.helius-rpc.com/?api-key={HELIUS_API_KEY}" if HELIUS_API_KEY else None
 CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if origin.strip()]
-MAX_PENDING_TASKS = int(os.getenv("APERTURE_MAX_PENDING_TASKS", "100"))
-MAX_STREAM_LINES_PER_TASK = int(os.getenv("APERTURE_MAX_STREAM_LINES_PER_TASK", "10_000"))
-MAX_LOG_BYTES_PER_TASK = int(os.getenv("APERTURE_MAX_LOG_BYTES_PER_TASK", "1_000_000"))
-TASK_LEASE_SECONDS = int(os.getenv("APERTURE_TASK_LEASE_SECONDS", "210"))
-MAX_COMPLETED_TASKS = max(1, int(os.getenv("APERTURE_MAX_COMPLETED_TASKS", "1000")))
-EXECUTE_RATE_LIMIT = max(1, int(os.getenv("APERTURE_EXECUTE_RATE_LIMIT", "10")))
-FAUCET_RATE_LIMIT = max(1, int(os.getenv("APERTURE_FAUCET_RATE_LIMIT", "3")))
-RATE_LIMIT_WINDOW_SECONDS = max(1, int(os.getenv("APERTURE_RATE_LIMIT_WINDOW_SECONDS", "60")))
-AUTH_CHALLENGE_TTL_SECONDS = max(15, min(300, int(os.getenv("APERTURE_AUTH_CHALLENGE_TTL_SECONDS", "90"))))
-READINESS_CACHE_SECONDS = 15
-
-
-def worker_token_is_configured(token: str) -> bool:
-    """Reject empty/example credentials instead of treating documentation as a secret."""
-    normalized = (token or "").strip().lower()
-    return len(token or "") >= 16 and normalized not in {
-        "replace-with-a-long-random-secret",
-        "change-me",
-        "example-token",
-    }
-
-
-def require_worker(
-    x_aperture_worker_token: Optional[str] = Header(default=None),
-    x_aperture_worker_id: Optional[str] = Header(default=None),
-) -> str:
-    """Authenticate a named worker before it can claim or mutate a task."""
-    if not worker_token_is_configured(WORKER_TOKEN):
-        raise HTTPException(status_code=503, detail="Worker authentication is not configured.")
-    if not x_aperture_worker_token or not hmac.compare_digest(x_aperture_worker_token, WORKER_TOKEN):
-        raise HTTPException(status_code=401, detail="Invalid worker credentials.")
-    if not x_aperture_worker_id or len(x_aperture_worker_id) > 64:
-        raise HTTPException(status_code=401, detail="Worker identity is required.")
-    return x_aperture_worker_id
-
-
-def require_task_access(task_id: str, access_token: Optional[str]) -> None:
-    """Task URLs are bearer-capability URLs, not public task-status feeds."""
-    task = active_tasks_rates.get(task_id)
-    expected = task.get("access_token") if task else None
-    if not expected:
-        # Completed tasks retain their capability separately for the result/log
-        # endpoints; unknown IDs must not be distinguishable from forbidden ones.
-        expected = completed_task_access.get(task_id)
-    if not access_token or not expected or not hmac.compare_digest(access_token, expected):
-        raise HTTPException(status_code=404, detail="Task not found.")
-
-
-def verify_signature(public_key_str: str, signature_bytes: list, message_str: str) -> bool:
-    """Verifies an Ed25519 wallet signature. Demo bypasses are opt-in only."""
-    if not public_key_str:
-        return False
-
-    if DEMO_MODE and public_key_str.startswith("DEMO_") and signature_bytes == [0] * 64:
-        print(f"[DEMO] Explicit demo authentication for {public_key_str[:12]}")
-        return True
-
-    try:
-        public_key_bytes = base58.b58decode(public_key_str)
-        if len(public_key_bytes) != 32:
-            return False
-        verify_key = VerifyKey(public_key_bytes)
-        sig_bytes = bytes(signature_bytes)
-        msg_bytes = message_str.encode("utf-8")
-        verify_key.verify(msg_bytes, sig_bytes)
-        return True
-    except (BadSignatureError, ValueError, TypeError) as e:
-        print(f"[!] Web3 authentication rejected ({public_key_str[:8]}...): {e}")
-        return False
-
-
-def mint_compute_receipt(wallet: str, task_id: str, duration: float, cost: float, ai_verdict: str) -> Optional[str]:
-    """
-    Attempts a Helius compressed-NFT receipt mint on Devnet.
-    Returns its confirmed transaction signature, or None when minting is unavailable.
-    """
-    if not HELIUS_URL:
-        return None
-    print(f"[🛠️] Minting compute receipt for {wallet} (Task: {task_id})...")
-    payload = {
-        "jsonrpc": "2.0",
-        "id": "aperture-mint",
-        "method": "mintCompressedNft",
-        "params": {
-            "name": f"Aperture Task {task_id[-6:].upper()}",
-            "symbol": "APRT",
-            "owner": wallet if len(wallet) >= 32 and not wallet.startswith("DEMO_") else "C2q9yxux7b7bxFF64pkZUV6g2Vcs2bQ1FS4GUQy512wv",
-            "description": f"Aperture AI Compute Receipt. Verdict: {ai_verdict}",
-            "attributes": [
-                {"trait_type": "Duration", "value": f"{duration:.2f}s"},
-                {"trait_type": "Cost_SOL", "value": f"{cost:.8f} SOL"},
-                {"trait_type": "Task_ID", "value": task_id},
-                {"trait_type": "Network", "value": "Solana Devnet"},
-                {"trait_type": "Validator", "value": "Aperture AI Sentinel"}
-            ],
-            "imageUrl": "https://raw.githubusercontent.com/solana-foundation/press-kit/main/Solana_Logo_Symbol_Gradient.png",
-            "externalUrl": "https://github.com/AliNurym/aperture-ai-gateway"
-        }
-    }
-    try:
-        response = requests.post(HELIUS_URL, json=payload, timeout=5)
-        res_data = response.json()
-        if "result" in res_data and "signature" in res_data["result"]:
-            tx_sig = res_data['result']['signature']
-            print(f"[⛓️] COMPRESSED NFT RECEIPT MINTED: {tx_sig}")
-            return tx_sig
-    except Exception as e:
-        print(f"[!] Helius compressed NFT notice: {e}")
-
-    return None
-
-
-# Global statistics tracker
-grid_stats = {
-    "tasks_completed": 0,
-    "total_compute_seconds": 0.0,
-    "total_sol_burned": 0.0,
-    "threats_blocked": 0,
-    "start_time": time.time()
-}
-
-# In-memory grid state
-nodes: Dict[str, dict] = {}
-pending_tasks: List[dict] = []
-claimed_tasks: Dict[str, dict] = {}
-completed_tasks: Dict[str, str] = {}
-completed_task_access: Dict[str, str] = {}
-completed_task_times: Dict[str, float] = {}
-completed_receipts: Dict[str, dict] = {}
-full_logs: Dict[str, str] = {}
-active_tasks_rates: Dict[str, dict] = {}
-streamed_logs: Dict[str, List[str]] = {}
-streamed_log_bytes: Dict[str, int] = {}
-request_rate_buckets: Dict[str, List[float]] = {}
-execution_challenges: Dict[str, dict] = {}
-# Cancellation is retained until the leased worker observes it (or its lease
-# expires). Removing the lease immediately would prevent authenticated polling.
-cancelled_tasks: Dict[str, float] = {}
-execution_admission_lock = asyncio.Lock()
-task_settlement_lock = asyncio.Lock()
-readiness_check_lock = asyncio.Lock()
-readiness_cache = {"checked_at": 0.0, "protocol_config_initialized": False}
-
 solana_client = SolanaClient()
+gateway = Gateway(solana_client, DEMO_MODE, WORKER_TOKEN)
+require_worker = gateway.require_worker
+nodes = {}
+request_rate_buckets = {}
+grid_stats = {"tasks_completed": 0, "total_compute_seconds": 0.0, "total_sol_burned": 0.0, "threats_blocked": 0, "start_time": time.time()}
 
+def worker_token_is_configured(token):
+    return len(token or "") >= 16 and (token or "").strip().lower() not in {"replace-with-a-long-random-secret", "change-me", "example-token"}
 
-async def requeue_expired_tasks() -> None:
-    """Fail closed on a dead worker lease: stop billing; never duplicate work."""
+def enforce_rate_limit(scope, client_id, limit):
     now = time.time()
-    expired = [task_id for task_id, claim in claimed_tasks.items() if now - claim["claimed_at"] > TASK_LEASE_SECONDS]
-    for task_id in expired:
-        async with task_settlement_lock:
-            claim = claimed_tasks.get(task_id)
-            info = active_tasks_rates.get(task_id)
-            if not info:
-                claimed_tasks.pop(task_id, None)
-                cancelled_tasks.pop(task_id, None)
-                continue
-            stop_sig = await solana_client.update_burn_rate(user_pubkey_str=info["wallet"], new_rate_lamports=0)
-            if not stop_sig and not DEMO_MODE:
-                print(f"[QUEUE] Could not stop billing for expired task {task_id}; will retry on the next queue poll.")
-                continue
-
-            active_tasks_rates.pop(task_id, None)
-            claimed_tasks.pop(task_id, None)
-            cancelled_tasks.pop(task_id, None)
-            proof_url = f"https://explorer.solana.com/tx/{stop_sig}?cluster=devnet" if stop_sig else None
-            receipt = {
-                "status": "saved",
-                "task_id": task_id,
-                "execution_status": "failed",
-                "exit_code": None,
-                "worker_id": claim.get("worker_id") if claim else None,
-                "settlement_type": "DEVNET" if stop_sig else "OFF_CHAIN",
-                "receipt_signature": None,
-                "explorer_url": proof_url,
-            }
-            store_completed_task(task_id, "EXECUTION_LEASE_EXPIRED", "EXECUTION_LEASE_EXPIRED", info["access_token"], receipt)
-            print(f"[QUEUE] Expired worker lease for {task_id}; billing stopped ({stop_sig}).")
-
-
-def store_completed_task(task_id: str, output: str, full_log: str, access_token: str, receipt: Optional[dict] = None) -> None:
-    """Keep completed task evidence bounded in memory until durable storage exists."""
-    while len(completed_tasks) >= MAX_COMPLETED_TASKS:
-        oldest_task_id = next(iter(completed_tasks))
-        completed_tasks.pop(oldest_task_id, None)
-        completed_task_access.pop(oldest_task_id, None)
-        completed_task_times.pop(oldest_task_id, None)
-        completed_receipts.pop(oldest_task_id, None)
-        full_logs.pop(oldest_task_id, None)
-        streamed_logs.pop(oldest_task_id, None)
-        streamed_log_bytes.pop(oldest_task_id, None)
-    completed_tasks[task_id] = output
-    completed_task_access[task_id] = access_token
-    completed_task_times[task_id] = time.time()
-    full_logs[task_id] = full_log
-    completed_receipts[task_id] = receipt or {
-        "execution_status": "cancelled" if output == "EXECUTION_ABORTED_BY_USER" else "failed" if output == "EXECUTION_LEASE_EXPIRED" else "completed",
-        "settlement_type": "UNKNOWN",
-    }
-
-
-def enforce_rate_limit(scope: str, client_id: str, limit: int) -> None:
-    """Small in-process abuse guard; use a shared proxy/store for multi-instance production."""
-    now = time.time()
-    bucket_key = f"{scope}:{client_id}"
-    recent = [seen_at for seen_at in request_rate_buckets.get(bucket_key, []) if now - seen_at < RATE_LIMIT_WINDOW_SECONDS]
+    key = f"{scope}:{client_id}"
+    recent = [item for item in request_rate_buckets.get(key, []) if now - item < 60]
     if len(recent) >= limit:
-        raise HTTPException(status_code=429, detail="Rate limit exceeded. Retry shortly.")
-    recent.append(now)
-    request_rate_buckets[bucket_key] = recent
+        raise HTTPException(429, "Rate limit exceeded. Retry shortly.")
+    request_rate_buckets[key] = recent + [now]
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("🟢 Aperture Compute Gateway: Systems Online.")
-    print("🛰️ Source-policy analyzer ready; SOL reference prices are fetched on demand.")
-
+async def lifespan(app):
+    await gateway.start()
     yield
+    await gateway.close()
     await solana_client.close()
-    print("🛑 Aperture AI Oracle: Systems Offline.")
 
-
-app = FastAPI(
-    title="Aperture Compute Gateway",
-    description="Routes wallet-authorized Python workloads to workers and meters live usage through Solana payment channels.",
-    version="1.0.0",
-    lifespan=lifespan
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
+app = FastAPI(title="Aperture Compute Gateway", version="2.0.0", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
 
 @app.middleware("http")
-async def add_security_headers(request, call_next):
+async def security_and_admission(request, call_next):
+    if request.method == "POST" and request.url.path in {"/quotes", "/execute/challenge", "/execute", "/agents/challenge", "/agents", "/analyze"}:
+        try:
+            enforce_rate_limit(request.url.path, request.client.host if request.client else "unknown", 30)
+        except HTTPException as error:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=error.status_code, content={"detail": error.detail})
     response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Cache-Control"] = "no-store"
+    response.headers.update({"X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store"})
     return response
 
-
-class RunRequest(BaseModel):
-    code: str = Field(min_length=1, max_length=32_000)
-    wallet: str = Field(min_length=1, max_length=44)
-    signature: Optional[List[int]] = Field(default=None, min_length=64, max_length=64)
-    message: Optional[str] = Field(default=None, max_length=512)
-    authorization_nonce: str = Field(min_length=16, max_length=128)
-    authorization_expires_at: int = Field(ge=1)
-    guest_id: Optional[str] = "guest"
-
-
-class ExecutionChallengeRequest(BaseModel):
-    code: str = Field(min_length=1, max_length=32_000)
-    wallet: str = Field(min_length=1, max_length=44)
-
+app.include_router(gateway.router)
 
 class AnalyzeRequest(BaseModel):
     code: str = Field(min_length=1, max_length=32_000)
 
-
 class NodeInfo(BaseModel):
     node_id: str = Field(min_length=1, max_length=64)
+    worker_pubkey: str = Field(min_length=32, max_length=44)
     gpu_name: str = Field(min_length=1, max_length=128)
     vram_total: float = Field(ge=0, le=1_000)
     vram_used: Optional[float] = Field(default=None, ge=0, le=1_000)
@@ -313,565 +71,78 @@ class NodeInfo(BaseModel):
     gpu_util: Optional[int] = Field(default=None, ge=0, le=100)
     power_watts: Optional[float] = Field(default=None, ge=0, le=10_000)
     tflops: Optional[float] = Field(default=None, ge=0, le=100_000)
-    status: Optional[str] = Field(default="ONLINE", max_length=32)
-
-
-class StreamChunk(BaseModel):
-    task_id: str
-    lines: List[str]
-    node_id: Optional[str] = None
-
+    status: str = Field(default="ONLINE", max_length=32)
+    execution_mode: str = Field(default="unknown", max_length=32)
 
 class AirdropRequest(BaseModel):
     wallet: str = Field(min_length=32, max_length=44)
-    amount_sol: Optional[float] = Field(default=1.0, gt=0, le=2.0)
-
+    amount_sol: float = Field(default=1.0, gt=0, le=2.0)
 
 @app.get("/")
 def root():
-    return {
-        "protocol": "Aperture Compute",
-        "description": "Prototype gateway for wallet-authorized Python tasks, worker execution, and Solana payment-channel billing.",
-        "version": "1.0.0",
-        "network": "Solana Devnet",
-        "status": "online"
-    }
-
+    return {"protocol": "Aperture Compute", "version": "2.0.0", "status": "online", "network": "Solana Devnet", "demo_mode": DEMO_MODE}
 
 @app.get("/health")
 async def health():
-    """Report whether the configured worker and live payment path are ready."""
     signer_configured = bool(os.getenv("BACKEND_PRIVATE_KEY")) or KEYPAIR_PATH.exists()
-    protocol_config_initialized: Optional[bool] = None
-    if not DEMO_MODE:
-        async with readiness_check_lock:
-            now = time.time()
-            if now - readiness_cache["checked_at"] >= READINESS_CACHE_SECONDS:
-                initialized = False
-                if worker_token_is_configured(WORKER_TOKEN) and signer_configured:
-                    try:
-                        initialized = await solana_client.get_protocol_config() is not None
-                    except Exception as e:
-                        print(f"[HEALTH] Live protocol configuration is not ready: {e}")
-                readiness_cache.update({
-                    "checked_at": now,
-                    "protocol_config_initialized": initialized,
-                })
-            protocol_config_initialized = readiness_cache["protocol_config_initialized"]
-
-    ready = worker_token_is_configured(WORKER_TOKEN) and (
-        DEMO_MODE or (signer_configured and protocol_config_initialized is True)
-    )
-    return {
-        "status": "ready" if ready else "configuration_required",
-        "environment": APP_ENV,
-        "demo_mode": DEMO_MODE,
-        "worker_auth_configured": worker_token_is_configured(WORKER_TOKEN),
-        "oracle_signer_configured": signer_configured,
-        "protocol_config_initialized": protocol_config_initialized,
-    }
-
-
-@app.get("/price")
-def get_sol_price():
-    """Returns a recent SOL/USD reference price, or null when feeds are unavailable."""
-    price = get_sol_price_from_pyth()
-    return {"price": price, "source": "Pyth Network Hermes / Binance Oracle"}
-
-
-@app.get("/balance/{wallet_address}")
-async def get_balance(wallet_address: str):
-    """Reads on-chain locked fuel balance directly from user's PDA channel."""
-    try:
-        channel_state = await solana_client.get_channel_state(wallet_address)
-        balance_lamports = channel_state["balance_lamports"] if channel_state else 0
-        balance_sol = balance_lamports / 1_000_000_000
-        return {
-            "wallet": wallet_address,
-            "lamports": balance_lamports,
-            "balance": round(balance_sol, 8),
-            "initialized": channel_state is not None,
-            "burn_rate_lamports": channel_state["burn_rate_lamports"] if channel_state else 0,
-            "status": "on_chain" if channel_state else "channel_not_opened"
-        }
-    except Exception as e:
-        print(f"🔴 Error reading on-chain balance: {e}")
-        return {"balance": 0.0, "lamports": 0, "initialized": False, "status": "error"}
-
-
-@app.get("/channel-config")
-async def get_channel_config():
-    """Returns public protocol account addresses needed by the wallet client."""
-    try:
-        config = await solana_client.get_protocol_config()
-        config_pda, _bump = solana_client.get_config_pda()
-        return {
-            "initialized": config is not None,
-            "program_id": str(solana_client.program_id),
-            "config_pda": str(config_pda),
-            "oracle": str(config["oracle"]) if config else None,
-            "treasury": str(config["treasury"]) if config else None,
-        }
-    except Exception as e:
-        print(f"🔴 Error reading protocol config: {e}")
-        raise HTTPException(status_code=503, detail="Protocol configuration is unavailable or incompatible.")
-
-
-@app.post("/execute/challenge")
-def issue_execution_challenge(req: ExecutionChallengeRequest, request: Request):
-    """Issue a one-time, short-lived wallet-signature challenge for this code."""
-    client_id = request.client.host if request.client else "unknown"
-    enforce_rate_limit("challenge", client_id, EXECUTE_RATE_LIMIT)
-    now = int(time.time())
-    expired = [nonce for nonce, item in execution_challenges.items() if item["expires_at"] < now]
-    for nonce in expired:
-        execution_challenges.pop(nonce, None)
-    nonce = secrets.token_urlsafe(32)
-    expires_at = now + AUTH_CHALLENGE_TTL_SECONDS
-    execution_challenges[nonce] = {"wallet": req.wallet, "code": req.code, "expires_at": expires_at}
-    return {
-        "nonce": nonce,
-        "expires_at": expires_at,
-        "message": execution_message(req.wallet, req.code, nonce, expires_at),
-    }
-
+    config = None
+    if not DEMO_MODE and worker_token_is_configured(WORKER_TOKEN) and signer_configured:
+        try:
+            config = await solana_client.get_protocol_config()
+        except Exception:
+            pass
+    ready = worker_token_is_configured(WORKER_TOKEN) and (DEMO_MODE or config is not None)
+    return {"status": "ready" if ready else "configuration_required", "environment": APP_ENV,
+            "demo_mode": DEMO_MODE, "worker_auth_configured": worker_token_is_configured(WORKER_TOKEN),
+            "oracle_signer_configured": signer_configured, "protocol_config_initialized": bool(config) if not DEMO_MODE else None,
+            "protocol_version": 2, "durable_state": True, "kya": "owner-issued delegation; not legal KYC", "execution_scope": "bounded Python CPU"}
 
 @app.post("/analyze")
-def analyze_workload(req: AnalyzeRequest, request: Request):
-    """Run the deterministic source-policy preview without signing or dispatching a task."""
-    client_id = request.client.host if request.client else "unknown"
-    enforce_rate_limit("analyze", client_id, 30)
+def analyze(req: AnalyzeRequest):
     return analyze_code_ast(req.code)
 
+@app.get("/price")
+def price():
+    return {"price": get_sol_price_from_pyth(), "source": "Pyth/Binance reference; not settlement authority"}
 
-@app.post("/execute")
-async def execute_code(req: RunRequest, request: Request):
-    """
-    Primary Gateway Endpoint:
-    1. Authenticates wallet
-    2. Runs AI-Sentinel Pre-Execution Audit (AST security & complexity)
-    3. Blocks malicious code immediately
-    4. Calculates dynamic burn rate (Lamports/sec)
-    5. Confirms channel readiness without starting billing
-    6. Queues the task for an authenticated worker to claim
-    """
-    client_id = request.client.host if request.client else "unknown"
-    enforce_rate_limit("execute", client_id, EXECUTE_RATE_LIMIT)
-    sig = req.signature or [0] * 64
-    msg = req.message or ""
-    challenge = execution_challenges.get(req.authorization_nonce)
-    expected_message = execution_message(req.wallet, req.code, req.authorization_nonce, req.authorization_expires_at)
-    now = int(time.time())
-    if (
-        not challenge
-        or challenge["expires_at"] != req.authorization_expires_at
-        or challenge["expires_at"] < now
-        or challenge["wallet"] != req.wallet
-        or challenge["code"] != req.code
-    ):
-        raise HTTPException(status_code=401, detail="Execution authorization is expired or already used.")
-    if not hmac.compare_digest(msg, expected_message):
-        raise HTTPException(status_code=401, detail="Signature message does not match this workload.")
-
-    if not verify_signature(req.wallet, sig, msg):
-        raise HTTPException(status_code=401, detail="Invalid Web3 Wallet Signature.")
-
-    # 🧠 AI-SENTINEL PRE-EXECUTION AUDIT
-    ai_result = analyze_code_complexity(req.code)
-
-    if ai_result.get("security") == "DANGEROUS":
-        grid_stats["threats_blocked"] += 1
-        reason = ai_result.get("reason", "Malicious code detected.")
-        print(f"\n[🚨 AI SENTINEL BLOCKED MALICIOUS CODE from {req.wallet[:8]}]")
-        print(f"Reason: {reason}\n")
-        return JSONResponse(
-            status_code=403,
-            content={
-                "status": "blocked",
-                "security": "DANGEROUS",
-                "detail": f"AI Sentinel Security Alert: {reason}",
-                "scores": ai_result.get("scores", {}),
-                "reason": reason
-            }
-        )
-
-    complexity = ai_result.get("complexity_score", 30)
-    burn_rate_sol = ai_result.get("calculated_rate_sol_sec", 0.00000150)
-    burn_rate_lamports = int(burn_rate_sol * 1_000_000_000)
-    reason = ai_result.get("scores", {}).get("reason", "Algorithmic compute payload verified.")
-
-    print("\n" + "="*55)
-    print(f"🧠 [AI SENTINEL AUDIT PASSED]: {req.wallet[:12]}...")
-    print(f"📊 [COMPLEXITY]: {complexity}/100 | Predicted Time: {ai_result.get('predicted_sec', 3)}s")
-    print(f"🔥 [DYNAMIC BURN RATE]: {burn_rate_sol:.8f} SOL/sec ({burn_rate_lamports} lamports/sec)")
-    print(f"📝 [VERDICT]: {reason}")
-    print("="*55 + "\n")
-
-    async with execution_admission_lock:
-        # Recheck and consume under one lock: parallel replays cannot both pass
-        # the one-time challenge check while waiting for the chain RPC.
-        challenge = execution_challenges.get(req.authorization_nonce)
-        if (
-            not challenge
-            or challenge["expires_at"] != req.authorization_expires_at
-            or challenge["expires_at"] < int(time.time())
-            or challenge["wallet"] != req.wallet
-            or challenge["code"] != req.code
-        ):
-            raise HTTPException(status_code=401, detail="Execution authorization is expired or already used.")
-        if len(pending_tasks) >= MAX_PENDING_TASKS:
-            raise HTTPException(status_code=429, detail="Compute queue is full. Retry shortly.")
-        if any(task.get("wallet") == req.wallet for task in active_tasks_rates.values()):
-            raise HTTPException(status_code=409, detail="This payment channel already has an active task.")
-
-        starting_balance = None
-        if not DEMO_MODE:
-            try:
-                channel_state = await solana_client.get_channel_state(req.wallet)
-            except Exception as e:
-                print(f"🔴 Could not read payment channel before dispatch: {e}")
-                raise HTTPException(status_code=503, detail="Payment channel could not be verified.")
-            if not channel_state or channel_state["balance_lamports"] <= 0:
-                raise HTTPException(status_code=409, detail="Open and fund a payment channel before execution.")
-
-        # 128-bit opaque IDs make task log/result URLs non-guessable.
-        task_id = f"task-{uuid.uuid4().hex}"
-        task_access_token = secrets.token_urlsafe(32)
-        execution_challenges.pop(req.authorization_nonce, None)
-
-        active_tasks_rates[task_id] = {
-            "wallet": req.wallet,
-            "rate_sol": burn_rate_sol,
-            "rate_lamports": burn_rate_lamports,
-            "start_time": None,
-            "starting_balance_lamports": starting_balance,
-            "proof": None,
-            "ai_verdict": reason,
-            "complexity": complexity,
-            "access_token": task_access_token,
-        }
-        pending_tasks.append({"task_id": task_id, "code": req.code, "wallet": req.wallet})
-
-    return {
-        "status": "queued",
-        "task_id": task_id,
-        "burn_rate": burn_rate_sol,
-        "burn_rate_lamports": burn_rate_lamports,
-        "complexity_score": complexity,
-        "ai_analysis": ai_result,
-        "on_chain_proof": None,
-        "tx_sig": None,
-        "task_access_token": task_access_token,
-        "sol_market_price": ai_result.get("sol_market_price")
-    }
-
-
-@app.post("/submit_result")
-async def submit_result(payload: dict, worker_id: str = Depends(require_worker)):
-    """Execution Worker submits telemetry and stdout output upon task completion."""
-    task_id = payload.get("task_id")
-    output = payload.get("output", "")
-    full_log_data = payload.get("full_log", output)
-    exit_code = payload.get("exit_code", 0)
-    if type(exit_code) is not int:
-        raise HTTPException(status_code=422, detail="Exit code must be an integer.")
+@app.get("/balance/{wallet_address}")
+async def balance(wallet_address: str):
     try:
-        execution_time = float(payload.get("execution_time", 0.0))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="Execution time must be numeric.")
+        state = await solana_client.get_channel_state(wallet_address)
+        lamports = state.get("effective_balance_lamports", state["balance_lamports"]) if state else 0
+        return {"wallet": wallet_address, "lamports": lamports, "balance": lamports / 1e9,
+                "initialized": state is not None, "burn_rate_lamports": state["burn_rate_lamports"] if state else 0,
+                "status": "on_chain" if state else "channel_not_opened", "task_deadline": state.get("task_deadline") if state else None}
+    except Exception:
+        raise HTTPException(503, "Compatible payment channel state is unavailable.")
 
-    if not task_id or task_id not in active_tasks_rates:
-        raise HTTPException(status_code=404, detail="Unknown or already-settled task.")
-    claim = claimed_tasks.get(task_id)
-    if not claim or claim["worker_id"] != worker_id:
-        raise HTTPException(status_code=409, detail="Task is not leased to this worker.")
-    if task_id in cancelled_tasks:
-        claimed_tasks.pop(task_id, None)
-        cancelled_tasks.pop(task_id, None)
-        raise HTTPException(status_code=409, detail="Task was cancelled by its submitter.")
-    if not math.isfinite(execution_time) or execution_time < 0 or execution_time > 180:
-        raise HTTPException(status_code=422, detail="Execution time is outside the permitted range.")
-    if not isinstance(output, str) or not isinstance(full_log_data, str):
-        raise HTTPException(status_code=422, detail="Task output must be text.")
-    if max(len(output.encode("utf-8", errors="replace")), len(full_log_data.encode("utf-8", errors="replace"))) > MAX_LOG_BYTES_PER_TASK:
-        raise HTTPException(status_code=413, detail="Task output exceeds the configured limit.")
-
-    async with task_settlement_lock:
-        info = active_tasks_rates.get(task_id)
-        claim = claimed_tasks.get(task_id)
-        if not info:
-            raise HTTPException(status_code=404, detail="Unknown or already-settled task.")
-        if not claim or claim["worker_id"] != worker_id:
-            raise HTTPException(status_code=409, detail="Task is not leased to this worker.")
-        if task_id in cancelled_tasks:
-            raise HTTPException(status_code=409, detail="Task was cancelled by its submitter.")
-
-        # Keep the active record and worker lease until the reset is confirmed.
-        # A transient RPC failure can then be retried without losing billing state.
-        stop_sig = await solana_client.update_burn_rate(user_pubkey_str=info["wallet"], new_rate_lamports=0)
-        if not stop_sig and not DEMO_MODE:
-            raise HTTPException(status_code=503, detail="Could not confirm payment-channel settlement; worker may retry.")
-
-        final_cost = None
-        exact_cost = False
-        if info.get("starting_balance_lamports") is not None:
-            try:
-                final_state = await solana_client.get_channel_state(info["wallet"])
-                if final_state:
-                    spent_lamports = max(0, info["starting_balance_lamports"] - final_state["balance_lamports"])
-                    final_cost = round(spent_lamports / 1_000_000_000, 9)
-                    exact_cost = True
-            except Exception as e:
-                print(f"[SETTLEMENT] Balance read failed after confirmed reset for {task_id}: {e}")
-
-        receipt_sig = None
-        if stop_sig:
-            receipt_sig = mint_compute_receipt(
-                wallet=info["wallet"],
-                task_id=task_id,
-                duration=execution_time,
-                cost=final_cost if final_cost is not None else 0.0,
-                ai_verdict=info["ai_verdict"]
-            )
-
-        proof_signature = receipt_sig or stop_sig
-        explorer_url = f"https://explorer.solana.com/tx/{proof_signature}?cluster=devnet" if proof_signature else None
-        receipt = {
-            "status": "saved",
-            "task_id": task_id,
-            "execution_status": "completed" if exit_code == 0 else "failed",
-            "exit_code": exit_code,
-            "worker_id": worker_id,
-            "execution_time": execution_time,
-            "cost_sol": final_cost,
-            "cost_is_exact": exact_cost,
-            "settlement_type": "DEVNET" if stop_sig else "OFF_CHAIN",
-            "receipt_signature": receipt_sig,
-            "explorer_url": explorer_url
-        }
-        active_tasks_rates.pop(task_id, None)
-        claimed_tasks.pop(task_id, None)
-        store_completed_task(task_id, output, full_log_data, info["access_token"], receipt)
-
-        grid_stats["tasks_completed"] += 1
-        grid_stats["total_compute_seconds"] += execution_time
-        if final_cost is not None:
-            grid_stats["total_sol_burned"] += final_cost
-        print(f"🛑 [SETTLEMENT] Task {task_id} billing reset confirmed ({stop_sig}).")
-        return receipt
-
-
-@app.post("/stop/{task_id}")
-async def stop_task(task_id: str, access_token: Optional[str] = Query(default=None)):
-    """Stops a running task immediately and resets on-chain burn rate to 0."""
-    require_task_access(task_id, access_token)
-    async with execution_admission_lock:
-        async with task_settlement_lock:
-            info = active_tasks_rates.get(task_id)
-            if not info:
-                raise HTTPException(status_code=409, detail="Task is already concluded.")
-
-            was_claimed = task_id in claimed_tasks
-            stop_sig = None
-            if was_claimed:
-                stop_sig = await solana_client.update_burn_rate(user_pubkey_str=info["wallet"], new_rate_lamports=0)
-                if not stop_sig and not DEMO_MODE:
-                    raise HTTPException(status_code=503, detail="Could not confirm the payment-channel reset; the task remains active.")
-
-            global pending_tasks
-            pending_tasks = [task for task in pending_tasks if task.get("task_id") != task_id]
-            if was_claimed:
-                cancelled_tasks[task_id] = time.time()
-            active_tasks_rates.pop(task_id, None)
-
-            proof_url = f"https://explorer.solana.com/tx/{stop_sig}?cluster=devnet" if stop_sig else None
-            receipt = {
-                "status": "saved",
-                "task_id": task_id,
-                "execution_status": "cancelled",
-                "exit_code": None,
-                "settlement_type": "DEVNET" if stop_sig else ("OFF_CHAIN" if was_claimed else "NOT_STARTED"),
-                "receipt_signature": None,
-                "explorer_url": proof_url,
-            }
-            store_completed_task(task_id, "EXECUTION_ABORTED_BY_USER", "EXECUTION_ABORTED_BY_USER", info["access_token"], receipt)
-            print(f"🛑 [ABORT] User cancelled task {task_id}; claimed={was_claimed}, reset_tx={stop_sig}.")
-            return {"status": "stopped", "tx_sig": stop_sig}
-
-
-@app.get("/result/{task_id}")
-def get_result(task_id: str, access_token: Optional[str] = Query(default=None)):
-    """Polled by frontend to receive real-time stdout and completion state."""
-    require_task_access(task_id, access_token)
-    if task_id in completed_tasks:
-        return {
-            "status": "completed",
-            "output": completed_tasks[task_id],
-            "receipt": completed_receipts.get(task_id),
-            "task_id": task_id
-        }
-    return {"status": "processing", "task_id": task_id}
-
-
-@app.get("/download/{task_id}")
-def download_result(task_id: str, access_token: Optional[str] = Query(default=None)):
-    """Downloads complete raw execution logs."""
-    require_task_access(task_id, access_token)
-    if task_id in full_logs:
-        return PlainTextResponse(
-            full_logs[task_id],
-            headers={"Content-Disposition": f"attachment; filename=aperture_log_{task_id}.txt"}
-        )
-    raise HTTPException(status_code=404, detail="Log file not found.")
-
-
-@app.post("/stream_log")
-def stream_log_chunk(chunk: StreamChunk, worker_id: str = Depends(require_worker)):
-    """Worker streams intermediate stdout chunks during execution."""
-    if chunk.task_id not in active_tasks_rates:
-        raise HTTPException(status_code=404, detail="Unknown or already-settled task.")
-    claim = claimed_tasks.get(chunk.task_id)
-    if not claim or claim["worker_id"] != worker_id or chunk.node_id != worker_id:
-        raise HTTPException(status_code=409, detail="Task is not leased to this worker.")
-    if chunk.task_id in cancelled_tasks:
-        raise HTTPException(status_code=409, detail="Task was cancelled by its submitter.")
-    if chunk.task_id not in streamed_logs:
-        streamed_logs[chunk.task_id] = []
-        streamed_log_bytes[chunk.task_id] = 0
-    if len(streamed_logs[chunk.task_id]) + len(chunk.lines) > MAX_STREAM_LINES_PER_TASK:
-        raise HTTPException(status_code=413, detail="Task stream exceeds the configured line limit.")
-    chunk_bytes = sum(len(line.encode("utf-8", errors="replace")) for line in chunk.lines)
-    if streamed_log_bytes[chunk.task_id] + chunk_bytes > MAX_LOG_BYTES_PER_TASK:
-        raise HTTPException(status_code=413, detail="Stream chunk exceeds the configured byte limit.")
-    streamed_logs[chunk.task_id].extend(chunk.lines)
-    streamed_log_bytes[chunk.task_id] += chunk_bytes
-    return {"status": "ok", "total_lines": len(streamed_logs[chunk.task_id])}
-
-
-@app.get("/worker_task_status/{task_id}")
-def worker_task_status(task_id: str, worker_id: str = Depends(require_worker)):
-    """Expose cancellation only to the named worker that holds this lease."""
-    claim = claimed_tasks.get(task_id)
-    if not claim or claim["worker_id"] != worker_id:
-        raise HTTPException(status_code=404, detail="Task lease not found.")
-    return {"task_id": task_id, "cancelled": task_id in cancelled_tasks}
-
-
-@app.get("/stream_log/{task_id}")
-def get_stream_log(task_id: str, offset: int = 0, access_token: Optional[str] = Query(default=None)):
-    """Frontend polls to get real-time incremental execution output."""
-    require_task_access(task_id, access_token)
-    all_lines = streamed_logs.get(task_id, [])
-    new_lines = all_lines[offset:] if offset < len(all_lines) else []
-    is_completed = task_id in completed_tasks
-    output = completed_tasks.get(task_id)
-    task_status = (
-        "completed" if is_completed
-        else "running" if task_id in claimed_tasks
-        else "queued" if task_id in active_tasks_rates
-        else "unknown"
-    )
-    return {
-        "task_id": task_id,
-        "lines": new_lines,
-        "next_offset": len(all_lines),
-        "is_completed": is_completed,
-        "task_status": task_status,
-        "output": output,
-        "receipt": completed_receipts.get(task_id) if is_completed else None,
-    }
-
+@app.get("/channel-config")
+async def channel_config():
+    try:
+        config = await solana_client.get_protocol_config()
+        pda, _ = solana_client.get_config_pda()
+        return {"initialized": config is not None, "program_id": str(solana_client.program_id), "config_pda": str(pda),
+                "oracle": str(config["oracle"]) if config else None, "treasury": str(config["treasury"]) if config else None, "version": 2}
+    except Exception:
+        raise HTTPException(503, "Compatible v2 protocol configuration is unavailable.")
 
 @app.post("/register_node")
 async def register_node(info: NodeInfo, worker_id: str = Depends(require_worker)):
-    """Worker nodes call this periodically to heartbeat and announce hardware specs & live telemetry."""
-    if info.node_id != worker_id:
-        raise HTTPException(status_code=409, detail="Worker identity does not match node payload.")
-    nodes[info.node_id] = {
-        "node_id": info.node_id,
-        "gpu_name": info.gpu_name,
-        "vram_total": info.vram_total,
-        "vram_used": info.vram_used,
-        "gpu_temp": info.gpu_temp,
-        "gpu_util": info.gpu_util,
-        "power_watts": info.power_watts,
-        "tflops": info.tflops,
-        "status": info.status or "ONLINE",
-        "last_seen": time.time()
-    }
-    return {"status": "registered", "node_id": info.node_id}
-
+    from agent_identity import valid_public_key
+    if info.node_id != worker_id or not valid_public_key(info.worker_pubkey):
+        raise HTTPException(409, "Worker identity does not match node payload.")
+    existing = gateway.store.get("workers", worker_id)
+    if existing and existing["worker_pubkey"] != info.worker_pubkey:
+        raise HTTPException(409, "Worker signing key changed; register a new worker ID.")
+    record = {**info.model_dump(), "last_seen": time.time()}
+    gateway.store.put("workers", worker_id, record)
+    nodes[worker_id] = record
+    return {"status": "registered", "node_id": worker_id}
 
 @app.get("/active_nodes")
-async def get_nodes():
-    """Returns list of currently active GPU and CPU execution workers in the DePIN grid."""
+async def active_nodes():
     now = time.time()
-    # Keep nodes alive if seen in last 45 seconds
-    active = [n for n in nodes.values() if now - n["last_seen"] < 45]
-    return active
-
-
-@app.get("/get_task")
-async def get_task(worker_id: str = Depends(require_worker)):
-    """Polled by worker daemon to receive next audited task in FIFO order."""
-    await requeue_expired_tasks()
-    async with execution_admission_lock:
-        while pending_tasks:
-            task = pending_tasks[0]
-            task_id = task["task_id"]
-            info = active_tasks_rates.get(task_id)
-            if not info:
-                pending_tasks.pop(0)
-                continue
-
-            starting_balance = None
-            tx_sig = None
-            if not DEMO_MODE:
-                try:
-                    channel_state = await solana_client.get_channel_state(info["wallet"])
-                except Exception as e:
-                    print(f"[QUEUE] Could not read payment channel before starting {task_id}: {e}")
-                    return {"task_id": None}
-                if not channel_state or channel_state["balance_lamports"] <= 0:
-                    pending_tasks.pop(0)
-                    active_tasks_rates.pop(task_id, None)
-                    receipt = {
-                        "status": "saved",
-                        "task_id": task_id,
-                        "execution_status": "failed",
-                        "exit_code": None,
-                        "settlement_type": "NONE",
-                        "receipt_signature": None,
-                        "explorer_url": None,
-                        "failure_reason": "Payment channel was unavailable when a worker became ready.",
-                    }
-                    store_completed_task(
-                        task_id,
-                        "PAYMENT_CHANNEL_UNAVAILABLE",
-                        "PAYMENT_CHANNEL_UNAVAILABLE",
-                        info["access_token"],
-                        receipt,
-                    )
-                    return {"task_id": None}
-                starting_balance = channel_state["balance_lamports"]
-
-                tx_sig = await solana_client.update_burn_rate(
-                    user_pubkey_str=info["wallet"],
-                    new_rate_lamports=info["rate_lamports"],
-                )
-                if not tx_sig:
-                    print(f"[QUEUE] Could not start billing for {task_id}; leaving it queued for retry.")
-                    return {"task_id": None}
-
-            pending_tasks.pop(0)
-            now = time.time()
-            info["start_time"] = now
-            info["starting_balance_lamports"] = starting_balance
-            info["proof"] = f"https://explorer.solana.com/tx/{tx_sig}?cluster=devnet" if tx_sig else None
-            claimed_tasks[task_id] = {"task": task, "worker_id": worker_id, "claimed_at": now}
-            return task
-    return {"task_id": None}
-
+    return [node for node in gateway.store.list("workers") if now - node["last_seen"] < 45]
 
 @app.get("/benchmarks")
 def get_benchmarks():
@@ -1068,6 +339,10 @@ def get_stats():
     total_vram = round(sum(n.get("vram_total") or 0.0 for n in active), 1)
     used_vram = round(sum(n.get("vram_used") or 0.0 for n in active), 1)
     total_tflops = round(sum(float(n.get("tflops") or 0.0) for n in active), 1)
+    done = [job for job in gateway.store.list('jobs') if job['state'] == 'completed']
+    grid_stats['tasks_completed'] = len(done)
+    grid_stats['total_compute_seconds'] = sum(job['receipt']['execution_time'] for job in done)
+    grid_stats['total_sol_burned'] = sum(job['receipt'].get('cost_sol') or 0 for job in done)
 
     return {
         "tasks_completed": grid_stats["tasks_completed"],
@@ -1095,7 +370,7 @@ async def faucet_airdrop(req: AirdropRequest, request: Request):
     if APP_ENV == "production":
         raise HTTPException(status_code=404, detail="Devnet faucet is disabled in production.")
     client_id = request.client.host if request.client else "unknown"
-    enforce_rate_limit("faucet", f"{client_id}:{req.wallet}", FAUCET_RATE_LIMIT)
+    enforce_rate_limit("faucet", f"{client_id}:{req.wallet}", 3)
     success = await solana_client.request_airdrop(req.wallet, int(req.amount_sol * 1_000_000_000))
     if success:
         return {"status": "success", "amount_sol": req.amount_sol, "wallet": req.wallet}

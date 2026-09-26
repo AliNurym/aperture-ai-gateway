@@ -80,9 +80,9 @@ try {
     if ($Service -eq 'Backend') {
         & $venvPython -m uvicorn main:app --host 127.0.0.1 --port 8000
     } else {
-        Write-Host 'Local development worker: executes submitted Python on this computer.'
-        Write-Host 'Use your own trusted workloads. Configure APERTURE_WORKER_TOKEN in backend/.env.'
-        & $venvPython -u worker.py --allow-unsafe-local-execution
+        Write-Host 'Worker uses a separate Docker sandbox per task. Configure APERTURE_WORKER_TOKEN in backend/.env.'
+        Write-Host 'Build the task image first: docker build -f backend/Dockerfile.sandbox -t aperture-task:local backend'
+        & $venvPython -u worker.py
     }
     exit $LASTEXITCODE
 } catch {
