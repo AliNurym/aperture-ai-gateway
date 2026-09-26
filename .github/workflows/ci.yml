@@ -59,7 +59,7 @@ jobs:
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
           mkdir -p "$HOME/.cache/solana"
       - name: Build deployable SBF program with test-only authority
-        run: cargo build-sbf --tools-version v1.57 --manifest-path programs/Cargo.toml --sbf-out-dir target/deploy
+        run: cargo build-sbf --tools-version v1.54 --manifest-path programs/Cargo.toml --sbf-out-dir target/deploy
         env:
           APERTURE_CONFIG_AUTHORITY: GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB
       - name: Exercise instructions on a local Solana validator
