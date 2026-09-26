@@ -57,6 +57,7 @@ jobs:
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/v1.18.26/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+          mkdir -p "$HOME/.cache/solana"
       - name: Build deployable SBF program with test-only authority
         run: cargo build-sbf --tools-version v1.57 --manifest-path programs/Cargo.toml --sbf-out-dir target/deploy
         env:
