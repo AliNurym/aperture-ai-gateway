@@ -25,7 +25,7 @@ from contextlib import asynccontextmanager
 from nacl.signing import VerifyKey
 from nacl.exceptions import BadSignatureError
 
-from ai_engine import analyze_code_complexity, get_sol_price_from_pyth
+from ai_engine import analyze_code_ast, analyze_code_complexity, get_sol_price_from_pyth
 from solana_client import KEYPAIR_PATH, SolanaClient
 from task_auth import execution_message
 
@@ -46,6 +46,7 @@ EXECUTE_RATE_LIMIT = max(1, int(os.getenv("APERTURE_EXECUTE_RATE_LIMIT", "10")))
 FAUCET_RATE_LIMIT = max(1, int(os.getenv("APERTURE_FAUCET_RATE_LIMIT", "3")))
 RATE_LIMIT_WINDOW_SECONDS = max(1, int(os.getenv("APERTURE_RATE_LIMIT_WINDOW_SECONDS", "60")))
 AUTH_CHALLENGE_TTL_SECONDS = max(15, min(300, int(os.getenv("APERTURE_AUTH_CHALLENGE_TTL_SECONDS", "90"))))
+READINESS_CACHE_SECONDS = 15
 
 
 def worker_token_is_configured(token: str) -> bool:
@@ -109,8 +110,8 @@ def verify_signature(public_key_str: str, signature_bytes: list, message_str: st
 
 def mint_compute_receipt(wallet: str, task_id: str, duration: float, cost: float, ai_verdict: str) -> Optional[str]:
     """
-    Generates an on-chain verifiable compute receipt.
-    Attempts Helius compressed NFT mint on Devnet, with cryptographic fallback.
+    Attempts a Helius compressed-NFT receipt mint on Devnet.
+    Returns its confirmed transaction signature, or None when minting is unavailable.
     """
     if not HELIUS_URL:
         return None
@@ -176,6 +177,8 @@ execution_challenges: Dict[str, dict] = {}
 cancelled_tasks: Dict[str, float] = {}
 execution_admission_lock = asyncio.Lock()
 task_settlement_lock = asyncio.Lock()
+readiness_check_lock = asyncio.Lock()
+readiness_cache = {"checked_at": 0.0, "protocol_config_initialized": False}
 
 solana_client = SolanaClient()
 
@@ -248,8 +251,8 @@ def enforce_rate_limit(scope: str, client_id: str, limit: int) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🟢 Aperture AI Oracle: Systems Online.")
-    print("🛰️ AI Sentinel: AST Guard & Pyth Price Feeds Ready.")
+    print("🟢 Aperture Compute Gateway: Systems Online.")
+    print("🛰️ Source-policy analyzer ready; SOL reference prices are fetched on demand.")
 
     yield
     await solana_client.close()
@@ -257,8 +260,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Aperture AI: Autonomous DePIN Gateway",
-    description="The first logic-aware billing protocol on Solana built for the 400ms block economy.",
+    title="Aperture Compute Gateway",
+    description="Routes wallet-authorized Python workloads to workers and meters live usage through Solana payment channels.",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -297,15 +300,19 @@ class ExecutionChallengeRequest(BaseModel):
     wallet: str = Field(min_length=1, max_length=44)
 
 
+class AnalyzeRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=32_000)
+
+
 class NodeInfo(BaseModel):
     node_id: str = Field(min_length=1, max_length=64)
     gpu_name: str = Field(min_length=1, max_length=128)
     vram_total: float = Field(ge=0, le=1_000)
-    vram_used: Optional[float] = Field(default=0.0, ge=0, le=1_000)
-    gpu_temp: Optional[float] = Field(default=45.0, ge=-50, le=150)
-    gpu_util: Optional[int] = Field(default=0, ge=0, le=100)
-    power_watts: Optional[float] = Field(default=15.0, ge=0, le=10_000)
-    tflops: Optional[float] = Field(default=0.0, ge=0, le=100_000)
+    vram_used: Optional[float] = Field(default=None, ge=0, le=1_000)
+    gpu_temp: Optional[float] = Field(default=None, ge=-50, le=150)
+    gpu_util: Optional[int] = Field(default=None, ge=0, le=100)
+    power_watts: Optional[float] = Field(default=None, ge=0, le=10_000)
+    tflops: Optional[float] = Field(default=None, ge=0, le=100_000)
     status: Optional[str] = Field(default="ONLINE", max_length=32)
 
 
@@ -323,31 +330,51 @@ class AirdropRequest(BaseModel):
 @app.get("/")
 def root():
     return {
-        "protocol": "Aperture AI",
-        "description": "Autonomous DePIN Grid Governed by AI on Solana",
+        "protocol": "Aperture Compute",
+        "description": "Prototype gateway for wallet-authorized Python tasks, worker execution, and Solana payment-channel billing.",
         "version": "1.0.0",
         "network": "Solana Devnet",
-        "status": "OPERATIONAL"
+        "status": "online"
     }
 
 
 @app.get("/health")
-def health():
-    """Liveness/readiness signal safe for load balancers and public status checks."""
+async def health():
+    """Report whether the configured worker and live payment path are ready."""
     signer_configured = bool(os.getenv("BACKEND_PRIVATE_KEY")) or KEYPAIR_PATH.exists()
-    ready = worker_token_is_configured(WORKER_TOKEN) and (DEMO_MODE or signer_configured)
+    protocol_config_initialized: Optional[bool] = None
+    if not DEMO_MODE:
+        async with readiness_check_lock:
+            now = time.time()
+            if now - readiness_cache["checked_at"] >= READINESS_CACHE_SECONDS:
+                initialized = False
+                if worker_token_is_configured(WORKER_TOKEN) and signer_configured:
+                    try:
+                        initialized = await solana_client.get_protocol_config() is not None
+                    except Exception as e:
+                        print(f"[HEALTH] Live protocol configuration is not ready: {e}")
+                readiness_cache.update({
+                    "checked_at": now,
+                    "protocol_config_initialized": initialized,
+                })
+            protocol_config_initialized = readiness_cache["protocol_config_initialized"]
+
+    ready = worker_token_is_configured(WORKER_TOKEN) and (
+        DEMO_MODE or (signer_configured and protocol_config_initialized is True)
+    )
     return {
         "status": "ready" if ready else "configuration_required",
         "environment": APP_ENV,
         "demo_mode": DEMO_MODE,
         "worker_auth_configured": worker_token_is_configured(WORKER_TOKEN),
         "oracle_signer_configured": signer_configured,
+        "protocol_config_initialized": protocol_config_initialized,
     }
 
 
 @app.get("/price")
 def get_sol_price():
-    """Returns the live SOL price from Pyth Network oracle."""
+    """Returns a recent SOL/USD reference price, or null when feeds are unavailable."""
     price = get_sol_price_from_pyth()
     return {"price": price, "source": "Pyth Network Hermes / Binance Oracle"}
 
@@ -409,6 +436,14 @@ def issue_execution_challenge(req: ExecutionChallengeRequest, request: Request):
     }
 
 
+@app.post("/analyze")
+def analyze_workload(req: AnalyzeRequest, request: Request):
+    """Run the deterministic source-policy preview without signing or dispatching a task."""
+    client_id = request.client.host if request.client else "unknown"
+    enforce_rate_limit("analyze", client_id, 30)
+    return analyze_code_ast(req.code)
+
+
 @app.post("/execute")
 async def execute_code(req: RunRequest, request: Request):
     """
@@ -417,8 +452,8 @@ async def execute_code(req: RunRequest, request: Request):
     2. Runs AI-Sentinel Pre-Execution Audit (AST security & complexity)
     3. Blocks malicious code immediately
     4. Calculates dynamic burn rate (Lamports/sec)
-    5. Modulates on-chain smart contract state
-    6. Dispatches to decentralized execution worker
+    5. Confirms channel readiness without starting billing
+    6. Queues the task for an authenticated worker to claim
     """
     client_id = request.client.host if request.client else "unknown"
     enforce_rate_limit("execute", client_id, EXECUTE_RATE_LIMIT)
@@ -498,27 +533,19 @@ async def execute_code(req: RunRequest, request: Request):
                 raise HTTPException(status_code=503, detail="Payment channel could not be verified.")
             if not channel_state or channel_state["balance_lamports"] <= 0:
                 raise HTTPException(status_code=409, detail="Open and fund a payment channel before execution.")
-            starting_balance = channel_state["balance_lamports"]
 
         # 128-bit opaque IDs make task log/result URLs non-guessable.
         task_id = f"task-{uuid.uuid4().hex}"
         task_access_token = secrets.token_urlsafe(32)
         execution_challenges.pop(req.authorization_nonce, None)
 
-        tx_sig = await solana_client.update_burn_rate(
-            user_pubkey_str=req.wallet,
-            new_rate_lamports=burn_rate_lamports
-        )
-        if not tx_sig and not DEMO_MODE:
-            raise HTTPException(status_code=503, detail="On-chain payment channel update failed; task was not queued.")
-
-        on_chain_proof = f"https://explorer.solana.com/tx/{tx_sig}?cluster=devnet" if tx_sig else None
         active_tasks_rates[task_id] = {
             "wallet": req.wallet,
             "rate_sol": burn_rate_sol,
-            "start_time": time.time(),
+            "rate_lamports": burn_rate_lamports,
+            "start_time": None,
             "starting_balance_lamports": starting_balance,
-            "proof": on_chain_proof,
+            "proof": None,
             "ai_verdict": reason,
             "complexity": complexity,
             "access_token": task_access_token,
@@ -526,16 +553,16 @@ async def execute_code(req: RunRequest, request: Request):
         pending_tasks.append({"task_id": task_id, "code": req.code, "wallet": req.wallet})
 
     return {
-        "status": "success",
+        "status": "queued",
         "task_id": task_id,
         "burn_rate": burn_rate_sol,
         "burn_rate_lamports": burn_rate_lamports,
         "complexity_score": complexity,
         "ai_analysis": ai_result,
-        "on_chain_proof": on_chain_proof,
-        "tx_sig": tx_sig,
+        "on_chain_proof": None,
+        "tx_sig": None,
         "task_access_token": task_access_token,
-        "sol_market_price": ai_result.get("sol_market_price", 185.0)
+        "sol_market_price": ai_result.get("sol_market_price")
     }
 
 
@@ -638,34 +665,38 @@ async def submit_result(payload: dict, worker_id: str = Depends(require_worker))
 async def stop_task(task_id: str, access_token: Optional[str] = Query(default=None)):
     """Stops a running task immediately and resets on-chain burn rate to 0."""
     require_task_access(task_id, access_token)
-    async with task_settlement_lock:
-        info = active_tasks_rates.get(task_id)
-        if not info:
-            raise HTTPException(status_code=409, detail="Task is already concluded.")
+    async with execution_admission_lock:
+        async with task_settlement_lock:
+            info = active_tasks_rates.get(task_id)
+            if not info:
+                raise HTTPException(status_code=409, detail="Task is already concluded.")
 
-        stop_sig = await solana_client.update_burn_rate(user_pubkey_str=info["wallet"], new_rate_lamports=0)
-        if not stop_sig and not DEMO_MODE:
-            raise HTTPException(status_code=503, detail="Could not confirm the payment-channel reset; the task remains active.")
+            was_claimed = task_id in claimed_tasks
+            stop_sig = None
+            if was_claimed:
+                stop_sig = await solana_client.update_burn_rate(user_pubkey_str=info["wallet"], new_rate_lamports=0)
+                if not stop_sig and not DEMO_MODE:
+                    raise HTTPException(status_code=503, detail="Could not confirm the payment-channel reset; the task remains active.")
 
-        global pending_tasks
-        pending_tasks = [task for task in pending_tasks if task.get("task_id") != task_id]
-        if task_id in claimed_tasks:
-            cancelled_tasks[task_id] = time.time()
-        active_tasks_rates.pop(task_id, None)
+            global pending_tasks
+            pending_tasks = [task for task in pending_tasks if task.get("task_id") != task_id]
+            if was_claimed:
+                cancelled_tasks[task_id] = time.time()
+            active_tasks_rates.pop(task_id, None)
 
-        proof_url = f"https://explorer.solana.com/tx/{stop_sig}?cluster=devnet" if stop_sig else None
-        receipt = {
-            "status": "saved",
-            "task_id": task_id,
-            "execution_status": "cancelled",
-            "exit_code": None,
-            "settlement_type": "DEVNET" if stop_sig else "OFF_CHAIN",
-            "receipt_signature": None,
-            "explorer_url": proof_url,
-        }
-        store_completed_task(task_id, "EXECUTION_ABORTED_BY_USER", "EXECUTION_ABORTED_BY_USER", info["access_token"], receipt)
-        print(f"🛑 [ABORT] User cancelled task {task_id}; billing reset confirmed ({stop_sig}).")
-        return {"status": "stopped", "tx_sig": stop_sig}
+            proof_url = f"https://explorer.solana.com/tx/{stop_sig}?cluster=devnet" if stop_sig else None
+            receipt = {
+                "status": "saved",
+                "task_id": task_id,
+                "execution_status": "cancelled",
+                "exit_code": None,
+                "settlement_type": "DEVNET" if stop_sig else ("OFF_CHAIN" if was_claimed else "NOT_STARTED"),
+                "receipt_signature": None,
+                "explorer_url": proof_url,
+            }
+            store_completed_task(task_id, "EXECUTION_ABORTED_BY_USER", "EXECUTION_ABORTED_BY_USER", info["access_token"], receipt)
+            print(f"🛑 [ABORT] User cancelled task {task_id}; claimed={was_claimed}, reset_tx={stop_sig}.")
+            return {"status": "stopped", "tx_sig": stop_sig}
 
 
 @app.get("/result/{task_id}")
@@ -734,11 +765,18 @@ def get_stream_log(task_id: str, offset: int = 0, access_token: Optional[str] = 
     new_lines = all_lines[offset:] if offset < len(all_lines) else []
     is_completed = task_id in completed_tasks
     output = completed_tasks.get(task_id)
+    task_status = (
+        "completed" if is_completed
+        else "running" if task_id in claimed_tasks
+        else "queued" if task_id in active_tasks_rates
+        else "unknown"
+    )
     return {
         "task_id": task_id,
         "lines": new_lines,
         "next_offset": len(all_lines),
         "is_completed": is_completed,
+        "task_status": task_status,
         "output": output,
         "receipt": completed_receipts.get(task_id) if is_completed else None,
     }
@@ -753,11 +791,11 @@ async def register_node(info: NodeInfo, worker_id: str = Depends(require_worker)
         "node_id": info.node_id,
         "gpu_name": info.gpu_name,
         "vram_total": info.vram_total,
-        "vram_used": info.vram_used if info.vram_used is not None else 0.0,
-        "gpu_temp": info.gpu_temp if info.gpu_temp is not None else 45.0,
-        "gpu_util": info.gpu_util if info.gpu_util is not None else 0,
-        "power_watts": info.power_watts if info.power_watts is not None else 15.0,
-        "tflops": info.tflops or 0.0,
+        "vram_used": info.vram_used,
+        "gpu_temp": info.gpu_temp,
+        "gpu_util": info.gpu_util,
+        "power_watts": info.power_watts,
+        "tflops": info.tflops,
         "status": info.status or "ONLINE",
         "last_seen": time.time()
     }
@@ -777,10 +815,61 @@ async def get_nodes():
 async def get_task(worker_id: str = Depends(require_worker)):
     """Polled by worker daemon to receive next audited task in FIFO order."""
     await requeue_expired_tasks()
-    if pending_tasks:
-        task = pending_tasks.pop(0)
-        claimed_tasks[task["task_id"]] = {"task": task, "worker_id": worker_id, "claimed_at": time.time()}
-        return task
+    async with execution_admission_lock:
+        while pending_tasks:
+            task = pending_tasks[0]
+            task_id = task["task_id"]
+            info = active_tasks_rates.get(task_id)
+            if not info:
+                pending_tasks.pop(0)
+                continue
+
+            starting_balance = None
+            tx_sig = None
+            if not DEMO_MODE:
+                try:
+                    channel_state = await solana_client.get_channel_state(info["wallet"])
+                except Exception as e:
+                    print(f"[QUEUE] Could not read payment channel before starting {task_id}: {e}")
+                    return {"task_id": None}
+                if not channel_state or channel_state["balance_lamports"] <= 0:
+                    pending_tasks.pop(0)
+                    active_tasks_rates.pop(task_id, None)
+                    receipt = {
+                        "status": "saved",
+                        "task_id": task_id,
+                        "execution_status": "failed",
+                        "exit_code": None,
+                        "settlement_type": "NONE",
+                        "receipt_signature": None,
+                        "explorer_url": None,
+                        "failure_reason": "Payment channel was unavailable when a worker became ready.",
+                    }
+                    store_completed_task(
+                        task_id,
+                        "PAYMENT_CHANNEL_UNAVAILABLE",
+                        "PAYMENT_CHANNEL_UNAVAILABLE",
+                        info["access_token"],
+                        receipt,
+                    )
+                    return {"task_id": None}
+                starting_balance = channel_state["balance_lamports"]
+
+                tx_sig = await solana_client.update_burn_rate(
+                    user_pubkey_str=info["wallet"],
+                    new_rate_lamports=info["rate_lamports"],
+                )
+                if not tx_sig:
+                    print(f"[QUEUE] Could not start billing for {task_id}; leaving it queued for retry.")
+                    return {"task_id": None}
+
+            pending_tasks.pop(0)
+            now = time.time()
+            info["start_time"] = now
+            info["starting_balance_lamports"] = starting_balance
+            info["proof"] = f"https://explorer.solana.com/tx/{tx_sig}?cluster=devnet" if tx_sig else None
+            claimed_tasks[task_id] = {"task": task, "worker_id": worker_id, "claimed_at": now}
+            return task
     return {"task_id": None}
 
 
@@ -790,9 +879,9 @@ def get_benchmarks():
     return [
         {
             "id": "matrix_mult",
-            "name": "Matrix Multiplication (High TFLOPS)",
-            "category": "Scientific AI",
-            "code": """# Aperture Benchmark: Dense Matrix Multiplication (TFLOPS Stress)
+            "name": "Matrix Multiplication (Python CPU)",
+            "category": "Scientific Computing",
+            "code": """# Aperture Benchmark: Dense Matrix Multiplication in Python
 import time
 import random
 
@@ -813,8 +902,8 @@ for i in range(N):
         C[i][j] = total
 
 duration = time.perf_counter() - start
-print(f"✅ [SUCCESS] Computed {N*N*N} floating point operations in {duration:.3f}s")
-print(f"📊 [TELEMETRY] Aperture Logic-Aware Rate Applied: Robin Hood dynamic billing.")
+print(f"✅ [SUCCESS] Computed the {N}x{N} matrix product in {duration:.3f}s")
+print("📊 [INFO] This script ran as a Python workload; billing is managed by the gateway.")
 """
         },
         {
@@ -896,9 +985,9 @@ while True:
         },
         {
             "id": "neural_forward",
-            "name": "Deep Neural Network Forward Pass (Tensor AI Inference)",
-            "category": "Machine Learning",
-            "code": """# Aperture Benchmark: Deep Neural Network Layer Inference
+            "name": "Neural Network Forward Pass (Python CPU)",
+            "category": "Machine Learning Prototype",
+            "code": """# Aperture Benchmark: Neural Network Forward Pass in Python
 import time
 import math
 import random
@@ -948,14 +1037,14 @@ for sample in X:
 elapsed = time.perf_counter() - start
 total_ops = num_samples * (input_dim * hidden_dim * 2 + hidden_dim * output_dim * 2)
 print(f"✅ [RESULT] Completed {num_samples} inferences ({total_ops:,} FLOPs) in {elapsed:.3f}s")
-print(f"🧠 [METRICS] Throughput: {num_samples / max(elapsed, 0.001):.1f} samples/sec on physical silicon")
+print(f"🧠 [METRICS] Throughput: {num_samples / max(elapsed, 0.001):.1f} samples/sec in Python")
 """
         },
         {
             "id": "security_exploit",
-            "name": "Security Exploit Test (Blocked by Sentinel)",
-            "category": "Security Sandbox",
-            "code": """# Aperture Security Test: Unauthorized System Probe
+            "name": "Restricted Source Example (Expected to Be Rejected)",
+            "category": "Source-policy Preview",
+            "code": """# Source-policy example; this code should not be executed
 import os
 import subprocess
 
@@ -972,11 +1061,13 @@ def get_stats():
     """Aggregated protocol telemetry for the DePIN network."""
     now = time.time()
     active = [n for n in nodes.values() if now - n["last_seen"] < 45]
-    avg_temp = round(sum(n.get("gpu_temp", 0.0) for n in active) / len(active), 1) if active else None
-    avg_util = round(sum(n.get("gpu_util", 0.0) for n in active) / len(active), 0) if active else None
-    total_vram = round(sum(n.get("vram_total", 0.0) for n in active), 1)
-    used_vram = round(sum(n.get("vram_used", 0.0) for n in active), 1)
-    total_tflops = round(sum(float(n.get("tflops", 0.0)) for n in active), 1)
+    known_temps = [n["gpu_temp"] for n in active if n.get("gpu_temp") is not None]
+    known_utils = [n["gpu_util"] for n in active if n.get("gpu_util") is not None]
+    avg_temp = round(sum(known_temps) / len(known_temps), 1) if known_temps else None
+    avg_util = round(sum(known_utils) / len(known_utils), 0) if known_utils else None
+    total_vram = round(sum(n.get("vram_total") or 0.0 for n in active), 1)
+    used_vram = round(sum(n.get("vram_used") or 0.0 for n in active), 1)
+    total_tflops = round(sum(float(n.get("tflops") or 0.0) for n in active), 1)
 
     return {
         "tasks_completed": grid_stats["tasks_completed"],

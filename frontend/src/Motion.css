@@ -1,0 +1,271 @@
+/* Shared M3 motion: fast feedback, gentle entrances, no animation dependencies.
+   Curves: material-components-android/docs/theming/Motion.md.
+   Content is visible by default; reduced-motion never waits for an animation. */
+.console-app {
+  --motion-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-enter: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --motion-fast: 150ms;
+  --motion-medium: 300ms;
+  --motion-long: 450ms;
+}
+
+/* The indicator moves, while the actual navigation buttons stay in place. */
+.console-sidebar nav {
+  --nav-item-height: 50px;
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  gap: 7px;
+}
+.console-sidebar .console-nav-item {
+  height: var(--nav-item-height);
+  margin: 0;
+  position: relative;
+}
+.console-sidebar .console-nav-item.selected {
+  background: transparent;
+}
+.console-nav-indicator {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: var(--nav-item-height);
+  transform: translateY(calc(var(--nav-index) * (var(--nav-item-height) + 7px)));
+  pointer-events: none;
+  z-index: -1;
+}
+.console-nav-indicator::before {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 28px;
+  background: #e2d7f1;
+}
+
+@media (max-width: 980px) {
+  .console-sidebar nav {
+    --nav-item-height: 54px;
+  }
+  .console-nav-indicator::before {
+    border-radius: 20px;
+  }
+}
+@media (max-width: 480px) {
+  .console-sidebar nav {
+    --nav-item-height: 56px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+  }
+  .console-sidebar .console-nav-item {
+    justify-self: center;
+    max-width: 100%;
+  }
+  .console-nav-indicator {
+    width: 25%;
+    transform: translateX(calc(var(--nav-index) * 100%));
+  }
+  .console-nav-indicator::before {
+    width: min(70px, 100%);
+    margin-inline: auto;
+    border-radius: 19px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .console-nav-indicator {
+    transition: transform var(--motion-long) var(--motion-standard);
+  }
+
+  /* Only the heading is keyed on navigation. The editor is never remounted. */
+  .console-heading-copy,
+  .console-breadcrumb strong,
+  .console-overview > .console-hero,
+  .console-metric,
+  .console-home-grid > .console-panel,
+  .console-overview > .console-tip,
+  .console-guide > section,
+  .console-network > *,
+  .console-worker,
+  .console-studio:not([hidden]) > .console-mode-bar,
+  .console-studio:not([hidden]) .studio-editor,
+  .console-studio:not([hidden]) .studio-inspector > *,
+  .console-studio:not([hidden]) .studio-terminal {
+    animation: aperture-enter var(--motion-long) var(--motion-enter) backwards;
+  }
+  .console-overview > .console-hero,
+  .console-guide > section:first-child,
+  .console-network > :first-child,
+  .console-studio:not([hidden]) .studio-editor {
+    animation-delay: 50ms;
+  }
+  .console-metric:nth-child(1),
+  .console-guide > section:nth-child(2),
+  .console-network > :nth-child(2),
+  .console-studio:not([hidden]) .studio-status-card {
+    animation-delay: 100ms;
+  }
+  .console-metric:nth-child(2),
+  .console-guide > section:nth-child(3),
+  .console-studio:not([hidden]) .studio-estimate {
+    animation-delay: 150ms;
+  }
+  .console-metric:nth-child(3),
+  .console-home-grid > .console-panel:first-child,
+  .console-studio:not([hidden]) .studio-terminal {
+    animation-delay: 200ms;
+  }
+  .console-home-grid > .console-panel:nth-child(2),
+  .console-overview > .console-tip {
+    animation-delay: 250ms;
+  }
+
+  /* A single brief flourish on entry; no endless decorative movement. */
+  .console-orbit-core img {
+    animation: aperture-awaken 1600ms var(--motion-enter) 100ms backwards;
+  }
+  .console-orbit-tile.code {
+    animation: aperture-code-arrive 1100ms var(--motion-enter) 150ms backwards;
+  }
+  .console-orbit-tile.result {
+    animation: aperture-result-arrive 1100ms var(--motion-enter) 250ms backwards;
+  }
+  .console-brand img {
+    transition: transform var(--motion-long) var(--motion-standard);
+  }
+  .console-brand:is(:hover, :focus-visible) img {
+    transform: rotate(30deg);
+  }
+  .console-brand:active img {
+    transform: rotate(15deg) scale(0.92);
+  }
+
+  /* State layers and a centered press ripple keep keyboard/touch feedback equal. */
+  :is(.console-button, .console-new, .console-nav-item, .console-sample,
+      .console-segmented button) {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+  :is(.console-button, .console-new, .console-nav-item, .console-sample,
+      .console-segmented button)::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: radial-gradient(circle, currentColor 10%, transparent 70%);
+    pointer-events: none;
+    opacity: 0;
+    transform: scale(0.4);
+    transition:
+      opacity var(--motion-medium) var(--motion-standard),
+      transform var(--motion-long) var(--motion-standard);
+  }
+  :is(.console-button, .console-new, .console-nav-item, .console-sample,
+      .console-segmented button):active:not(:disabled)::after {
+    opacity: 0.16;
+    transform: scale(2.5);
+    transition-duration: var(--motion-fast);
+  }
+  :is(.console-button, .console-new, .console-nav-item, .console-text-button,
+      .console-sample, .console-segmented button, .studio-history > button,
+      .studio-editor-heading button, .studio-presets button, .console-status) {
+    transition:
+      transform var(--motion-fast) var(--motion-standard),
+      background-color var(--motion-fast) var(--motion-standard),
+      color var(--motion-fast) var(--motion-standard),
+      border-color var(--motion-fast) var(--motion-standard),
+      box-shadow var(--motion-medium) var(--motion-standard);
+  }
+  :is(.console-button, .console-new, .console-nav-item,
+      .studio-editor-heading button, .studio-presets button):active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .console-sample > svg,
+  .console-text-button > svg:last-child {
+    transition: transform var(--motion-medium) var(--motion-standard);
+  }
+
+  .studio-steps li,
+  .studio-steps li span,
+  .studio-steps li::before,
+  .studio-status-icon {
+    transition:
+      background-color var(--motion-medium) var(--motion-standard),
+      color var(--motion-medium) var(--motion-standard),
+      transform var(--motion-medium) var(--motion-standard);
+  }
+  .studio-steps li.reached:not(:first-child)::before {
+    background: #c9b2e1;
+  }
+  .studio-status-icon.completed {
+    animation: aperture-complete var(--motion-long) var(--motion-enter);
+  }
+  .studio-status-icon.completed svg path {
+    stroke-dasharray: 32;
+    animation: aperture-check var(--motion-long) var(--motion-standard);
+  }
+  .studio-status-icon[data-busy="true"] svg,
+  .console-status[aria-busy="true"] > svg,
+  .console-network-banner button[aria-busy="true"] > svg {
+    animation: studio-spin 1400ms linear infinite;
+  }
+  .console-running-dot {
+    animation: aperture-working 1600ms ease-in-out infinite;
+  }
+  .studio-receipt,
+  .studio-notice {
+    animation: aperture-enter var(--motion-long) var(--motion-enter) backwards;
+  }
+  .studio-log-line {
+    animation: aperture-log-in var(--motion-fast) var(--motion-standard);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    :is(.console-button, .console-new):hover:not(:disabled) {
+      transform: translateY(-2px);
+    }
+    :is(.console-button, .console-new):active:not(:disabled) {
+      transform: scale(0.97);
+    }
+    .console-sample:hover > svg,
+    .console-text-button:hover:not(:disabled) > svg:last-child {
+      transform: translateX(3px);
+    }
+  }
+}
+
+@keyframes aperture-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes aperture-awaken {
+  from { opacity: 0; transform: rotate(-48deg) scale(0.8); }
+  to { opacity: 1; transform: rotate(12deg) scale(1); }
+}
+@keyframes aperture-code-arrive {
+  from { opacity: 0; transform: translate(-12px, 12px) rotate(-12deg); }
+  to { opacity: 1; transform: translate(0, 0) rotate(-7deg); }
+}
+@keyframes aperture-result-arrive {
+  from { opacity: 0; transform: translate(12px, 12px) rotate(12deg); }
+  to { opacity: 1; transform: translate(0, 0) rotate(6deg); }
+}
+@keyframes aperture-complete {
+  from { transform: scale(0.85); }
+  65% { transform: scale(1.06); }
+  to { transform: scale(1); }
+}
+@keyframes aperture-check {
+  from { stroke-dashoffset: 32; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes aperture-working {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+@keyframes aperture-log-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

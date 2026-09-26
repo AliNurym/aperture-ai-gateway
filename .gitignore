@@ -13,6 +13,7 @@ frontend/dist-ssr/
 build/
 .vite/
 frontend/.vite/
+.pnpm-store/
 *.local
 
 # --- NPM / Yarn / PNPM Logs ---

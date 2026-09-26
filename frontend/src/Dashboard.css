@@ -1,0 +1,546 @@
+.studio {
+  min-width: 0;
+}
+.studio-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(240px, 1fr);
+  gap: 23px;
+}
+.studio-editor {
+  background: #24212b;
+  border-radius: 22px;
+  overflow: hidden;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.studio-editor-heading,
+.studio-editor-heading > div {
+  display: flex;
+  align-items: center;
+}
+.studio-editor-heading {
+  padding: 20px 22px;
+  border-bottom: 1px solid #37313f;
+  justify-content: space-between;
+  gap: 10px;
+}
+.studio-editor-heading > div {
+  gap: 11px;
+}
+.studio-editor-heading strong {
+  font-size: 14px;
+  font-weight: 500;
+  color: #d2c6df;
+}
+.studio-file-dot {
+  height: 7px;
+  width: 7px;
+  border-radius: 50%;
+  background: #bfa1df;
+}
+.studio-language {
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  background: #363040;
+  color: #9989aa;
+  padding: 5px 7px;
+  border-radius: 5px;
+}
+.studio-editor-heading button,
+.studio-presets button {
+  display: grid;
+  place-items: center;
+  border: 0;
+  padding: 5px;
+  background: transparent;
+  color: #a493b8;
+}
+.studio-editor-heading button:hover,
+.studio-presets button:hover {
+  color: #e8d8fc;
+}
+.studio-presets {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 22px;
+  background: #2a2533;
+  color: #a997bb;
+}
+.studio-presets label {
+  font-size: 12px;
+}
+.studio-presets select {
+  min-width: 0;
+  flex: 1;
+  background: #352e40;
+  color: #ccbade;
+  border: 1px solid #463b53;
+  border-radius: 8px;
+  font-size: 13px;
+  padding: 8px;
+}
+.studio-source {
+  display: flex;
+  flex: 1;
+  min-height: 315px;
+}
+.studio-source textarea {
+  resize: vertical;
+  display: block;
+  border: 0;
+  color: #d5c5e7;
+  background: #24212b;
+  width: 100%;
+  min-height: 315px;
+  padding: 24px;
+  font:
+    12px/1.9 "Roboto Mono",
+    Consolas,
+    monospace;
+  tab-size: 4;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.studio-source textarea:disabled {
+  opacity: 0.7;
+}
+.studio-source textarea:focus-visible {
+  outline-offset: -4px;
+}
+.studio-editor-meta {
+  color: #8d7e9f;
+  font:
+    9px "Roboto Mono",
+    Consolas,
+    monospace;
+  padding: 14px 22px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid #37303f;
+}
+.studio-run-bar {
+  background: #f5effb;
+  padding: 17px 21px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.studio-run-bar > span {
+  color: #9581a7;
+  font-size: 12px;
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+.studio-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.studio-status-card {
+  text-align: center;
+  padding: 25px 22px;
+  flex: 1;
+}
+.studio-status-icon {
+  display: grid;
+  place-items: center;
+  width: 69px;
+  height: 69px;
+  border-radius: 23px;
+  background: #f1e8fb;
+  color: #b096c9;
+  margin: 23px auto 20px;
+}
+.studio-status-icon.completed {
+  background: #e9f2e9;
+  color: #7a9c7f;
+}
+.studio-status-icon.failed,
+.studio-status-icon.blocked {
+  background: #faece8;
+  color: #b38073;
+}
+.studio-status-icon.running svg {
+  animation: studio-spin 2s linear infinite;
+}
+@keyframes studio-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.studio-status-card h2 {
+  font-size: 17px;
+}
+.studio-status-card > p {
+  color: #786787;
+  font-size: 13px;
+  line-height: 1.8;
+  max-width: 230px;
+  margin: 12px auto 24px;
+}
+.studio-steps {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.studio-steps li {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  color: #786787;
+  font-size: 9px;
+  position: relative;
+  flex: 1;
+}
+.studio-steps li::before {
+  content: "";
+  position: absolute;
+  height: 1px;
+  background: #e9e0f1;
+  width: 100%;
+  top: 13px;
+  right: 50%;
+}
+.studio-steps li:first-child::before {
+  display: none;
+}
+.studio-steps li span {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  width: 27px;
+  height: 27px;
+  background: #f7f2fb;
+  font-size: 12px;
+  z-index: 1;
+}
+.studio-steps li.reached {
+  color: #8e6eab;
+}
+.studio-steps li.reached span {
+  background: #e5d7f2;
+  color: #8863a5;
+}
+.studio-estimate dl {
+  margin-top: 19px;
+}
+.studio-estimate dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 0;
+  font-size: 13px;
+  border-bottom: 1px solid #f2ecf6;
+}
+.studio-estimate dt {
+  color: #786787;
+}
+.studio-estimate dd {
+  color: #806390;
+  font-size: 12px;
+}
+.studio-estimate > p {
+  color: #786787;
+  font-size: 12px;
+  line-height: 1.8;
+  margin-top: 17px;
+}
+.studio-channel .console-section-heading {
+  margin-bottom: 5px;
+}
+.studio-channel .console-section-heading h2 {
+  margin-top: 5px;
+  font-size: 17px;
+}
+.studio-channel-wallet {
+  color: #786787;
+  font: 10px "Roboto Mono", Consolas, monospace;
+  margin: 12px 0 2px;
+  overflow-wrap: anywhere;
+}
+.studio-channel dl {
+  margin-top: 10px;
+}
+.studio-channel dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0;
+  font-size: 12px;
+  border-bottom: 1px solid #f2ecf6;
+}
+.studio-channel dt,
+.studio-channel-help {
+  color: #786787;
+}
+.studio-channel dd {
+  color: #806390;
+  font-size: 11px;
+  text-align: right;
+}
+.studio-channel-label {
+  display: block;
+  margin: 15px 0 7px;
+  color: #786787;
+  font-size: 12px;
+}
+.studio-channel-deposit {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #e9e0f1;
+  border-radius: 11px;
+  padding: 0 12px;
+  color: #786787;
+  font-size: 12px;
+}
+.studio-channel-deposit input {
+  min-width: 0;
+  width: 100%;
+  padding: 11px 0;
+  border: 0;
+  outline: 0;
+  color: #4d3c5d;
+  background: transparent;
+  font: 13px "Roboto Mono", Consolas, monospace;
+}
+.studio-channel-action {
+  width: 100%;
+  justify-content: center;
+  margin-top: 12px;
+}
+.studio-channel-close {
+  width: 100%;
+  justify-content: center;
+  margin-top: 13px;
+  font-size: 11px;
+}
+.studio-channel-help {
+  margin-top: 12px;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.studio-terminal {
+  background: white;
+  border: 1px solid #ebe4f2;
+  border-radius: 21px;
+  margin-top: 23px;
+  overflow: hidden;
+}
+.studio-terminal-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 15px 23px;
+  border-bottom: 1px solid #f0eaf6;
+}
+.studio-terminal-heading > span {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: #806b91;
+}
+.studio-terminal-count {
+  padding: 4px 6px;
+  font-size: 9px;
+  border-radius: 5px;
+  background: #f7f2fa;
+  color: #786787;
+}
+.studio-log {
+  padding: 21px 23px;
+  height: 200px;
+  overflow-y: auto;
+  font:
+    10px/1.85 "Roboto Mono",
+    Consolas,
+    monospace;
+  color: #8d7c9c;
+}
+.studio-log-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 17px;
+  padding: 3px 0;
+}
+.studio-log-line time {
+  color: #bcaac9;
+  flex-shrink: 0;
+}
+.studio-log-line > span {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.studio-log-line.success > span {
+  color: #658e73;
+}
+.studio-log-line.warning > span {
+  color: #b77e57;
+}
+.studio-terminal-empty {
+  color: #786787;
+  display: flex;
+  gap: 10px;
+  padding-top: 5px;
+}
+.studio-notice {
+  display: flex;
+  gap: 12px;
+  color: #9a704f;
+  background: #faf1e6;
+  border-radius: 15px;
+  padding: 16px 20px;
+  font-size: 14px;
+  line-height: 1.8;
+  margin-bottom: 20px;
+}
+.studio-notice svg {
+  margin-top: 2px;
+}
+.studio-receipt,
+.studio-history {
+  margin-top: 23px;
+}
+.studio-receipt h2 {
+  margin-top: 10px;
+}
+.studio-receipt-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 17px;
+  margin: 24px 0;
+}
+.studio-receipt-details span {
+  color: #786787;
+  font-size: 12px;
+  display: block;
+  margin-bottom: 7px;
+}
+.studio-receipt-details strong {
+  font-size: 14px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.studio-receipt pre {
+  background: #f9f5fc;
+  padding: 19px;
+  border-radius: 13px;
+  font:
+    11px/1.85 "Roboto Mono",
+    Consolas,
+    monospace;
+  color: #8e729f;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 250px;
+  overflow-y: auto;
+}
+.studio-receipt-actions {
+  display: flex;
+  align-items: center;
+  gap: 23px;
+  margin-top: 19px;
+  flex-wrap: wrap;
+}
+.studio-history h2 {
+  margin-bottom: 15px;
+}
+.studio-history > button {
+  display: flex;
+  gap: 15px;
+  justify-content: space-between;
+  width: 100%;
+  padding: 15px 0;
+  font-size: 13px;
+  border: 0;
+  border-top: 1px solid #eee6f4;
+  background: transparent;
+  color: #8a7499;
+}
+.studio-history > button > span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+@media (max-width: 1100px) {
+  .studio-grid {
+    grid-template-columns: minmax(0, 1.3fr) minmax(225px, 1fr);
+    gap: 17px;
+  }
+}
+@media (max-width: 780px) {
+  .studio-grid {
+    grid-template-columns: 1fr;
+  }
+  .studio-inspector {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+  }
+  .studio-status-card {
+    padding: 22px 15px;
+  }
+  .studio-status-card h2 {
+    font-size: 15px;
+  }
+  .studio-status-icon {
+    margin-block: 17px;
+    width: 56px;
+    height: 56px;
+  }
+  .studio-source,
+  .studio-source textarea {
+    min-height: 300px;
+  }
+}
+@media (max-width: 480px) {
+  .studio-inspector {
+    grid-template-columns: 1fr;
+  }
+  .studio-status-card {
+    padding: 23px;
+  }
+  .studio-source textarea {
+    font-size: 12px;
+    padding: 20px 17px;
+  }
+  .studio-editor-heading {
+    padding-inline: 17px;
+  }
+  .studio-presets {
+    padding-inline: 17px;
+  }
+  .studio-log {
+    padding: 16px;
+    font-size: 11px;
+  }
+  .studio-log-line {
+    gap: 11px;
+  }
+  .studio-terminal-heading {
+    padding-inline: 17px;
+  }
+  .studio-terminal-count {
+    display: none;
+  }
+  .studio-receipt-details {
+    gap: 10px;
+  }
+  .studio-receipt-details strong {
+    font-size: 12px;
+  }
+  .studio-history > button {
+    flex-wrap: wrap;
+  }
+}

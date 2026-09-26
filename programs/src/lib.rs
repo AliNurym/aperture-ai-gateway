@@ -1,10 +1,23 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
+use std::str::FromStr;
 
 // Unique program ID on Solana Devnet
 declare_id!("C2q9yxux7b7bxFF64pkZUV6g2Vcs2bQ1FS4GUQy512wv");
 
 pub const MAX_BURN_RATE_LAMPORTS_PER_SECOND: u64 = 25_000;
+
+fn configured_protocol_authority() -> Result<Pubkey> {
+    let authority_str = option_env!("APERTURE_CONFIG_AUTHORITY")
+        .ok_or(ApertureError::ConfigAuthorityNotConfigured)?;
+    let authority = Pubkey::from_str(authority_str)
+        .map_err(|_| error!(ApertureError::ConfigAuthorityNotConfigured))?;
+    require!(
+        authority != Pubkey::default() && authority != system_program::ID && authority != crate::ID,
+        ApertureError::ConfigAuthorityNotConfigured
+    );
+    Ok(authority)
+}
 
 #[program]
 pub mod aperture_gateway {
@@ -12,8 +25,20 @@ pub mod aperture_gateway {
 
     /// Initializes the protocol-wide oracle and payout destination once.
     pub fn initialize_config(ctx: Context<InitializeConfig>, treasury: Pubkey) -> Result<()> {
-        require!(treasury != Pubkey::default(), ApertureError::InvalidTreasury);
-        require!(treasury != system_program::ID, ApertureError::InvalidTreasury);
+        let expected_authority = configured_protocol_authority()?;
+        require_keys_eq!(
+            ctx.accounts.authority.key(),
+            expected_authority,
+            ApertureError::UnauthorizedConfigAuthority
+        );
+        require!(
+            treasury != Pubkey::default(),
+            ApertureError::InvalidTreasury
+        );
+        require!(
+            treasury != system_program::ID,
+            ApertureError::InvalidTreasury
+        );
         require!(treasury != crate::ID, ApertureError::InvalidTreasury);
 
         let config = &mut ctx.accounts.config;
@@ -26,10 +51,7 @@ pub mod aperture_gateway {
 
     /// Initializes a streaming payment channel PDA for the user.
     /// Locks initial SOL into the contract to fuel autonomous AI compute workloads.
-    pub fn open_channel(
-        ctx: Context<OpenChannel>,
-        initial_deposit: u64,
-    ) -> Result<()> {
+    pub fn open_channel(ctx: Context<OpenChannel>, initial_deposit: u64) -> Result<()> {
         require!(initial_deposit > 0, ApertureError::InsufficientBalance);
         let channel_info = ctx.accounts.channel.to_account_info();
         let channel = &mut ctx.accounts.channel;
@@ -102,8 +124,14 @@ pub mod aperture_gateway {
         let channel_info = ctx.accounts.channel.to_account_info();
         let treasury_info = ctx.accounts.treasury.to_account_info();
         let channel = &mut ctx.accounts.channel;
-        require!(new_rate == 0 || channel.balance > 0, ApertureError::InsufficientBalance);
-        require!(channel.oracle == ctx.accounts.config.oracle, ApertureError::InvalidOracle);
+        require!(
+            new_rate == 0 || channel.balance > 0,
+            ApertureError::InsufficientBalance
+        );
+        require!(
+            channel.oracle == ctx.accounts.config.oracle,
+            ApertureError::InvalidOracle
+        );
         let current_time = Clock::get()?.unix_timestamp;
 
         // Charge elapsed time under the previous rate and move those SOL now.
@@ -144,7 +172,10 @@ pub mod aperture_gateway {
         let user_info = ctx.accounts.user.to_account_info();
         let treasury_info = ctx.accounts.treasury.to_account_info();
         let channel = &mut ctx.accounts.channel;
-        require!(channel.oracle == ctx.accounts.config.oracle, ApertureError::InvalidOracle);
+        require!(
+            channel.oracle == ctx.accounts.config.oracle,
+            ApertureError::InvalidOracle
+        );
         let current_time = Clock::get()?.unix_timestamp;
 
         let elapsed_seconds = (current_time.saturating_sub(channel.last_update_time)) as u64;
@@ -303,4 +334,8 @@ pub enum ApertureError {
     BurnRateTooHigh,
     #[msg("A payment channel cannot be topped up while a task is running")]
     ChannelBusy,
+    #[msg("Build with APERTURE_CONFIG_AUTHORITY set to the intended protocol authority")]
+    ConfigAuthorityNotConfigured,
+    #[msg("Only the authority pinned into this program build may initialize the protocol config")]
+    UnauthorizedConfigAuthority,
 }

@@ -90,7 +90,20 @@ class SolanaClient:
         """Derives the singleton protocol configuration PDA."""
         return Pubkey.find_program_address([b"config"], self.program_id)
 
+    def _configured_protocol_authority(self) -> Pubkey:
+        authority_str = (os.getenv("APERTURE_CONFIG_AUTHORITY") or "").strip()
+        if not authority_str:
+            raise ValueError("Set APERTURE_CONFIG_AUTHORITY before using the live payment channel.")
+        try:
+            authority = Pubkey.from_string(authority_str)
+        except Exception as e:
+            raise ValueError("APERTURE_CONFIG_AUTHORITY must be a valid Solana public key.") from e
+        if authority in (Pubkey.default(), SYSTEM_PROGRAM_ID, self.program_id):
+            raise ValueError("APERTURE_CONFIG_AUTHORITY must be a signing-wallet address.")
+        return authority
+
     async def get_protocol_config(self) -> dict | None:
+        expected_authority = self._configured_protocol_authority()
         config_pda, _bump = self.get_config_pda()
         response = await self.client.get_account_info(config_pda)
         account = response.value
@@ -105,6 +118,8 @@ class SolanaClient:
         authority = Pubkey.from_bytes(data[8:40])
         oracle = Pubkey.from_bytes(data[40:72])
         treasury = Pubkey.from_bytes(data[72:104])
+        if authority != expected_authority:
+            raise ValueError("On-chain protocol authority does not match APERTURE_CONFIG_AUTHORITY.")
         if oracle != self.ai_signer.pubkey():
             raise ValueError("On-chain oracle does not match BACKEND_PRIVATE_KEY.")
 
@@ -119,6 +134,9 @@ class SolanaClient:
     async def initialize_protocol_config(self, treasury_address: str) -> str | None:
         """Initializes the immutable oracle/treasury config once; never changes an existing payout address."""
         try:
+            expected_authority = self._configured_protocol_authority()
+            if self.ai_signer.pubkey() != expected_authority:
+                raise ValueError("BACKEND_PRIVATE_KEY must match APERTURE_CONFIG_AUTHORITY for initialization.")
             treasury = Pubkey.from_string(treasury_address)
             if treasury in (Pubkey.default(), SYSTEM_PROGRAM_ID, self.program_id):
                 raise ValueError("APERTURE_TREASURY_PUBKEY must be a wallet address, not a program address.")

@@ -1,11 +1,17 @@
 import requests
 import time
 import sys
+import hashlib
 
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
 BASE = 'http://127.0.0.1:8000'
+
+
+def signed_message(wallet: str, code: str) -> str:
+    digest = hashlib.sha256(code.encode("utf-8")).hexdigest()
+    return f"Aperture execution request\nwallet:{wallet}\ncode_sha256:{digest}"
 
 print('1. Checking /stats...')
 s = requests.get(f'{BASE}/stats').json()
@@ -30,10 +36,11 @@ print(f'COMPUTED {N}x{N} MATRIX MULTIPLICATION')
 ''',
     'wallet': 'DEMO_DEVNET_SOLANA_GUEST',
     'signature': [0]*64,
-    'message': 'Sign to authenticate execution.'
 }
+payload['message'] = signed_message(payload['wallet'], payload['code'])
 res = requests.post(f'{BASE}/execute', json=payload).json()
 task_id = res['task_id']
+task_access_token = res['task_access_token']
 print(f'   Task initiated: {task_id}')
 print(f'   Burn rate: {res["burn_rate"]} SOL/sec ({res["burn_rate_lamports"]} lamports/sec)')
 print(f'   Complexity Score: {res["complexity_score"]}/100')
@@ -44,11 +51,11 @@ completed = False
 for i in range(15):
     time.sleep(1)
     # Check stream log
-    stream_res = requests.get(f'{BASE}/stream_log/{task_id}').json()
+    stream_res = requests.get(f'{BASE}/stream_log/{task_id}', params={'access_token': task_access_token}).json()
     if stream_res.get('lines'):
         print(f'   📡 Streamed chunk ({len(stream_res["lines"])} lines): {stream_res["lines"][0].strip()[:60]}...')
     
-    status_res = requests.get(f'{BASE}/result/{task_id}').json()
+    status_res = requests.get(f'{BASE}/result/{task_id}', params={'access_token': task_access_token}).json()
     if status_res.get('status') == 'completed':
         print('   ✅ Worker execution settled:')
         print('   Output:\n', status_res['output'])
@@ -68,7 +75,7 @@ if nn_bench:
         'code': nn_bench['code'],
         'wallet': 'DEMO_DEVNET_SOLANA_GUEST',
         'signature': [0]*64,
-        'message': 'Sign'
+        'message': signed_message('DEMO_DEVNET_SOLANA_GUEST', nn_bench['code'])
     }).json()
     print(f'   NN Task ID: {nn_res["task_id"]} | Complexity: {nn_res["complexity_score"]}/100 | Burn: {nn_res["burn_rate_lamports"]} L/s')
 
@@ -77,8 +84,8 @@ malicious = {
     'code': 'import os\nos.system("rm -rf /")',
     'wallet': 'DEMO_DEVNET_SOLANA_GUEST',
     'signature': [0]*64,
-    'message': 'Sign'
 }
+malicious['message'] = signed_message(malicious['wallet'], malicious['code'])
 sec_res = requests.post(f'{BASE}/execute', json=malicious)
 print(f'   Security response status code: {sec_res.status_code} (Expected 403)')
 print('   Detail:', sec_res.json().get('detail'))

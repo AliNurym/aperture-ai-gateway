@@ -1,10 +1,12 @@
-# Aperture — Compute Workspace
+# Aperture — On-Demand Python Compute
 
-A Material 3 workspace for short Python workloads and an experimental Solana Devnet compute gateway.
+Aperture is a Solana-powered compute network for Python and AI workloads. Developers use Compute Studio to review source-policy findings and runtime estimates, authorize jobs with a Solana wallet, and follow results from connected workers. The gateway queues each task; a worker executes the Python and streams output back. Live payment-channel billing begins only after the worker claims the task, and Compute Studio shows settlement evidence when available.
+
+The hackathon MVP includes the task queue, authenticated worker handoff, Python execution, source-policy preview, and Devnet payment-channel integration. GPU acceleration and provider payouts are planned milestones.
 
 The application has two explicit modes:
 
-- **Browser demo:** local workflow preview with example policy feedback and an illustrative quote. It never executes Python, signs a message, contacts a worker or makes a payment.
+- **Browser demo:** local walkthrough with selectable Python examples and simulated progress. It never executes Python, signs a message, contacts a worker or makes a payment.
 - **Devnet gateway:** one-time wallet authorization, server-side source policy, authenticated worker dispatch, streamed output and recorded settlement evidence. This requires a configured gateway, an approved worker and a deployed compatible payment-channel program.
 
 ## Start on Windows
@@ -35,6 +37,7 @@ The checked-in `frontend/package-lock.json` is the canonical dependency lock. Se
 Copy `backend/.env.example` to `backend/.env` and configure:
 
 - `APERTURE_WORKER_TOKEN`: a unique secret of at least 16 characters, shared with approved workers. Example placeholders are rejected.
+- `APERTURE_CONFIG_AUTHORITY`: public key pinned into the Anchor program at build time. It must match the protected backend signing wallet used to initialize the protocol config.
 - `BACKEND_PRIVATE_KEY`: your development oracle signer, for Devnet payment-channel operations.
 - `APERTURE_TREASURY_PUBKEY`: the shared payout wallet for confirmed channel charges.
 - `SOLANA_RPC_URL` and `SOLANA_PROGRAM_ID`: the intended Devnet deployment.
@@ -42,7 +45,14 @@ Copy `backend/.env.example` to `backend/.env` and configure:
 
 Keep `APERTURE_DEMO_MODE=false`. The browser demo is independent of this backend setting.
 
-The live wallet flow requires the revised Anchor program to be deployed and its one-time protocol config initialized. After setting the treasury address and oracle signer, run this command from `backend/`:
+The protocol initializer is pinned to `APERTURE_CONFIG_AUTHORITY` at program build time. Choose and protect that signing wallet first, set the same public key in `backend/.env`, and build the program from the project root with that environment variable:
+
+```powershell
+$env:APERTURE_CONFIG_AUTHORITY = "<protected signing-wallet public key>"
+anchor build
+```
+
+Set `BACKEND_PRIVATE_KEY` to the matching private key in `backend/.env`, then deploy and verify this guarded program before initializing the protocol config. A source edit does not change an existing on-chain deployment; do not run the initializer against a program that was not built with this authority check. After verification, run the command from `backend/`:
 
 ```powershell
 .\venv\Scripts\python.exe .\init_protocol_config.py

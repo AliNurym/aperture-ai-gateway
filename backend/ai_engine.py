@@ -22,48 +22,53 @@ if GEMINI_API_KEY:
         genai_client = None
 
 
-_cached_sol_price = 99.75
+_cached_sol_price: float | None = None
 _last_sol_price_fetch = 0.0
+MAX_SOL_PRICE_STALENESS_SECONDS = 30
 
-def get_sol_price_from_pyth() -> float:
+def get_sol_price_from_pyth() -> float | None:
     """
-    Solana Devnet / Pyth Oracle Price Feed (Pyth Hermes -> Binance -> Fallback).
-    Cached for 5 seconds to provide blazing-fast zero-latency responses.
+    Fetch the SOL/USD reference price from Pyth, then Binance as a real-data fallback.
+    Return a recent real price, or None if both sources fail or the cache is stale.
     """
     global _cached_sol_price, _last_sol_price_fetch
     now = time.time()
-    if now - _last_sol_price_fetch < 5.0 and _cached_sol_price > 0:
+    if now - _last_sol_price_fetch < 5.0 and _cached_sol_price is not None:
         return _cached_sol_price
 
     try:
         # Pyth Network SOL/USD Price Feed ID
         price_id = "ef0d8b6fda2ceba41da15d4095d1da99f0e283034f2ff974b299a34f758f361b"
         url = f"https://hermes.pyth.network/v2/updates/price/latest?ids%5B%5D={price_id}"
-        
+
         response = requests.get(url, timeout=2.5)
         if response.status_code == 200:
             data = response.json()
             price_info = data['parsed'][0]['price']
             raw_price = float(price_info['price'])
             exponent = float(price_info['expo'])
-            price = round(raw_price * (10 ** exponent), 2)
-            _cached_sol_price = price
-            _last_sol_price_fetch = now
-            return price
+            price = raw_price * (10 ** exponent)
+            if math.isfinite(price) and price > 0:
+                _cached_sol_price = round(price, 2)
+                _last_sol_price_fetch = now
+                return _cached_sol_price
     except Exception as e:
         pass
 
     try:
         res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT", timeout=2.5)
         if res.status_code == 200:
-            price = round(float(res.json()['price']), 2)
-            _cached_sol_price = price
-            _last_sol_price_fetch = now
-            return price
+            price = float(res.json()['price'])
+            if math.isfinite(price) and price > 0:
+                _cached_sol_price = round(price, 2)
+                _last_sol_price_fetch = now
+                return _cached_sol_price
     except Exception as e:
         pass
 
-    return _cached_sol_price or 99.75  # Resilient fallback
+    if _cached_sol_price is not None and now - _last_sol_price_fetch <= MAX_SOL_PRICE_STALENESS_SECONDS:
+        return _cached_sol_price
+    return None
 
 
 def sigmoid(x: float) -> float:
@@ -102,20 +107,23 @@ def calculate_quantum_price(complexity_sum: float, hw_power: float = 2.5, teleme
 
 class CodeComplexityVisitor(ast.NodeVisitor):
     """
-    High-Performance Python AST Static Security & Complexity Analyzer.
-    Operates in milliseconds without external network calls, ensuring
-    100% reliable pre-execution audits for the AI-Sentinel Oracle.
+    Python AST source-policy and workload-complexity analyzer.
+    It flags selected syntax patterns; it is not a sandbox or a safety guarantee.
     """
     DANGEROUS_MODULES = {
         "os", "sys", "subprocess", "shutil", "socket", "pty", "commands",
         "builtins", "importlib", "pickle", "ctypes", "posix", "nt",
         "urllib", "http.client", "ftplib", "telnetlib"
     }
-    
+
     DANGEROUS_FUNCTIONS = {
         "eval", "exec", "__import__", "compile", "globals", "locals",
         "system", "popen", "spawn", "fork", "kill", "rmdir", "remove", "unlink"
     }
+    # A deny-list alone is not a sandbox: newly discovered stdlib modules and
+    # indirect imports would otherwise execute on a worker. Keep workloads
+    # intentionally small and deterministic until they run in containers.
+    ALLOWED_MODULES = {"math", "random", "time", "hashlib", "statistics", "decimal", "fractions"}
 
     def __init__(self):
         self.security_violations = []
@@ -134,16 +142,16 @@ class CodeComplexityVisitor(ast.NodeVisitor):
         for alias in node.names:
             self.imported_modules.add(alias.name)
             base_module = alias.name.split('.')[0]
-            if base_module in self.DANGEROUS_MODULES:
-                self.security_violations.append(f"Restricted module import: '{alias.name}' (line {node.lineno})")
+            if base_module not in self.ALLOWED_MODULES:
+                self.security_violations.append(f"Module is not allowed: '{alias.name}' (line {node.lineno})")
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node):
         if node.module:
             self.imported_modules.add(node.module)
             base_module = node.module.split('.')[0]
-            if base_module in self.DANGEROUS_MODULES:
-                self.security_violations.append(f"Restricted module import: '{node.module}' (line {node.lineno})")
+            if base_module not in self.ALLOWED_MODULES:
+                self.security_violations.append(f"Module is not allowed: '{node.module}' (line {node.lineno})")
         self.generic_visit(node)
 
     def visit_Call(self, node):
@@ -155,10 +163,7 @@ class CodeComplexityVisitor(ast.NodeVisitor):
             if func_name in self.DANGEROUS_FUNCTIONS:
                 self.security_violations.append(f"Forbidden function call: '{func_name}' (line {node.lineno})")
             elif func_name == "open":
-                # Check write modes
-                for arg in node.args[1:]:
-                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and any(m in arg.value for m in ['w', 'a', '+', 'x']):
-                        self.security_violations.append(f"Forbidden file write: 'open' with mode '{arg.value}' (line {node.lineno})")
+                self.security_violations.append(f"Filesystem access is forbidden: 'open' (line {node.lineno})")
 
         elif isinstance(node.func, ast.Attribute):
             attr_name = node.func.attr
@@ -166,6 +171,19 @@ class CodeComplexityVisitor(ast.NodeVisitor):
             if attr_name in self.DANGEROUS_FUNCTIONS:
                 self.security_violations.append(f"Forbidden method call: '{attr_name}' (line {node.lineno})")
 
+        self.generic_visit(node)
+
+    def visit_Name(self, node):
+        if node.id.startswith("__"):
+            self.security_violations.append(f"Dunder access is forbidden: '{node.id}' (line {node.lineno})")
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node):
+        # Private attributes commonly expose imported implementation modules
+        # (for example random._os). They are not part of the workload API and
+        # bypass a module-level allowlist, so permit public attributes only.
+        if node.attr.startswith("_"):
+            self.security_violations.append(f"Private attribute access is forbidden: '{node.attr}' (line {node.lineno})")
         self.generic_visit(node)
 
     def visit_For(self, node):
@@ -207,9 +225,15 @@ class CodeComplexityVisitor(ast.NodeVisitor):
 
 def analyze_code_ast(code_snippet: str) -> dict:
     """
-    Executes deep static AST analysis to compute deterministically
-    complexity metrics, security classification, and gas/time estimates.
+    Performs deterministic AST-based source-policy checks and rough workload estimates.
+    A passing result does not isolate execution or certify arbitrary Python as safe.
     """
+    if not isinstance(code_snippet, str) or len(code_snippet.encode("utf-8")) > 32_000:
+        return {
+            "security": "DANGEROUS", "syntax_valid": False, "predicted_sec": 0,
+            "cpu": 0, "ram": 0, "reason": "Payload rejected: maximum source size is 32 KiB"
+        }
+
     try:
         tree = ast.parse(code_snippet)
     except SyntaxError as e:
@@ -221,6 +245,12 @@ def analyze_code_ast(code_snippet: str) -> dict:
             "cpu": 0,
             "ram": 0,
             "reason": f"Payload rejected: Python Syntax Error at line {e.lineno}"
+        }
+
+    if sum(1 for _ in ast.walk(tree)) > 5_000:
+        return {
+            "security": "DANGEROUS", "syntax_valid": True, "predicted_sec": 0,
+            "cpu": 0, "ram": 0, "reason": "Payload rejected: AST is too large"
         }
 
     visitor = CodeComplexityVisitor()
@@ -315,9 +345,9 @@ def analyze_code_ast(code_snippet: str) -> dict:
 
 def analyze_code_complexity(code_snippet: str) -> dict:
     """
-    Primary AI-Sentinel Audit Oracle Entry Point.
-    Combines Static AST Security & Complexity validation with optional
-    Gemini 2.5 Flash neural evaluation, backed by Pyth real-time price feeds.
+    Main workload-analysis entry point.
+    Combines deterministic AST checks with optional Gemini reasoning and a recent
+    SOL/USD reference price when an external feed is available.
     """
     # 1. Deterministic Layer 1: Static AST Analysis
     ast_audit = analyze_code_ast(code_snippet)
@@ -394,4 +424,4 @@ def analyze_code_complexity(code_snippet: str) -> dict:
         "calculated_rate_sol_sec": price_per_sec,
         "calculated_rate_lamports_sec": int(price_per_sec * 1_000_000_000),
         "sol_market_price": sol_price
-    }
+    }

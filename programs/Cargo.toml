@@ -1,0 +1,19 @@
+[package]
+name = "aperture-gateway"
+version = "0.2.0"
+description = "Aperture AI payment-channel program"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "aperture_gateway"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang = "0.29.0"

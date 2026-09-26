@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+oracle_keypair.json
+*.key
+*.pem
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.git/
+node_modules/
+dist/
+target/
+task_*.py
+*.log
