@@ -27,7 +27,17 @@ const seeds = (name, ...parts) => PublicKey.findProgramAddressSync([Buffer.from(
 const config = seeds('config');
 const channel = seeds('channel', owner.publicKey.toBuffer());
 const passport = seeds('agent', agent.publicKey.toBuffer());
-const send = async (ix, signers) => sendAndConfirmTransaction(connection, new Transaction().add(ix), signers, { commitment: 'confirmed' });
+const send = async (ix, signers) => {
+  const latest = await connection.getLatestBlockhash('processed');
+  const transaction = new Transaction({
+    feePayer: signers[0].publicKey,
+    blockhash: latest.blockhash,
+    lastValidBlockHeight: latest.lastValidBlockHeight,
+  }).add(ix);
+  return sendAndConfirmTransaction(connection, transaction, signers, {
+    commitment: 'processed', preflightCommitment: 'processed',
+  });
+};
 const ix = (name, data, keys) => new TransactionInstruction({
   programId, data: Buffer.concat([discriminator('global:' + name), ...data]),
   keys: keys.map(([pubkey, isSigner = false, isWritable = false]) => ({ pubkey, isSigner, isWritable })),
@@ -41,9 +51,13 @@ const requireKeys = (accounts, name) => {
   return accounts.map(([pubkey, signer = false, writable = false]) => [pubkey, signer, writable]);
 };
 const expectRejected = async (promise, label) => {
-  let failed = false;
-  try { await promise; } catch { failed = true; }
-  assert(failed, label + ' unexpectedly succeeded');
+  let error;
+  try { await promise; } catch (caught) { error = caught; }
+  assert(error, label + ' unexpectedly succeeded');
+  assert(
+    typeof error.transactionMessage === 'string' || Array.isArray(error.transactionLogs),
+    `${label} failed before transaction execution: ${error.message}`,
+  );
 };
 
 const ledger = await mkdtemp(join(tmpdir(), 'aperture-v2-ledger-'));
@@ -57,7 +71,7 @@ validator.stderr.on('data', chunk => { validatorOutput = (validatorOutput + chun
 let connection;
 
 try {
-  connection = new Connection(url, 'confirmed');
+  connection = new Connection(url, 'processed');
   let ready = false;
   let lastRpcError;
   for (let attempt = 0; attempt < 90; attempt++) {
@@ -74,8 +88,7 @@ try {
   async function airdrop(keypairOrPublicKey, sol = 2) {
     const publicKey = keypairOrPublicKey.publicKey ?? keypairOrPublicKey;
     const signature = await connection.requestAirdrop(publicKey, sol * 1_000_000_000);
-    const latest = await connection.getLatestBlockhash('confirmed');
-    await connection.confirmTransaction({ signature, ...latest }, 'confirmed');
+    await connection.confirmTransaction(signature, 'processed');
   }
   for (const key of [authority, owner, wrongOracle]) await airdrop(key);
 
