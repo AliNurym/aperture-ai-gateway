@@ -107,9 +107,9 @@ class Gateway:
             raise HTTPException(403, "The quote exceeds the agent's delegated capabilities or limits.")
         # Reserve full task bounds until final settlement; never spend a not-yet
         # reconciled allowance again after an RPC failure or process restart.
-        jobs = [job for job in self.store.list("jobs") if job.get("agent_pubkey") == agent]
-        reserved = sum(job["max_cost_lamports"] for job in jobs if job["state"] in ACTIVE_STATES)
-        spent = sum((job.get("receipt") or {}).get("charged_lamports") or 0 for job in jobs if job["state"] == "completed")
+        jobs = [job for job in self.store.list("jobs") if job.get("agent_pubkey") == agent and job["state"] in ACTIVE_STATES]
+        reserved = sum(job["max_cost_lamports"] for job in jobs)
+        spent = self.store.spent_for_agent(agent)
         if reserved + spent + max_cost > item["total_budget_lamports"]:
             raise HTTPException(403, "Agent lifetime budget has no available allowance.")
         if not self.demo_mode:
@@ -412,7 +412,6 @@ class Gateway:
                             self.store.save_job(job)
                             await self.settle(job)
                             continue
-                    now = time.time()
                     prepared = None
                     if not self.demo_mode:
                         try:
@@ -420,7 +419,7 @@ class Gateway:
                         except Exception:
                             return {"task_id": None}
                     job.update(state="starting", worker_id=worker_id, lease_id=secrets.token_urlsafe(24), start_intent=True, prepared_start=prepared,
-                               started_at=now, deadline_unix=int(now) + job["effective_runtime_seconds"])
+                               started_at=None, deadline_unix=None)
                     self.store.save_job(job)
                     start = None
                     if not self.demo_mode:
@@ -434,7 +433,37 @@ class Gateway:
                             self.store.save_job(job)
                             await self.settle(job)
                             return {"task_id": None}
-                    job.update(state="running", start_signature=start)
+                    if self.demo_mode:
+                        started_at = time.time()
+                        deadline_unix = int(started_at) + job["effective_runtime_seconds"]
+                    else:
+                        try:
+                            receipt = await self.solana.get_task_receipt(job["task_hash"])
+                            if (not receipt or receipt["settled"] or receipt["owner"] != job["wallet"]
+                                    or receipt["agent_pubkey"] != job["agent_pubkey"]
+                                    or receipt["source_hash"] != job["code_sha256"]
+                                    or receipt["rate_lamports"] != job["rate_lamports"]
+                                    or receipt["max_cost_lamports"] != job["max_cost_lamports"]):
+                                raise ValueError("Confirmed task receipt does not match the admitted workload.")
+                            started_at = receipt["started_at"]
+                            deadline_unix = receipt["deadline"]
+                            if (type(started_at) is not int or type(deadline_unix) is not int
+                                    or deadline_unix <= started_at
+                                    or deadline_unix > started_at + job["effective_runtime_seconds"]):
+                                raise ValueError("Confirmed task receipt has invalid execution bounds.")
+                        except Exception:
+                            job.update(state="settlement_pending", cancelled=True, result={"output": "START_RECEIPT_UNAVAILABLE", "full_log": "START_RECEIPT_UNAVAILABLE", "execution_status": "failed", "execution_time": 0})
+                            self.store.save_job(job)
+                            await self.settle(job)
+                            return {"task_id": None}
+                    if time.time() >= deadline_unix:
+                        elapsed = max(0, min(time.time() - started_at, job["effective_runtime_seconds"]))
+                        job.update(state="settlement_pending", cancelled=True, started_at=started_at, deadline_unix=deadline_unix,
+                                   result={"output": "EXECUTION_WINDOW_ELAPSED_BEFORE_DISPATCH", "full_log": "EXECUTION_WINDOW_ELAPSED_BEFORE_DISPATCH", "execution_status": "failed", "execution_time": elapsed})
+                        self.store.save_job(job)
+                        await self.settle(job)
+                        return {"task_id": None}
+                    job.update(state="running", start_signature=start, started_at=started_at, deadline_unix=deadline_unix)
                     self.store.save_job(job)
                     return {key: job[key] for key in ("task_id", "code", "wallet", "agent_pubkey", "quote_id", "lease_id", "code_sha256", "max_cost_lamports", "max_runtime_seconds", "deadline_unix")} | {"source_hash": job["code_sha256"], "execution_deadline": job["deadline_unix"]}
             return {"task_id": None}

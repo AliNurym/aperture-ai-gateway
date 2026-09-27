@@ -1,128 +1,21 @@
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block');
-
-/* ==========================================================================
-   Aperture AI — Google Material Design 3 (Material You) Design System
-   With Expressive Motion, Tonal Surfaces, State Layers & Rich Micro-Animations
-   ========================================================================== */
-
-:root {
-  /* Surface Hierarchy (Google Material 3 Tonal Elevation) */
-  --m3-surface: #ffffff;
-  --m3-surface-dim: #f8fafc;
-  --m3-surface-bright: #ffffff;
-  --m3-surface-container-lowest: #ffffff;
-  --m3-surface-container-low: #f8fafc;
-  --m3-surface-container: #f1f5f9;
-  --m3-surface-container-high: #e2e8f0;
-  --m3-surface-container-highest: #cbd5e1;
-
-  /* Typography Colors (M3 On-Surface Tonal) */
-  --m3-text-primary: #0f172a;       /* M3 On-Surface 900 */
-  --m3-text-secondary: #334155;     /* M3 On-Surface-Variant 700 */
-  --m3-text-muted: #64748b;         /* M3 On-Surface-Variant 500 */
-  --m3-text-light: #94a3b8;
-
-  /* Accent Roles (M3 Material You Vibrant & Harmonious) */
-  --m3-primary: #0f172a;
-  --m3-primary-hover: #1e293b;
-  --m3-primary-container: #e0e7ff;
-  --m3-on-primary-container: #1e1b4b;
-
-  --m3-blue: #2563eb;
-  --m3-blue-container: #dbeafe;
-  --m3-indigo: #4f46e5;
-  --m3-indigo-container: #e0e7ff;
-  --m3-purple: #7c3aed;
-  --m3-purple-container: #ede9fe;
-
-  /* Status Colors */
-  --m3-green: #059669;
-  --m3-green-bg: #ecfdf5;
-  --m3-green-border: #a7f3d0;
-
-  --m3-red: #dc2626;
-  --m3-red-bg: #fef2f2;
-  --m3-red-border: #fecaca;
-
-  --m3-amber: #d97706;
-  --m3-amber-bg: #fffbeb;
-  --m3-amber-border: #fde68a;
-
-  /* Borders & Hairlines */
-  --m3-border: #e2e8f0;
-  --m3-border-subtle: #f1f5f9;
-  --m3-border-hover: #cbd5e1;
-
-  /* Google Material 3 Shape System */
-  --m3-radius-xs: 4px;
-  --m3-radius-sm: 8px;
-  --m3-radius-md: 12px;
-  --m3-radius-lg: 16px;
-  --m3-radius-xl: 24px;
-  --m3-radius-2xl: 28px;
-  --m3-radius-pill: 9999px;
-
-  /* Google Material 3 Elevation System */
-  --m3-elevation-1: 0 1px 3px 1px rgba(15, 23, 42, 0.05), 0 1px 2px 0 rgba(15, 23, 42, 0.03);
-  --m3-elevation-2: 0 2px 6px 2px rgba(15, 23, 42, 0.06), 0 1px 3px 0 rgba(15, 23, 42, 0.04);
-  --m3-elevation-3: 0 4px 14px 3px rgba(15, 23, 42, 0.08), 0 2px 4px 0 rgba(15, 23, 42, 0.04);
-  --m3-elevation-4: 0 10px 24px 4px rgba(15, 23, 42, 0.1), 0 4px 8px 0 rgba(15, 23, 42, 0.05);
-  --m3-elevation-5: 0 20px 48px 8px rgba(15, 23, 42, 0.14), 0 8px 16px 0 rgba(15, 23, 42, 0.06);
-
-  /* Google Material 3 Expressive Motion Easing */
-  --m3-motion-emphasized: cubic-bezier(0.2, 0.0, 0, 1.0);
-  --m3-motion-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1.0);
-  --m3-motion-accelerate: cubic-bezier(0.3, 0.0, 0.8, 0.15);
-  --m3-motion-standard: cubic-bezier(0.2, 0.0, 0, 1.0);
-}
-
+/* Shared foundation and wallet surfaces for the Aperture workspace. */
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
-html, body, #root {
-  background-color: var(--m3-surface-dim);
-  color: var(--m3-text-primary);
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+html,
+body,
+#root {
   min-height: 100vh;
-  overflow-x: hidden;
+  background: var(--console-bg, #faf8fc);
+  color: var(--console-ink, #282332);
+  font-family: Roboto, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Material Symbols Rounded Icon Engine */
-.material-symbols-rounded {
-  font-family: 'Material Symbols Rounded' !important;
-  font-weight: normal;
-  font-style: normal;
-  font-size: 19px;
-  line-height: 1;
-  letter-spacing: normal;
-  text-transform: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  white-space: nowrap;
-  word-wrap: normal;
-  direction: ltr;
-  vertical-align: middle;
-  -webkit-font-feature-settings: 'liga';
-  font-feature-settings: 'liga';
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-  font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 24;
-  user-select: none;
-  transition: transform 0.2s var(--m3-motion-standard), font-variation-settings 0.2s var(--m3-motion-standard);
-}
-
-.material-symbols-rounded.filled {
-  font-variation-settings: 'FILL' 1, 'wght' 600, 'GRAD' 0, 'opsz' 24;
-}
-
-/* Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -131,461 +24,140 @@ html, body, #root {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: var(--m3-radius-pill);
+  background: #c8bbd5;
+  border-radius: 20px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #a48ebc;
 }
 
-/* ==========================================================================
-   Material 3 Signature Keyframe Animations
-   ========================================================================== */
-
-/* Staggered Fade-in and Slide-up */
-@keyframes m3FadeInUp {
-  0% {
-    opacity: 0;
-    transform: translateY(20px) scale(0.98);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.m3-anim-1 { animation: m3FadeInUp 0.5s var(--m3-motion-decelerate) 0.05s both; }
-.m3-anim-2 { animation: m3FadeInUp 0.5s var(--m3-motion-decelerate) 0.12s both; }
-.m3-anim-3 { animation: m3FadeInUp 0.5s var(--m3-motion-decelerate) 0.20s both; }
-.m3-anim-4 { animation: m3FadeInUp 0.5s var(--m3-motion-decelerate) 0.28s both; }
-.m3-anim-5 { animation: m3FadeInUp 0.5s var(--m3-motion-decelerate) 0.36s both; }
-
-/* Subtle Gentle Float */
-@keyframes m3Float {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-5px);
-  }
-}
-
-.m3-floating {
-  animation: m3Float 4s ease-in-out infinite;
-}
-
-/* Pulsing Radar / Beacon Ring */
-@keyframes m3RadarRing {
-  0% {
-    transform: scale(0.9);
-    box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.4);
-  }
-  70% {
-    transform: scale(1.05);
-    box-shadow: 0 0 0 8px rgba(5, 150, 105, 0);
-  }
-  100% {
-    transform: scale(0.9);
-    box-shadow: 0 0 0 0 rgba(5, 150, 105, 0);
-  }
-}
-
-.m3-pulse-beacon {
-  animation: m3RadarRing 2.2s infinite cubic-bezier(0.25, 0, 0, 1);
-}
-
-/* Shimmer Sweep Animation */
-@keyframes m3Shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
-
-.m3-shimmer {
-  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.6) 50%, rgba(255,255,255,0) 100%);
-  background-size: 200% 100%;
-  animation: m3Shimmer 3.5s infinite;
-}
-
-/* Flowing Pipeline Data Packet */
-@keyframes m3PacketStream {
-  0% {
-    stroke-dashoffset: 24;
-  }
-  100% {
-    stroke-dashoffset: 0;
-  }
-}
-
-/* ==========================================================================
-   Material 3 Cards & Surfaces
-   ========================================================================== */
-.m3-card {
-  background: var(--m3-surface);
-  border: 1px solid var(--m3-border);
-  border-radius: var(--m3-radius-2xl);
-  box-shadow: var(--m3-elevation-1);
-  transition: all 0.3s var(--m3-motion-emphasized);
-  position: relative;
-  overflow: hidden;
-}
-
-.m3-card:hover {
-  box-shadow: var(--m3-elevation-3);
-  border-color: var(--m3-border-hover);
-  transform: translateY(-3px) scale(1.006);
-}
-
-.m3-card-subtle {
-  background: #f8fafc;
-  border: 1px solid var(--m3-border);
-  border-radius: var(--m3-radius-xl);
-  transition: all 0.25s var(--m3-motion-standard);
-}
-
-/* ==========================================================================
-   Google Material 3 Pill & Extended FAB Buttons
-   ========================================================================== */
-.m3-btn-primary {
-  background: var(--m3-primary);
-  color: #ffffff;
-  font-family: inherit;
-  font-weight: 700;
-  font-size: 14px;
-  letter-spacing: 0.01em;
-  border: none;
-  border-radius: var(--m3-radius-pill);
-  padding: 10px 24px;
-  cursor: pointer;
-  transition: all 0.25s var(--m3-motion-emphasized);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  box-shadow: var(--m3-elevation-2);
-  height: 44px;
-  position: relative;
-  overflow: hidden;
-  user-select: none;
-}
-
-.m3-btn-primary:hover:not(:disabled) {
-  background: var(--m3-primary-hover);
-  transform: translateY(-2px);
-  box-shadow: var(--m3-elevation-3);
-}
-
-.m3-btn-primary:active:not(:disabled) {
-  transform: translateY(0) scale(0.98);
-  box-shadow: var(--m3-elevation-1);
-}
-
-.m3-btn-primary:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-.m3-btn-secondary {
-  background: #ffffff;
-  color: var(--m3-text-primary);
-  font-family: inherit;
-  font-weight: 600;
-  font-size: 13.5px;
-  border: 1px solid var(--m3-border);
-  border-radius: var(--m3-radius-pill);
-  padding: 8px 20px;
-  cursor: pointer;
-  transition: all 0.2s var(--m3-motion-emphasized);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  box-shadow: var(--m3-elevation-1);
-  height: 44px;
-  user-select: none;
-}
-
-.m3-btn-secondary:hover:not(:disabled) {
-  background: #f8fafc;
-  border-color: var(--m3-border-hover);
-  transform: translateY(-1px);
-  box-shadow: var(--m3-elevation-2);
-}
-
-.m3-btn-secondary:active:not(:disabled) {
-  transform: translateY(0) scale(0.98);
-}
-
-.m3-btn-ghost {
-  background: transparent;
-  color: var(--m3-text-secondary);
-  font-family: inherit;
-  font-weight: 600;
-  font-size: 13px;
-  border: none;
-  border-radius: var(--m3-radius-pill);
-  padding: 8px 16px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 40px;
-}
-
-.m3-btn-ghost:hover {
-  background: rgba(15, 23, 42, 0.05);
-  color: var(--m3-text-primary);
-}
-
-/* ==========================================================================
-   Material 3 Chips & Badges
-   ========================================================================== */
-.m3-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 14px;
-  border-radius: var(--m3-radius-pill);
-  font-size: 12px;
-  font-weight: 600;
-  border: 1px solid var(--m3-border);
-  background: #ffffff;
-  color: var(--m3-text-secondary);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  transition: all 0.2s ease;
-}
-
-.m3-badge-green {
-  background: var(--m3-green-bg);
-  color: var(--m3-green);
-  border-color: var(--m3-green-border);
-}
-
-.m3-badge-blue {
-  background: #eff6ff;
-  color: #2563eb;
-  border-color: #bfdbfe;
-}
-
-.m3-badge-red {
-  background: var(--m3-red-bg);
-  color: var(--m3-red);
-  border-color: var(--m3-red-border);
-}
-
-.m3-badge-amber {
-  background: var(--m3-amber-bg);
-  color: var(--m3-amber);
-  border-color: var(--m3-amber-border);
-}
-
-.m3-filter-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 16px;
-  border-radius: var(--m3-radius-pill);
-  font-size: 12.5px;
-  font-weight: 600;
-  border: 1px solid var(--m3-border);
-  background: #ffffff;
-  color: var(--m3-text-secondary);
-  cursor: pointer;
-  transition: all 0.2s var(--m3-motion-emphasized);
-  user-select: none;
-}
-
-.m3-filter-chip:hover {
-  border-color: #cbd5e1;
-  color: var(--m3-text-primary);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
-}
-
-.m3-filter-chip.active {
-  background: var(--m3-primary);
-  color: #ffffff;
-  border-color: var(--m3-primary);
-  box-shadow: var(--m3-elevation-2);
-}
-
-/* ==========================================================================
-   Material 3 Linear Progress Bar with Smooth Transitions
-   ========================================================================== */
-.m3-progress-track {
-  height: 8px;
-  border-radius: var(--m3-radius-pill);
-  background: #e2e8f0;
-  overflow: hidden;
-  position: relative;
-  width: 100%;
-}
-
-.m3-progress-fill {
-  height: 100%;
-  border-radius: var(--m3-radius-pill);
-  transition: width 0.6s var(--m3-motion-emphasized);
-  background-size: 200% 100%;
-}
-
-/* ==========================================================================
-   Material 3 Range Slider
-   ========================================================================== */
-.m3-slider {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 8px;
-  border-radius: var(--m3-radius-pill);
-  background: #e2e8f0;
-  outline: none;
-  transition: background 0.2s ease;
-}
-
-.m3-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: var(--m3-primary);
-  cursor: pointer;
-  border: 3px solid #ffffff;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.25);
-  transition: transform 0.2s var(--m3-motion-emphasized), box-shadow 0.2s ease;
-}
-
-.m3-slider::-webkit-slider-thumb:hover {
-  transform: scale(1.2);
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.35);
-}
-
-/* ==========================================================================
-   Material 3 Modal Dialog (Frosted Blur & Spring Entrance)
-   ========================================================================== */
-.m3-dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 10000;
-  padding: 24px;
-  animation: m3FadeIn 0.2s ease-out;
-}
-
-@keyframes m3FadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.m3-dialog {
-  background: #ffffff;
-  border-radius: var(--m3-radius-2xl);
-  padding: 36px;
-  border: 1px solid var(--m3-border);
-  box-shadow: var(--m3-elevation-5);
-  max-width: 520px;
-  width: 100%;
-  animation: m3DialogPop 0.35s var(--m3-motion-decelerate);
-}
-
-@keyframes m3DialogPop {
-  0% {
-    opacity: 0;
-    transform: scale(0.92) translateY(12px);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-/* Solana Wallet Adapter Overrides for Material 3 */
 .wallet-adapter-button {
-  background: #0f172a !important;
-  color: #ffffff !important;
-  border: 1px solid #1e293b !important;
-  border-radius: var(--m3-radius-pill) !important;
+  background: var(--console-primary, #6950a1) !important;
+  color: #fff !important;
+  border: 1px solid transparent !important;
+  border-radius: 24px !important;
   font-family: inherit !important;
-  font-weight: 700 !important;
-  font-size: 13px !important;
+  font-weight: 500 !important;
+  font-size: 14px !important;
   height: 40px !important;
   line-height: 40px !important;
   padding: 0 18px !important;
-  box-shadow: var(--m3-elevation-1) !important;
-  transition: all 0.2s var(--m3-motion-emphasized) !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 8px !important;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+.wallet-adapter-button:not([disabled]):hover {
+  background: #5e4496 !important;
+  box-shadow: 0 3px 7px #6950a121;
+}
+.wallet-adapter-button:not([disabled]):focus-visible,
+.wallet-adapter-modal-button-close:focus-visible,
+.wallet-adapter-dropdown-list-item:focus-visible {
+  outline: 3px solid #9d80ca !important;
+  outline-offset: 4px;
 }
 
-.wallet-adapter-button:hover {
-  background: #1e293b !important;
-  border-color: #334155 !important;
-  box-shadow: var(--m3-elevation-2) !important;
-  transform: translateY(-1px) !important;
+.wallet-adapter-modal {
+  background: #241a3159 !important;
+  backdrop-filter: blur(4px);
 }
-
-.wallet-adapter-button-trigger {
-  background: #0f172a !important;
+.wallet-adapter-modal-overlay {
+  background: transparent !important;
 }
-
 .wallet-adapter-modal-wrapper {
-  background: #ffffff !important;
-  border: 1px solid var(--m3-border) !important;
-  border-radius: var(--m3-radius-2xl) !important;
-  box-shadow: var(--m3-elevation-5) !important;
-  color: var(--m3-text-primary) !important;
-  padding: 32px !important;
+  background: #fff !important;
+  border: 1px solid var(--console-line, #ebe6ef) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 18px 54px #30203e26 !important;
+  color: var(--console-ink, #282332) !important;
+  padding: 24px !important;
   font-family: inherit !important;
 }
-
 .wallet-adapter-modal-title {
-  color: var(--m3-text-primary) !important;
-  font-family: 'Outfit', sans-serif !important;
-  font-weight: 800 !important;
+  color: var(--console-ink, #282332) !important;
+  font-family: inherit !important;
+  font-weight: 500 !important;
   font-size: 22px !important;
+  line-height: 1.4 !important;
+  letter-spacing: -0.4px;
+  padding: 48px 0 24px !important;
 }
-
 .wallet-adapter-modal-button-close {
-  background: #f1f5f9 !important;
-  border-radius: 50% !important;
-  color: var(--m3-text-secondary) !important;
+  background: #eee7f6 !important;
+  color: #6950a1 !important;
+  transition: background-color 150ms ease;
 }
-
 .wallet-adapter-modal-button-close:hover {
-  background: #e2e8f0 !important;
-  color: var(--m3-text-primary) !important;
+  background: #e2d7f1 !important;
 }
-
+.wallet-adapter-modal-button-close svg,
+.wallet-adapter-modal-list-more svg {
+  fill: currentColor !important;
+}
 .wallet-adapter-modal-list li .wallet-adapter-button {
-  background: #f8fafc !important;
-  border: 1.5px solid var(--m3-border) !important;
-  color: var(--m3-text-primary) !important;
-  border-radius: var(--m3-radius-xl) !important;
-  font-weight: 700 !important;
-  padding: 12px 20px !important;
+  background: #f5f0fa !important;
+  border: 1px solid #e7dfef !important;
+  color: var(--console-ink, #282332) !important;
+  border-radius: 16px !important;
+  padding: 12px 16px !important;
   height: 52px !important;
-  line-height: 52px !important;
-  margin-bottom: 8px !important;
-  transition: all 0.2s var(--m3-motion-emphasized) !important;
-  justify-content: flex-start !important;
+  line-height: 28px !important;
+  margin-bottom: 8px;
+}
+.wallet-adapter-modal-list li .wallet-adapter-button:hover {
+  background: #ede5f8 !important;
+  border-color: #d6c5e8 !important;
+}
+.wallet-adapter-modal-list .wallet-adapter-button span {
+  opacity: 1 !important;
+  color: var(--console-muted, #6f6677);
+  font-size: 12px !important;
+}
+.wallet-adapter-modal-list-more {
+  color: #6950a1 !important;
+  font-family: inherit;
+  min-height: 44px;
+  border-radius: 12px;
+}
+.wallet-adapter-modal-middle {
+  padding: 0 !important;
+}
+.wallet-adapter-modal-middle-button {
+  background: #6950a1 !important;
+  border-radius: 24px !important;
+  font-family: inherit;
+  font-size: 14px !important;
+  min-height: 44px;
+  margin-top: 20px !important;
 }
 
-.wallet-adapter-modal-list li .wallet-adapter-button:hover {
-  background: #ffffff !important;
-  border-color: var(--m3-blue) !important;
-  transform: translateY(-2px) !important;
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.12) !important;
-  color: var(--m3-blue) !important;
+.wallet-adapter-dropdown-list {
+  background: #fff !important;
+  border: 1px solid #e7dfef;
+  border-radius: 16px !important;
+  box-shadow: 0 8px 28px #30203e1a !important;
+  font-family: inherit !important;
+}
+.wallet-adapter-dropdown-list-item {
+  color: var(--console-ink, #282332) !important;
+  font-weight: 500 !important;
+  border-radius: 10px !important;
+  min-height: 40px;
+}
+.wallet-adapter-dropdown-list-item:not([disabled]):hover {
+  background: #f1eaf8 !important;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wallet-adapter-modal-fade-in .wallet-adapter-modal-wrapper {
+    animation: aperture-wallet-enter 220ms cubic-bezier(0.2, 0, 0, 1) backwards;
+  }
+}
+@keyframes aperture-wallet-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }

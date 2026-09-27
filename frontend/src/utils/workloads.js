@@ -4,8 +4,28 @@ export const WORKLOADS = [
     name: "Agent batch risk scoring",
     category: "Agent analytics",
     icon: "shield",
-    description: "Rank a fixed portfolio with reproducible Monte Carlo loss estimates.",
-    code: '# Agent tool: deterministic batch scenario scoring\nimport random\nimport statistics\nimport json\n\nrng = random.Random(42)\nportfolios = [("balanced", 0.45, 0.08), ("growth", 0.75, 0.14), ("conservative", 0.20, 0.04)]\nresults = []\nfor name, exposure, volatility in portfolios:\n    losses = [max(0, -(exposure * rng.gauss(0.01, volatility))) for _ in range(20000)]\n    ordered = sorted(losses)\n    tail = ordered[int(len(ordered) * 0.95):]\n    results.append({"portfolio": name, "loss_p95": round(ordered[int(len(ordered) * 0.95)], 6), "tail_mean": round(statistics.fmean(tail), 6)})\nresults.sort(key=lambda item: item["tail_mean"])\nprint(json.dumps({"seed": 42, "scenarios_per_portfolio": 20000, "ranking": results}, sort_keys=True))\n',
+    description: "Calculate 1.5 million reproducible loss scenarios and rank three portfolios.",
+    code: `# Agent tool: deterministic batch scenario scoring
+import random
+import statistics
+import json
+
+# Synthetic inputs for a reproducible compute example; not financial advice.
+rng = random.Random(42)
+scenarios = 500_000
+portfolios = [("balanced", 0.45, 0.08), ("growth", 0.75, 0.14), ("conservative", 0.20, 0.04)]
+results = []
+print(json.dumps({"stage": "started", "total_scenarios": scenarios * len(portfolios)}), flush=True)
+for name, exposure, volatility in portfolios:
+    losses = [max(0, -(exposure * rng.gauss(0.01, volatility))) for _ in range(scenarios)]
+    ordered = sorted(losses)
+    tail = ordered[int(len(ordered) * 0.95):]
+    result = {"portfolio": name, "loss_p95": round(ordered[int(len(ordered) * 0.95)], 6), "tail_mean": round(statistics.fmean(tail), 6)}
+    results.append(result)
+    print(json.dumps({"stage": "portfolio_completed", "completed_scenarios": scenarios * len(results), **result}), flush=True)
+results.sort(key=lambda item: item["tail_mean"])
+print(json.dumps({"seed": 42, "scenarios_per_portfolio": scenarios, "ranking": results}, sort_keys=True))
+`,
   },
   {
     id: "math",
@@ -33,24 +53,13 @@ export const WORKLOADS = [
   },
 ];
 
-// Presentation only: never executes Python or authorizes a gateway workload.
-export function estimateDemo(code) {
+// Client input limits only. Source policy and quotes are evaluated by the gateway.
+export function validateSource(code) {
   if (!code.trim()) throw new Error("Add a Python workload before running it.");
   if (code.length > 32000)
     throw new Error("Workloads must be 32,000 characters or smaller.");
   if (new TextEncoder().encode(code).length > 65536)
     throw new Error("Workloads must be 64 KB or smaller.");
-  const restricted =
-    /(?:^|\n)\s*(?:import\s+(?:os|sys|subprocess|socket)\b|from\s+(?:os|sys|subprocess|socket)\b)/.test(
-      code,
-    );
-  const score = Math.min(
-    95,
-    18 +
-      (code.match(/\bfor\b/g) || []).length * 12 +
-      (code.match(/\b(?:math|statistics)\./g) || []).length * 6,
-  );
-  return { restricted, score, rateLamports: Math.round(400 + score * 11) };
 }
 
 export function resultStatus(output, receipt) {

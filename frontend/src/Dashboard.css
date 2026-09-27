@@ -43,7 +43,7 @@
   font-size: 9px;
   letter-spacing: 1.2px;
   background: #363040;
-  color: #9989aa;
+  color: #c4b8d1;
   padding: 5px 7px;
   border-radius: 5px;
 }
@@ -110,9 +110,9 @@
   outline-offset: -4px;
 }
 .studio-editor-meta {
-  color: #8d7e9f;
+  color: #b6a8c2;
   font:
-    9px "Roboto Mono",
+    10px "Roboto Mono",
     Consolas,
     monospace;
   padding: 14px 22px;
@@ -130,7 +130,7 @@
   gap: 14px;
 }
 .studio-run-bar > span {
-  color: #9581a7;
+  color: #695878;
   font-size: 12px;
   display: flex;
   gap: 7px;
@@ -161,7 +161,8 @@
   color: #7a9c7f;
 }
 .studio-status-icon.failed,
-.studio-status-icon.blocked {
+.studio-status-icon.blocked,
+.studio-status-icon.unverified {
   background: #faece8;
   color: #b38073;
 }
@@ -224,11 +225,15 @@
   z-index: 1;
 }
 .studio-steps li.reached {
-  color: #8e6eab;
+  color: #6b547f;
 }
 .studio-steps li.reached span {
   background: #e5d7f2;
-  color: #8863a5;
+  color: #5e4772;
+}
+.studio-steps li.current span {
+  outline: 2px solid #bba5d1;
+  outline-offset: 3px;
 }
 .studio-estimate dl {
   margin-top: 19px;
@@ -363,10 +368,10 @@
   height: 200px;
   overflow-y: auto;
   font:
-    10px/1.85 "Roboto Mono",
+    12px/1.85 "Roboto Mono",
     Consolas,
     monospace;
-  color: #8d7c9c;
+  color: #6e6079;
 }
 .studio-log-line {
   display: flex;
@@ -375,7 +380,7 @@
   padding: 3px 0;
 }
 .studio-log-line time {
-  color: #bcaac9;
+  color: #6e6079;
   flex-shrink: 0;
 }
 .studio-log-line > span {
@@ -383,10 +388,10 @@
   overflow-wrap: anywhere;
 }
 .studio-log-line.success > span {
-  color: #658e73;
+  color: #3f704f;
 }
 .studio-log-line.warning > span {
-  color: #b77e57;
+  color: #865028;
 }
 .studio-terminal-empty {
   color: #786787;
@@ -397,7 +402,7 @@
 .studio-notice {
   display: flex;
   gap: 12px;
-  color: #9a704f;
+  color: #7d562f;
   background: #faf1e6;
   border-radius: 15px;
   padding: 16px 20px;
@@ -437,10 +442,10 @@
   padding: 19px;
   border-radius: 13px;
   font:
-    11px/1.85 "Roboto Mono",
+    12px/1.85 "Roboto Mono",
     Consolas,
     monospace;
-  color: #8e729f;
+  color: #695872;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-height: 250px;
@@ -466,7 +471,7 @@
   border: 0;
   border-top: 1px solid #eee6f4;
   background: transparent;
-  color: #8a7499;
+  color: #6b5879;
 }
 .studio-history > button > span {
   display: flex;
@@ -505,6 +510,20 @@
   }
 }
 @media (max-width: 480px) {
+  .studio-language {
+    display: none;
+  }
+  .studio-editor-heading button,
+  .studio-presets button {
+    min-width: 40px;
+    min-height: 40px;
+  }
+  .studio-run-bar {
+    flex-wrap: wrap;
+  }
+  .studio-run-bar > button {
+    width: 100%;
+  }
   .studio-inspector {
     grid-template-columns: 1fr;
   }

@@ -11,7 +11,7 @@ import React, { useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import ErrorBoundary from './components/ErrorBoundary';
-import './index.css';
+import SessionKeyAdapter from './utils/SessionKeyAdapter';
 
 // Импорты Соланы
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
@@ -22,11 +22,13 @@ import { clusterApiUrl } from '@solana/web3.js';
 
 // ВАЖНО: Дефолтные стили для модального окна
 import '@solana/wallet-adapter-react-ui/styles.css';
+import './index.css';
 
 function Root() {
   const endpoint = useMemo(() => clusterApiUrl('devnet'), []);
 
   const wallets = useMemo(() => [
+    ...(import.meta.env.DEV && import.meta.env.VITE_ENABLE_SESSION_KEY === 'true' ? [new SessionKeyAdapter()] : []),
     new PhantomWalletAdapter(),
     new SolflareWalletAdapter(),
   ], []);

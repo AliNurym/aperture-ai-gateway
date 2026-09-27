@@ -27,8 +27,8 @@ parser = argparse.ArgumentParser(description="Aperture authenticated compute wor
 parser.add_argument("--node-id", default=None)
 parser.add_argument("--gateway", default=None, help="Gateway URL; defaults to GATEWAY_API_URL")
 parser.add_argument("--token", default=None, help="Prefer APERTURE_WORKER_TOKEN in the environment")
-parser.add_argument("--wallet", default=None, help="Reserved provider payout address; payouts are not implemented")
 parser.add_argument("--allow-unsafe-local-execution", action="store_true", help="Execute trusted development workloads directly on the host")
+parser.add_argument("--trusted-source-directory", type=Path, default=None, help="Limit trusted local execution to exact UTF-8 .py files reviewed before startup")
 args, _ = parser.parse_known_args()
 API_URL = (args.gateway or os.getenv("GATEWAY_API_URL") or "http://127.0.0.1:8000").rstrip("/")
 NODE_ID = args.node_id or os.getenv("APERTURE_NODE_ID") or f"NODE-CPU-{socket.gethostname()}"
@@ -59,7 +59,7 @@ def detect_hardware():
 GPU_NAME, VRAM_TOTAL, TFLOPS = detect_hardware()
 
 
-def register_heartbeat(stop_event):
+def register_heartbeat(stop_event, executor=None):
     while not stop_event.is_set():
         try:
             requests.post(f"{API_URL}/register_node", json={
@@ -68,6 +68,8 @@ def register_heartbeat(stop_event):
                 "power_watts": None, "tflops": 0.0, "status": current_status,
                 "worker_pubkey": WORKER_IDENTITY.pubkey if WORKER_IDENTITY else None,
                 "execution_mode": "trusted_local" if ALLOW_UNSAFE_LOCAL_EXECUTION else "docker",
+                "source_policy": "exact_hash_allowlist" if ALLOW_UNSAFE_LOCAL_EXECUTION and executor and executor.approved_hashes is not None else "operator_trusted" if ALLOW_UNSAFE_LOCAL_EXECUTION else "gateway_ast",
+                "approved_source_count": len(executor.approved_hashes) if ALLOW_UNSAFE_LOCAL_EXECUTION and executor and executor.approved_hashes is not None else None,
             }, headers=worker_headers(), timeout=4)
         except requests.RequestException:
             pass
@@ -254,7 +256,8 @@ def main():
     global WORKER_IDENTITY
     if not worker_token_is_configured(WORKER_TOKEN):
         raise SystemExit("Set APERTURE_WORKER_TOKEN to a unique 16+ character secret; example values are rejected.")
-    executor = TrustedLocalExecutor() if ALLOW_UNSAFE_LOCAL_EXECUTION else DockerSandbox(
+    approved_sources = args.trusted_source_directory or os.getenv("APERTURE_TRUSTED_SOURCE_DIRECTORY")
+    executor = TrustedLocalExecutor(Path(approved_sources) if approved_sources else None) if ALLOW_UNSAFE_LOCAL_EXECUTION else DockerSandbox(
         SANDBOX_IMAGE, STATE_ROOT, os.getenv("APERTURE_SANDBOX_HOST_ROOT"),
     )
     executor.preflight()
@@ -267,7 +270,9 @@ def main():
         print(f"Aperture worker {NODE_ID} | {executor.backend} | gateway {API_URL}")
         if ALLOW_UNSAFE_LOCAL_EXECUTION:
             print("TRUSTED LOCAL DEVELOPMENT: Python executes on this host without a security sandbox.")
-        threading.Thread(target=register_heartbeat, args=(stop_event,), daemon=True).start()
+            if executor.approved_hashes is not None:
+                print(f"Exact source approval: {len(executor.approved_hashes)} reviewed workloads; restart worker after reviewing changes.")
+        threading.Thread(target=register_heartbeat, args=(stop_event, executor), daemon=True).start()
         while True:
             try:
                 flush_results(journal)

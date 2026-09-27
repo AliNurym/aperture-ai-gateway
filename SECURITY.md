@@ -1,49 +1,41 @@
 # Security model
 
-## Current security boundary
+## Scope
 
-Aperture is a Devnet prototype. It accepts a wallet-signed, hash-bound Python payload, applies a deterministic source-policy check, then makes it available only to authenticated workers. It is designed for a controlled demonstration environment, not for untrusted public compute.
+Aperture is a controlled Solana Devnet prototype. The repository does not promise safe public execution for mutually untrusted operators. Studio dispatches real Python to an authenticated worker; it does not generate simulated results. Devnet settlement additionally requires a compatible deployed Anchor program, an initialized protocol configuration, and a funded channel. Explicit off-chain development executes the same worker path without a Solana payment.
 
-The gateway accepts a request only when the Ed25519 signature covers this exact canonical message:
+## Authorization and state
 
-```text
-Aperture execution request
-wallet:<base58 wallet>
-code_sha256:<sha256 of code>
-```
+- The gateway issues a short-lived quote bound to the wallet, agent, source hash, rate, cost/runtime limits, network, program, gateway signer, treasury, and passport version. The frontend reconstructs the canonical v2 message and checks the quote fields before requesting a wallet signature; live Devnet approvals also require independently configured gateway signer and treasury pins. The Agent page similarly reconstructs the owner challenge and locally derives instruction bytes and accounts against the pinned program before asking for a wallet signature. `/execute` checks the exact stored message, source, caller, expiry, and signature before admitting new work.
+- Repeating the same valid signed admission recovers the same task response after a lost network response. The task access token is a bearer capability: result, receipt, stream and cancellation routes require it. Keep it private.
+- Agent passports are owner-authorized policies with bounded cost, duration, expiry, and total allowance. The program verifies the configured authority and oracle for payment operations. Verify a compatible deployment and initialized configuration before enabling live tasks.
+- Gateway state is persistent SQLite by default (`backend/data/gateway.sqlite3`) or at `APERTURE_STATE_DB`. Jobs can contain submitted source, output/logs, and capability tokens. Expired unused quotes and challenges are removed when new transient records are issued; completed jobs are capped by `APERTURE_MAX_COMPLETED_TASKS` (default 1000). A compact delegated-spend ledger preserves lifetime allowance accounting after old job details are pruned. Protect the state directory and configure an external retention policy for backups.
+- Task IDs alone do not authorize result access. Worker results are checked against the registered worker signature and task lease; gateway receipts bind the result to its quote and settlement. For gateway runs, the browser verifies the gateway signature, the worker signature when present, and the signed output hash against the approved quote and downloaded raw output. For Devnet settlement it independently checks the persistent on-chain TaskReceipt and transaction confirmation before reporting verification. Off-chain runs check the configured gateway signer pin when supplied and have no Solana settlement. Signatures attribute reports but do not attest faithful hardware execution.
 
-This prevents a valid signature for one payload being replayed for another payload. Demo authentication is disabled unless `APERTURE_DEMO_MODE=true` is explicitly set.
+## Worker boundary
 
-## Controls implemented
+- The default coordinator starts each task in a separate Docker container with a read-only input mount, no network, a non-root user, a read-only container filesystem, dropped capabilities, and resource/time/output limits.
+- The worker coordinator is trusted and has access to the Docker daemon socket in Compose. Compose currently supplies the backend environment file to both gateway and coordinator. Separate their secrets when deploying; workload containers receive only the explicit task environment.
+- Host execution is an explicit trusted-development option. It is not the default sandbox and should only run for code the operator trusts. `--trusted-source-directory` snapshots the SHA-256 values of reviewed UTF-8 Python files at startup and rejects any other source before launching a process. It limits source admission; it does not create OS isolation.
+- Worker leases are durable. A gateway restart or expired running lease is settled as failed rather than returned to the queue, because its on-chain start may already have been submitted.
 
-- A shared `APERTURE_WORKER_TOKEN` plus a named worker ID is required to register, claim, stream, or settle work. A task lease is bound to that worker ID, so another authenticated worker cannot stream or settle it.
-- Task IDs are opaque random UUIDs. Unknown tasks cannot receive logs or a result.
-- Each task response also contains a high-entropy, session-only capability token. That token is required to poll output, download logs, or cancel the task; the task ID alone grants no access.
-- Worker leases expire and tasks are returned to the queue rather than silently stalling.
-- Completed output and raw logs have a configurable in-memory retention cap, so a long-running gateway cannot retain an unbounded number of task artifacts.
-- Source policy limits code size and AST nodes; imports are allowlisted and dynamic imports, dunder access, and dangerous built-ins are rejected.
-- The development worker uses a temporary directory, stripped environment, isolated Python mode, wall-time/CPU/memory limits where supported, and capped stdout.
-- CORS defaults to local origins and API responses use basic anti-sniffing, frame, referrer, and no-store headers.
-- The gateway rate-limits task creation and Devnet faucet requests per client in a short in-memory window.
-- The gateway never fabricates a transaction signature. A receipt is labelled `DEVNET`, `OFF_CHAIN`, or `SIMULATION`.
+## Network and deployment
 
-## Important limitations
+- Local launchers and `python main.py` bind the API to loopback by default. Docker Compose also publishes the gateway on loopback. Override `APERTURE_BIND_HOST` only with deliberate network controls.
+- The API enforces a bounded request-body limit (`APERTURE_MAX_REQUEST_BYTES`, default 2.5 MB) and a bounded in-process rate limiter. Horizontally scaled or publicly reachable deployments still need shared/edge rate controls. CORS is browser policy, not API authentication.
+- Browser run metadata and the active task capability are stored in tab `sessionStorage` to resume polling. While an admission response is uncertain, the exact signed request, including its source, stays in that tab until the gateway accepts or rejects it. Do not treat same-origin scripts or a compromised browser/API response path as trusted; inspect wallet prompts.
+- Keep `BACKEND_PRIVATE_KEY`, worker tokens, deployment keypairs, and SQLite data outside source control and outside workload containers. Never copy a local state database into a distributed Docker image.
+- `VITE_ENABLE_SESSION_KEY=true` enables a temporary Ed25519 signing key only in the Vite development server. The key is generated on connection and remains non-extractable in browser memory; reload or disconnect loses it. It must not hold persistent assets. Production builds omit this connection option.
+- Pin `APERTURE_CONFIG_AUTHORITY` at program build time and verify it matches the protected initializer signer. Source changes do not change an already deployed program.
 
-The AST policy is not a complete sandbox. The current worker can execute approved Python on its host, so it must run only on a disposable isolated VM or container with restrictive network and filesystem permissions. Do not expose the worker token, oracle signing key, or a public worker endpoint.
+## Before a release
 
-The built-in rate limiter is per-process. A horizontally scaled production deployment must enforce equivalent limits at the edge or in a shared store.
+1. Review the exact gateway URL, TLS/ingress, CORS origins, secrets, worker mode, Docker host, and persistent-volume permissions.
+2. Confirm the deployed program address and on-chain v2 configuration independently.
+3. Review the completed-task retention limit and backup lifecycle; delegated spend totals remain available after task details are pruned.
+4. Run the backend, SDK, frontend, container-isolation, and local-validator checks listed in `README.md`.
+5. Review wallet-signed actions and receipt-verification behavior before describing a browser result as confirmed execution or settlement.
 
-Worker-reported duration is bounded but is not independently hardware-attested. The in-memory task queue and metrics are lost on restart. Wallet deposits are deliberately disabled in the UI until the revised Anchor program is built, deployed, and its generated IDL is published.
+## Reporting
 
-## Deployment checklist
-
-1. Set a unique `APERTURE_WORKER_TOKEN` outside source control.
-2. Keep `BACKEND_PRIVATE_KEY` in a secrets manager; never generate or commit `oracle_keypair.json` on a production host.
-3. Set `APERTURE_ENV=production`, keep `APERTURE_DEMO_MODE=false`, and configure exact `CORS_ORIGINS`.
-4. Run workers in separate sandboxed VM/container instances with no host secrets and restricted egress.
-5. Deploy the revised Anchor program and update program ID/IDL before enabling wallet deposits.
-6. Run `python backend/test_security.py` and `python backend/test_api_security.py` before release.
-
-## Reporting a vulnerability
-
-Please do not publish an exploit with secrets or production endpoints. Open a private security report with reproduction steps, impact, and a minimal proof of concept.
+Report suspected vulnerabilities privately with affected source locations, prerequisites, impact, and minimal sanitized evidence. Do not include secrets or production endpoints in a public report.

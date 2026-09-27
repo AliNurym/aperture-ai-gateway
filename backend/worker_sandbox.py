@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import subprocess
 import sys
 from pathlib import Path
@@ -100,10 +101,36 @@ class TrustedLocalExecutor:
     backend = "trusted_local"
     isolation = {"sandboxed": False, "output_limit_bytes": MAX_OUTPUT_BYTES}
 
+    def __init__(self, approved_source_directory: Path | None = None):
+        self.approved_source_directory = approved_source_directory
+        self.approved_hashes = None
+        self.isolation = dict(type(self).isolation)
+
     def preflight(self):
-        pass
+        if self.approved_source_directory is None:
+            return
+        directory = self.approved_source_directory.resolve(strict=True)
+        if not directory.is_dir():
+            raise RuntimeError("Trusted source directory must be a directory of reviewed Python files.")
+        sources = list(directory.glob("*.py"))
+        if not sources:
+            raise RuntimeError("Trusted source directory contains no reviewed Python files.")
+        self.approved_hashes = set()
+        for source in sources:
+            data = source.read_bytes()
+            if not data or len(data) > 65_536:
+                raise RuntimeError("Approved Python sources must contain between 1 and 65,536 bytes.")
+            data.decode("utf-8")
+            self.approved_hashes.add(hashlib.sha256(data).hexdigest())
+        self.isolation.update({"source_policy": "exact_hash_allowlist", "approved_source_count": len(self.approved_hashes)})
 
     def launch(self, task_directory: Path, container_name: str):
+        if self.approved_source_directory is not None and self.approved_hashes is None:
+            raise RuntimeError("Trusted source preflight must complete before execution.")
+        if self.approved_hashes is not None:
+            source_hash = hashlib.sha256((task_directory / "payload.py").read_bytes()).hexdigest()
+            if source_hash not in self.approved_hashes:
+                raise PermissionError("Source was not approved by this trusted local worker's operator.")
         safe_env = {name: os.environ[name] for name in ("PATH", "SYSTEMROOT", "WINDIR", "COMSPEC") if name in os.environ}
         safe_env["PYTHONIOENCODING"] = "utf-8"
         return subprocess.Popen(

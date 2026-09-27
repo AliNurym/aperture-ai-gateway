@@ -18,7 +18,7 @@ Target workflow: owner-issued agent policy → signed workload-bound quote with 
 
 The intended live program makes owner-controlled agent status/revocation readable onchain and enforces an accepted task payment cap in a funded channel. Independent clients can inspect authority and settlement. Worker output observation remains offchain; a gateway receipt is not proof of correct computation.
 
-Include only features proven by the submitted commit, tests, and recording. Describe the chain path as live only after a compatible deployment and retained transaction evidence. `OFF_CHAIN` demonstrates gateway/worker execution; `SIMULATION` is browser illustration. [KYA proof obligations](kya-positioning.md#acceptance-evidence).
+Include only features proven by the submitted commit, checks, and recording. Describe the chain path as live only after a compatible deployment and retained transaction evidence. `OFF_CHAIN` records real gateway/worker execution without chain settlement. Studio has no simulated execution path. [KYA proof obligations](kya-positioning.md#acceptance-evidence).
 
 ## Competitive context
 

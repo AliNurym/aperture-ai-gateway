@@ -31,7 +31,3 @@ task_*.py
 node_log_*.txt
 results_*.txt
 node_log_task-*.txt
-__pycache__/
-.env
-frontend/node_modules/
-frontend/dist/

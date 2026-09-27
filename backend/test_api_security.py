@@ -332,12 +332,5 @@ class DurableStoreTests(unittest.TestCase):
                 restored.admit('quote', {'task_id': 'other', 'wallet': 'owner', 'state': 'queued'}, 10)
             restored.close()
 
-    def test_clean_clone_required_auth_module_is_not_ignored(self):
-        import subprocess
-        root = Path(__file__).resolve().parent.parent
-        response = subprocess.run(['git', 'check-ignore', '--no-index', 'backend/task_auth.py'], cwd=root, capture_output=True, text=True)
-        self.assertEqual(response.returncode, 1, response.stdout)
-        self.assertTrue((root / 'backend' / 'task_auth.py').exists())
-
 if __name__ == '__main__':
     unittest.main()

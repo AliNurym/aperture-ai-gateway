@@ -68,7 +68,7 @@ class SolanaClient:
         try:
             self.program_id = Pubkey.from_string(program_id_str)
         except Exception:
-            self.program_id = Pubkey.from_string(DEFAULT_PROGRAM_ID)
+            raise RuntimeError("SOLANA_PROGRAM_ID must be a valid public key; refusing to select another program.") from None
             
         # 2. AI Oracle Keypair (Signer)
         self.ai_signer = self._load_or_create_keypair()
@@ -76,23 +76,24 @@ class SolanaClient:
         print(f"🔗 [SOLANA] PROGRAM ID: {self.program_id}")
 
     def _load_or_create_keypair(self) -> Keypair:
-        """Loads keypair from .env, local JSON, or creates a persistent new one."""
+        """Load the configured signer; explicit off-chain mode may use an ephemeral key."""
         env_secret = os.getenv("BACKEND_PRIVATE_KEY")
         if env_secret:
             try:
                 secret = json.loads(env_secret)
-                if len(secret) == 64 and any(b > 0 for b in secret):
+                if isinstance(secret, list) and len(secret) == 64 and all(type(b) is int and 0 <= b <= 255 for b in secret) and any(b > 0 for b in secret):
                     return Keypair.from_bytes(bytes(secret))
+                raise ValueError("Invalid keypair bytes")
             except Exception:
-                pass
+                raise RuntimeError("BACKEND_PRIVATE_KEY is invalid; refusing to replace the configured signing identity.") from None
 
         if KEYPAIR_PATH.exists():
             try:
                 with open(KEYPAIR_PATH, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     return Keypair.from_bytes(bytes(data))
-            except Exception as e:
-                print(f"[!] Warning reading oracle_keypair.json: {e}")
+            except Exception:
+                raise RuntimeError("oracle_keypair.json is invalid; refusing to replace the configured signing identity.") from None
 
         if os.getenv("APERTURE_DEMO_MODE", "false").lower() == "true":
             # Explicit demos may use an ephemeral signer, but never write secrets to disk.
@@ -402,41 +403,6 @@ class SolanaClient:
         if status.err is not None:
             raise RuntimeError(f"Solana transaction failed: {status.err}")
         return str(sent.value)
-
-    async def update_burn_rate(self, user_pubkey_str: str, new_rate_lamports: int) -> str | None:
-        """
-        Executes update_burn_rate on the smart contract.
-        Updates the per-second lamport burn rate dictated by the AI Sentinel.
-        """
-        try:
-            user_pubkey = Pubkey.from_string(user_pubkey_str)
-            channel_pda, _bump = self.get_channel_pda(user_pubkey)
-
-            config = await self.get_protocol_config()
-            if not config:
-                raise RuntimeError("Protocol config is not initialized. Run backend/init_protocol_config.py first.")
-
-            discriminator = get_anchor_discriminator("global", "update_burn_rate")
-            rate_bytes = struct.pack("<Q", new_rate_lamports)
-            ix_data = discriminator + rate_bytes
-
-            ix = Instruction(
-                program_id=self.program_id,
-                data=ix_data,
-                accounts=[
-                    AccountMeta(pubkey=config["config_pda"], is_signer=False, is_writable=False),
-                    AccountMeta(pubkey=channel_pda, is_signer=False, is_writable=True),
-                    AccountMeta(pubkey=self.ai_signer.pubkey(), is_signer=True, is_writable=False),
-                    AccountMeta(pubkey=config["treasury"], is_signer=False, is_writable=True),
-                ]
-            )
-            tx_sig = await self._send_and_confirm(ix)
-            print(f"✅ [ON-CHAIN] Burn rate updated ({new_rate_lamports} lamports/sec). TX: {tx_sig}")
-            return tx_sig
-
-        except Exception as e:
-            print(f"🔴 [SOLANA] update_burn_rate error: {e}")
-            return None
 
     async def request_airdrop(self, pubkey_str: str, lamports: int = 1_000_000_000) -> bool:
         """Helper to fund test wallets on Solana Devnet."""

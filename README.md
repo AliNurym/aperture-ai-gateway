@@ -4,18 +4,17 @@ Aperture is a Solana-powered compute network for Python and AI workloads. Develo
 
 The hackathon MVP includes the task queue, authenticated worker handoff, Python execution, source-policy preview, and Devnet payment-channel integration. GPU acceleration and provider payouts are planned milestones.
 
-The application has two explicit modes:
+Compute Studio submits real workloads through the gateway. It requests a source-bound quote, obtains a wallet signature, follows authenticated worker output and verifies signed result evidence. There is no browser-only simulated execution path.
 
-- **Browser demo:** local walkthrough with selectable Python examples and simulated progress. It never executes Python, signs a message, contacts a worker or makes a payment.
-- **Devnet gateway:** one-time wallet authorization, server-side source policy, authenticated worker dispatch, streamed output and recorded settlement evidence. This requires a configured gateway, an approved worker and a deployed compatible payment-channel program.
+Devnet settlement requires a configured gateway, an approved worker and a deployed compatible payment-channel program. Explicit off-chain development configuration can execute real Python through the same authenticated worker path without a Solana payment; its results are labelled `OFF_CHAIN` and never presented as Devnet settlement.
 
 ## Start on Windows
 
-For the interface and its browser demo, double-click `start_frontend.bat`, then open **http://127.0.0.1:3000**.
+For the interface, double-click `start_frontend.bat`, then open **http://127.0.0.1:3000**. Actual execution requires the configured gateway and an authenticated worker.
 
 `start_all.bat` opens the frontend and gateway. Workers are started separately using `start_worker.bat` after configuration.
 
-The launchers find Node.js/Python, create a project Python virtual environment when needed, install missing project dependencies, and report startup failures. They do not require a GPU for the browser demo. If Node.js or Python is missing, install Node.js LTS and Python 3.11+ first.
+The launchers find Node.js/Python, create a project Python virtual environment when needed, install missing project dependencies, and report startup failures. Python CPU execution does not require a GPU. If Node.js or Python is missing, install Node.js LTS and Python 3.11+ first.
 
 The Vite launcher resolves Windows directory junctions before starting. This avoids build paths escaping the project and dependency-optimizer failures when the same checkout has multiple directory names.
 
@@ -45,23 +44,20 @@ Copy `backend/.env.example` to `backend/.env` and configure:
 
 Check the treasury wallet's current rent-exempt minimum with `solana rent 0` and fund it before initializing the v2 config.
 
-Keep `APERTURE_DEMO_MODE=false`. The browser demo is independent of this backend setting.
+Keep `APERTURE_DEMO_MODE=false` for Devnet settlement. The legacy flag explicitly selects off-chain development settlement; it still requires real worker execution and signed authorization.
 
 The protocol initializer is pinned to `APERTURE_CONFIG_AUTHORITY` at program build time. Choose and protect that signing wallet first, set the same public key in `backend/.env`, and build the program from the project root with that environment variable:
 
-Use Agave CLI 4.3.0 and Anchor CLI 0.32.2 for a fresh Devnet deployment. `Anchor.toml` pins both versions; AVM must be installed to switch Anchor CLI versions. This program uses Anchor Lang 0.32.2; the CI build explicitly targets sBPF v3 with `cargo build-sbf --arch v3`. Build and deploy with these compatible versions so the emitted program matches the current Solana deployment target.
+Use Agave CLI 4.3.0 and Anchor Lang 0.32.2 for a fresh Devnet deployment. On Windows, the build helper initializes Microsoft C++ Build Tools and Windows SDK, performs the native Rust check and builds sBPF v3. It uses the locally installed Agave tools or `cargo-build-sbf` from PATH.
 
 ```powershell
-# v2 uses a new program address because the previous Devnet config account has
-# an incompatible layout. This checkout's program key is local and git-ignored.
-New-Item -ItemType Directory .\target\deploy -Force | Out-Null
-Copy-Item .\.aperture\devnet\program.json .\target\deploy\aperture_gateway-keypair.json
-$env:APERTURE_CONFIG_AUTHORITY = "<protected signing-wallet public key>"
-anchor build
-anchor deploy
+./scripts/build-devnet.ps1 -ConfigAuthority "<protected signing-wallet public key>"
+# Review target/deploy/build-manifest.json before publishing anything.
 ```
 
-The v2 Program ID in the source and Anchor config is A5HfdyRWy77i5DxhTMBa1ZinxVGZbVZnb35EvXUvkNzQ. The ignored program keypair was generated for this local checkout; copy it to Anchor's ignored target/deploy location before building, and keep a secure backup. For a different checkout, generate a new keypair and update every configured program ID consistently. The program-address key signs deployment; it is separate from the protected authority/oracle key. The existing checkout does not have a Devnet deployment or initialized v2 config yet.
+The v2 Program ID in the source and Anchor config is A5HfdyRWy77i5DxhTMBa1ZinxVGZbVZnb35EvXUvkNzQ. The ignored program keypair was generated for this local checkout; keep a secure backup and pass its path only to Solana CLI. For a different checkout, generate a new keypair and update every configured program ID consistently. The program-address key signs deployment; it is separate from the protected authority/oracle key. Deployment and initialized configuration must be confirmed against Devnet before accepting paid jobs.
+
+For this checkout's separate development wallets, use the [Windows Devnet runbook](docs/demo-runbook.md#windows-devnet-build-and-launch). `scripts/deploy-devnet.ps1` reviews the exact build and funding target without transactions; `-Publish` explicitly publishes the reviewed build to Devnet. `scripts/devnet.py initialize` reads the deployed binary back before configuring it. These helpers preserve the existing off-chain settings and keep private deployment logs out of version control.
 
 Set `APERTURE_CONFIG_AUTHORITY` to the public key of the signing wallet and `BACKEND_PRIVATE_KEY` to its matching local private key in `backend/.env`. It must be available at program build time and later sign `initialize_config`. Build and deploy before initializing. A source edit does not change an existing on-chain deployment; do not run the initializer against a program that was not built with this authority check. After deployment, verify the new program's executable account and configured address, then run this command from `backend/`:
 
@@ -90,15 +86,19 @@ Workers use a separate Docker container per task by default. The task has no net
 - **Worker network:** current heartbeats and reported hardware metrics. Unavailable telemetry is not replaced with invented data.
 - **Getting started:** setup instructions and an explanation of the execution flow.
 
-Navigation preserves a running Studio session. Run metadata persists in session storage for the current browser tab; source code, output and access tokens are not saved there. Reloading during a run is discouraged and closing the UI does not cancel a server task.
+Navigation preserves a running Studio session. Run metadata and the active task capability are stored in session storage for the current browser tab so polling can recover after a reload. If the gateway response is uncertain, the exact signed admission (including its source) stays in that tab until recovery or rejection; it is removed after acceptance. Wallet private keys are never stored there. Closing the UI does not cancel a server task.
 
 ## Results and limits
 
 A process exiting with a nonzero status is reported as failed. The gateway retains the worker identity, exit code and settlement evidence for authenticated result polling. A successful process does not by itself imply an on-chain settlement.
 
-Result types include `SIMULATION`, `DEVNET`, `OFF_CHAIN`, `NONE` and `UNKNOWN`. Explorer links are shown only when the gateway supplies transaction evidence. A disconnected client cannot assume that a submitted task was cancelled.
+Result types include `DEVNET`, `OFF_CHAIN`, `NOT_STARTED`, `NONE` and `UNKNOWN`. Explorer links are shown only when the gateway supplies transaction evidence. A disconnected client cannot assume that a submitted task was cancelled.
 
 Gateway quotes, jobs, worker outbox, and receipts use local SQLite and survive process restarts. The gateway requires one process per database file and a persistent writable state volume. Run Docker Compose with a configured `backend/.env`; the worker is a separately started trusted coordinator (`docker compose --profile worker up --build`). Build its per-task image first using the launcher instructions. The gate rejects Devnet work until a compatible v2 program and matching protocol configuration are available. The v2 program requires a new deployment because the earlier account layout is not compatible; close old channels with their original deployment first. This is a Devnet development prototype, not a mainnet service.
+
+Expired unused quotes and challenges are pruned as new ones are issued. Completed job records are capped by `APERTURE_MAX_COMPLETED_TASKS` (default 1000); delegated spend totals remain in a compact SQLite ledger after job details age out. The API rejects request bodies above `APERTURE_MAX_REQUEST_BYTES` (default 2.5 MB). For live Devnet approvals, copy `frontend/.env.example` to `frontend/.env.local` and set the gateway signer and treasury pins from trusted deployment configuration; the frontend reconstructs the canonical quote message and checks these pins before requesting a wallet signature.
+
+For gateway results, the browser verifies the gateway signature and worker signature when present, and matches signed receipt evidence to the approved quote and downloaded raw output. For Devnet settlement it also independently reads the on-chain TaskReceipt, compares its owner, source, rate and charge, and checks transaction confirmation. Off-chain runs use the configured gateway signer pin when supplied and do not settle on Solana. Signatures do not prove faithful remote computation.
 
 ## Owner delegated Python agents
 

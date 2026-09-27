@@ -37,7 +37,7 @@ This claim needs a compatible deployed program and a real transaction path. An o
 5. Receipt shows owner, agent, hashes, limits, actual charge, and settlement state.
 6. A settlement retry completes without a second charge.
 
-`SIMULATION` means browser illustration; `OFF_CHAIN` means gateway/worker execution without chain settlement; `DEVNET` needs an actual confirmed transaction. Do not describe a planned deployment as a completed demonstration.
+`OFF_CHAIN` means real gateway/worker execution without chain settlement; `DEVNET` needs an actual confirmed transaction. Studio has no simulated execution path. Do not describe a planned deployment as a completed demonstration.
 
 ## Adoption and revenue hypotheses
 

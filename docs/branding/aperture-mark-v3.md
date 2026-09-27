@@ -4,7 +4,7 @@ The v3 mark keeps the aperture motif and simplifies it for the lavender Material
 
 - Asset: `frontend/src/assets/aperture-mark-v3.png`.
 - Generated with the built-in imagegen tool; not the CLI/API fallback.
-- Reference: `frontend/src/assets/aperture-mark-v2.png` (retained unchanged).
+- The v2 reference asset is not part of this checkout; this v3 PNG is the current application asset.
 - Transparent PNG. Keep the alpha channel; do not apply a multiply blend mode.
 - Usage: sidebar brand, overview illustration, footer, and favicon.
 

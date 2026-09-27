@@ -11,7 +11,7 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^process$/, replacement: 'process/browser' },
-      { find: 'buffer', replacement: 'buffer' },
+      { find: 'buffer', replacement: 'buffer/' },
       { find: 'stream', replacement: 'stream-browserify' },
       { find: 'util', replacement: 'util' },
     ],

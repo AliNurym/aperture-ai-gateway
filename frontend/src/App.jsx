@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import axios from "axios";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
@@ -60,7 +60,7 @@ function readHistory() {
     return Array.isArray(stored)
       ? stored
           .filter(
-            (run) => typeof run.id === "string" && typeof run.name === "string",
+            (run) => run.mode === "gateway" && typeof run.id === "string" && typeof run.name === "string",
           )
           .slice(0, 20)
       : [];
@@ -70,12 +70,8 @@ function readHistory() {
 }
 
 export default function App() {
-  const { connected } = useWallet();
+  const { connected, wallet } = useWallet();
   const [page, setPage] = useState(currentPage);
-  const [mode, setMode] = useState(() => {
-    try { return sessionStorage.getItem("aperture-active:" + API_URL) ? "gateway" : "demo"; }
-    catch { return "demo"; }
-  });
   const [busy, setBusy] = useState(false);
   const [selection, setSelection] = useState(null);
   const [history, setHistory] = useState(readHistory);
@@ -88,13 +84,46 @@ export default function App() {
   });
   const [refreshing, setRefreshing] = useState(false);
   const refreshController = useRef(null);
+  const navRef = useRef(null);
   const activePage = PAGES.find((item) => item.id === page);
+
+  const syncNavIndicator = useCallback(() => {
+    const nav = navRef.current;
+    const selected = nav?.querySelector(
+      '.console-nav-item[aria-current="page"]',
+    );
+    const indicator = nav?.querySelector(".console-nav-indicator");
+    if (!nav || !selected || !indicator) return;
+
+    // Layout measurements stay stable while the button plays its press animation.
+    indicator.style.width = `${selected.offsetWidth}px`;
+    indicator.style.height = `${selected.offsetHeight}px`;
+    indicator.style.transform = `translate3d(${selected.offsetLeft}px, ${selected.offsetTop}px, 0)`;
+  }, []);
 
   useEffect(() => {
     const onHash = () => setPage(currentPage());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return undefined;
+
+    syncNavIndicator();
+    window.addEventListener("resize", syncNavIndicator);
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(syncNavIndicator);
+    observer?.observe(nav);
+    nav.querySelectorAll(".console-nav-item").forEach((item) => observer?.observe(item));
+
+    return () => {
+      window.removeEventListener("resize", syncNavIndicator);
+      observer?.disconnect();
+    };
+  }, [page, syncNavIndicator]);
   const navigate = (id) => {
     window.location.hash = id;
     setPage(id);
@@ -156,13 +185,17 @@ export default function App() {
     navigate("studio");
   };
   const online = telemetry.state === "online";
-  const stateLabel = online
-    ? telemetry.health?.status === "ready"
-      ? "Gateway connected"
-      : "Gateway needs setup"
-    : telemetry.state === "checking"
-      ? "Checking gateway"
-      : "Gateway offline";
+  const gatewayReady = online && telemetry.health?.status === "ready";
+  const activeWorkerCount = online ? telemetry.nodes.length : 0;
+  const stateLabel = gatewayReady
+    ? "Gateway connected"
+    : online
+      ? telemetry.health?.status === "workers_unavailable"
+        ? "Waiting for a worker"
+        : "Gateway needs setup"
+      : telemetry.state === "checking"
+        ? "Checking gateway"
+        : "Gateway offline";
 
   return (
     <div className="console-app">
@@ -189,10 +222,14 @@ export default function App() {
         </button>
         <button className="console-new" onClick={() => navigate("studio")}>
           <Icon name="code" />
-          New workload
+          Open Studio
         </button>
         <div className="console-nav-label">WORKSPACE</div>
-        <nav aria-label="Main navigation">
+        <nav
+          aria-label="Main navigation"
+          ref={navRef}
+        >
+          <span className="console-nav-indicator" aria-hidden="true" />
           {PAGES.map((item) => (
             <button
               key={item.id}
@@ -200,6 +237,8 @@ export default function App() {
                 "console-nav-item " + (page === item.id ? "selected" : "")
               }
               aria-current={page === item.id ? "page" : undefined}
+              aria-label={item.label}
+              title={item.label}
               onClick={() => navigate(item.id)}
             >
               <Icon name={item.icon} />
@@ -212,30 +251,30 @@ export default function App() {
         </nav>
         <div className="console-sidebar-bottom">
           <div className="console-devnet">
-            <span className="console-dot" />
-            Solana Devnet<span>DEVELOPMENT</span>
+            <span className={"console-dot " + (gatewayReady ? "ready" : "muted")} />
+            {online ? telemetry.health?.demo_mode ? "Off-chain execution" : "Solana Devnet" : "Gateway offline"}<span>{telemetry.health?.environment === 'production' ? 'PRODUCTION' : 'DEVELOPMENT'}</span>
           </div>
           <p>
             A space to build, test
             <br />
             and understand your compute.
           </p>
-          <span className="console-version">Aperture workspace · v0.2</span>
+          <span className="console-version">Aperture · Python CPU workspace</span>
         </div>
       </aside>
       <div className="console-body">
         <header className="console-topbar">
           <div className="console-breadcrumb">
-            Workspace <span>/</span> <strong>{activePage.label}</strong>
+            Workspace <span>/</span> <strong key={page}>{activePage.label}</strong>
           </div>
           <div className="console-top-actions">
-            <span className="console-env-chip">Devnet</span>
+            <span className="console-env-chip">{online ? telemetry.health?.demo_mode ? "Off-chain" : "Devnet" : "Gateway offline"}</span>
             <WalletMultiButton />
           </div>
         </header>
         <main id="main-content" tabIndex={-1} className="console-main">
           <div className="console-page-heading">
-            <div>
+            <div className="console-heading-copy" key={page}>
               <h1>{activePage.title}</h1>
               <p>{activePage.subtitle}</p>
             </div>
@@ -243,30 +282,37 @@ export default function App() {
               className="console-status"
               onClick={refresh}
               disabled={refreshing}
+              aria-busy={refreshing}
               title={"Refresh gateway: " + API_URL}
             >
-              <span className={"console-dot " + (online ? "" : "muted")} />
+              <span
+                className={
+                  "console-dot " +
+                  (gatewayReady ? "ready" : online ? "warning" : "muted")
+                }
+              />
               {stateLabel}
               <Icon name="refresh" size={15} />
             </button>
           </div>
 
+          {wallet?.adapter.name === 'Temporary key' && <div className="console-tip"><Icon name="shield" size={19} /><p>Temporary development key. Its private key exists only in this tab and is lost on reload or disconnect. Use an external wallet for persistent assets.</p></div>}
           {page === "overview" && (
             <>
               <section className="console-hero">
                 <div className="console-hero-copy">
                   <span className="console-eyebrow">
                     <Icon name="spark" size={16} />
-                    IDEAS IN. POSSIBILITIES OUT.
+                    CONTROLLED PYTHON COMPUTE
                   </span>
                   <h2>
-                    Your next idea.
+                    Run the workload.
                     <br />
-                    <span>Ready to compute.</span>
+                    <span>Keep control.</span>
                   </h2>
                   <p>
-                    Write a workload, explore its cost, and follow every step.
-                    Your next experiment starts right here.
+                    Authorize an exact Python workload and spending limit.
+                    Follow worker output, then verify the signed result.
                   </p>
                   <div className="console-hero-actions">
                     <button
@@ -286,7 +332,9 @@ export default function App() {
                   </div>
                   <div className="console-hero-note">
                     <Icon name="check" size={15} />
-                    Browser demo available · no wallet needed
+                    {gatewayReady && activeWorkerCount > 0
+                      ? "Authenticated workers available"
+                      : "Connect your gateway and worker to execute"}
                   </div>
                 </div>
                 <div className="console-orbit" aria-hidden="true">
@@ -311,6 +359,19 @@ export default function App() {
                   <div className="console-orbit-dot" />
                 </div>
               </section>
+              <section className="console-panel console-readiness" aria-label="Execution readiness">
+                <div className="console-section-heading">
+                  <div><h2>{gatewayReady ? "Execution is ready" : "Connect your execution stack"}</h2><p>Live gateway and worker status.</p></div>
+                  {!gatewayReady && <button className="console-text-button" onClick={() => navigate("guide")}>Setup guide<Icon name="arrow" size={16} /></button>}
+                </div>
+                <div className="console-readiness-grid">
+                  {[
+                    ["network", "Gateway", online ? "Connected" : "Not connected", online ? "ready" : "waiting"],
+                    ["chip", "Worker", activeWorkerCount > 0 ? `${activeWorkerCount} authenticated ${activeWorkerCount === 1 ? "worker" : "workers"}` : "Not connected", activeWorkerCount > 0 ? "ready" : "waiting"],
+                    ["wallet", "Settlement", !online ? "Not available" : telemetry.health?.demo_mode ? "Off-chain · no SOL payment" : telemetry.health?.protocol_config_initialized ? "Devnet configured" : "Devnet setup required", online && !telemetry.health?.demo_mode && telemetry.health?.protocol_config_initialized ? "ready" : "waiting"],
+                  ].map(([icon, title, detail, state]) => <div className={"console-readiness-item " + state} key={title}><span><Icon name={icon} size={19} /></span><div><strong>{title}</strong><small>{detail}</small></div></div>)}
+                </div>
+              </section>
               <section
                 className="console-metrics"
                 aria-label="Gateway telemetry"
@@ -318,25 +379,29 @@ export default function App() {
                 {[
                   [
                     "network",
-                    "Available workers",
+                    "Connected workers",
                     online ? telemetry.nodes.length : "—",
                     online
-                      ? "Reporting within the last 45 seconds"
+                      ? "Worker heartbeats from the last 45 seconds"
                       : "Connect your gateway to see capacity",
                   ],
                   [
                     "chip",
                     "Execution capability",
-                    online
+                    activeWorkerCount > 0
                       ? "Python CPU"
                       : "—",
-                    "Reported by registered workers",
+                    activeWorkerCount > 0
+                      ? "Reported by active workers"
+                      : online
+                        ? "Awaiting a worker heartbeat"
+                        : "Connect your gateway to see capabilities",
                   ],
                   [
                     "check",
                     "Completed workloads",
-                    online ? (telemetry.stats?.tasks_completed ?? 0) : "—",
-                    "Recorded by the gateway",
+                    online ? (telemetry.stats?.tasks_completed ?? "—") : "—",
+                    "Successful results in gateway history",
                   ],
                 ].map(([icon, label, value, caption]) => (
                   <div className="console-metric" key={label}>
@@ -400,7 +465,7 @@ export default function App() {
                           <div>
                             <strong>{run.name}</strong>
                             <small>
-                              {run.mode === "demo" ? "Browser demo" : "Gateway"}{" "}
+                              Gateway{" "}
                               ·{" "}
                               {new Date(run.timestamp).toLocaleTimeString([], {
                                 hour: "2-digit",
@@ -411,9 +476,11 @@ export default function App() {
                           <span
                             className={
                               "console-tag " +
-                              (["failed", "blocked"].includes(run.status)
+                              (["failed", "blocked", "unverified"].includes(run.status)
                                 ? "error"
-                                : "")
+                                : run.status === "cancelled"
+                                  ? "neutral"
+                                  : "")
                             }
                           >
                             {run.status}
@@ -430,13 +497,13 @@ export default function App() {
                       <p>
                         Your runs will appear here.
                         <br />
-                        Try a sample to get things moving.
+                        Prepare a sample and submit it to your worker.
                       </p>
                       <button
                         className="console-text-button"
                         onClick={() => openSample(WORKLOADS[0])}
                       >
-                        Run your first demo
+                        Prepare your first workload
                         <Icon name="arrow" size={16} />
                       </button>
                     </div>
@@ -450,8 +517,8 @@ export default function App() {
                 <div>
                   <strong>Small steps. Clear outcomes.</strong>
                   <p>
-                    Browser demos explore the workflow. Connect your wallet and
-                    gateway when you're ready to submit a Devnet workload.
+                    Review the gateway quote before signing. Progress and
+                    results come from your connected worker.
                   </p>
                 </div>
                 <button
@@ -465,40 +532,28 @@ export default function App() {
             </>
           )}
 
-          <section hidden={page !== "studio"} aria-label="Compute workspace">
+          <section
+            className="console-studio"
+            hidden={page !== "studio"}
+            aria-label="Compute workspace"
+          >
             <div className="console-mode-bar">
-              <div
-                className="console-segmented"
-                role="group"
-                aria-label="Execution mode"
-              >
-                <button
-                  aria-pressed={mode === "demo"}
-                  disabled={busy}
-                  onClick={() => setMode("demo")}
-                >
-                  Browser demo
-                </button>
-                <button
-                  aria-pressed={mode === "gateway"}
-                  disabled={busy}
-                  onClick={() => setMode("gateway")}
-                >
-                  Devnet gateway
-                </button>
-              </div>
+              <span className="console-execution-label"><Icon name="chip" size={17} />Authenticated execution</span>
               <p>
-                {mode === "demo"
-                  ? "An interactive estimate. Python is not executed and no payments are made."
-                  : connected
-                    ? telemetry.health?.demo_mode
-                      ? "Connected gateway executes Python with off-chain development settlement. No SOL payment."
-                      : "Review price and limits, then sign. Requires a configured gateway and Devnet channel."
-                    : "Connect a wallet to authorize a Devnet workload."}
+                {online
+                  ? telemetry.health?.demo_mode
+                    ? "Real worker execution. No on-chain payment in this gateway configuration."
+                    : connected
+                      ? "Review price and limits, then sign the exact workload."
+                      : "Connect your wallet to authorize a workload and Devnet payment."
+                  : "Start the gateway and a worker to run Python workloads."}
               </p>
             </div>
             <Dashboard
-              isDemoMode={mode === "demo"}
+              gatewayHealth={telemetry.health}
+              gatewayOnline={online}
+              workerCount={activeWorkerCount}
+              reviewedSourcesOnly={online && telemetry.nodes.length > 0 && telemetry.nodes.every(node => node.source_policy === 'exact_hash_allowlist')}
               selection={selection}
               onBusyChange={setBusy}
               onRecord={recordRun}
@@ -516,7 +571,7 @@ export default function App() {
                 <div>
                   <h2>
                     {online
-                      ? telemetry.nodes.length + " workers available"
+                      ? telemetry.nodes.length + " workers connected"
                       : "Your network is waiting"}
                   </h2>
                   <p>
@@ -529,6 +584,7 @@ export default function App() {
                   className="console-button secondary"
                   onClick={refresh}
                   disabled={refreshing}
+                  aria-busy={refreshing}
                 >
                   <Icon name="refresh" size={17} />
                   Refresh
@@ -549,22 +605,24 @@ export default function App() {
                       <p className="console-monospace">{node.node_id}</p>
                       <dl>
                         <div>
-                          <dt>Memory</dt>
-                          <dd>
-                            {node.vram_used ?? 0} / {node.vram_total ?? 0} GB
-                          </dd>
+                          <dt>Signing identity</dt>
+                          <dd title={node.worker_pubkey}>{node.worker_pubkey ? `${node.worker_pubkey.slice(0, 6)}…${node.worker_pubkey.slice(-6)}` : "Not reported"}</dd>
                         </div>
                         <div>
-                          <dt>Utilization</dt>
-                          <dd>{node.gpu_util ?? "—"}%</dd>
+                          <dt>Last heartbeat</dt>
+                          <dd>{Number.isFinite(node.last_seen) ? new Date(node.last_seen * 1000).toLocaleTimeString() : "Not reported"}</dd>
                         </div>
                         <div>
-                          <dt>Temperature</dt>
-                          <dd>{node.gpu_temp ?? "—"} °C</dd>
+                          <dt>State</dt>
+                          <dd>{node.status}</dd>
                         </div>
                         <div>
-                          <dt>Capacity</dt>
-                          <dd>{node.tflops ?? 0} TFLOPS</dd>
+                          <dt>Execution</dt>
+                          <dd>{node.execution_mode === "docker" ? "Docker container" : node.execution_mode === "trusted_local" ? "Trusted local process" : "Not reported"}</dd>
+                        </div>
+                        <div>
+                          <dt>Source approval</dt>
+                          <dd>{node.source_policy === "exact_hash_allowlist" ? `${node.approved_source_count} reviewed files` : node.source_policy === "gateway_ast" ? "Gateway source policy" : node.source_policy === "operator_trusted" ? "Operator trusted code" : "Not reported"}</dd>
                         </div>
                       </dl>
                     </article>
@@ -583,7 +641,7 @@ export default function App() {
                   <p>
                     Run the gateway, configure your worker, and return here.
                     <br />
-                    You can explore the Studio demo in the meantime.
+                    Prepare your source in Studio while connecting execution.
                   </p>
                   <button
                     className="console-button primary"
@@ -600,8 +658,8 @@ export default function App() {
                     telemetry.updated.toLocaleTimeString() +
                     ". "
                   : ""}
-                Availability refreshes every 15 seconds. Hardware values are
-                reported by workers.
+                Availability refreshes every 15 seconds. Worker identities and
+                states come from authenticated heartbeats.
               </p>
             </>
           )}
@@ -610,27 +668,23 @@ export default function App() {
             <div className="console-guide">
               <section className="console-panel">
                 <span className="console-eyebrow">THE SHORT VERSION</span>
-                <h2>One workspace. Two ways to explore.</h2>
+                <h2>From signed source to worker result.</h2>
                 <div className="console-guide-options">
                   <div>
                     <span className="console-sample-icon tone-0">
                       <Icon name="spark" size={24} />
                     </span>
-                    <h3>Try it in your browser</h3>
+                    <h3>Prepare a real workload</h3>
                     <p>
-                      Open Studio, select a Python sample and run the demo. See
-                      an illustrative policy check, cost estimate and a
-                      downloadable result. No server, wallet or installation
-                      required.
+                      Select or import Python source in Studio. Set a spending
+                      cap and runtime limit, then request the gateway's quote.
+                      Your wallet authorizes that exact source and those limits.
                     </p>
                     <button
                       className="console-button primary"
-                      onClick={() => {
-                        if (!busy) setMode("demo");
-                        openSample(WORKLOADS[0]);
-                      }}
+                      onClick={() => openSample(WORKLOADS[0])}
                     >
-                      Try a demo
+                      Open Compute Studio
                       <Icon name="arrow" size={17} />
                     </button>
                   </div>
@@ -641,8 +695,8 @@ export default function App() {
                     <h3>Connect your development stack</h3>
                     <p>
                       Start the gateway and an authenticated worker. Connect a
-                      Solana wallet, choose Devnet gateway in Studio and sign
-                      the workload. A configured payment channel and deployed
+                      Solana wallet and sign the reviewed quote in Studio.
+                      For Devnet settlement, a configured payment channel and deployed
                       program are required.
                     </p>
                     <a
@@ -694,12 +748,12 @@ export default function App() {
                 <h2>What happens to a workload?</h2>
                 {[
                   [
-                    "Sign",
-                    "Review the quoted rate, maximum spend and runtime. Your wallet authorizes that exact source and quote.",
+                    "Review",
+                    "The gateway checks the Python source against its allowed policy, estimates a rate and sets the approved limits.",
                   ],
                   [
-                    "Review",
-                    "The gateway checks Python source against its allowed policy and estimates a rate.",
+                    "Sign",
+                    "Review the quoted rate, maximum spend and runtime. Your wallet authorizes that exact source and quote.",
                   ],
                   [
                     "Run",
@@ -707,7 +761,7 @@ export default function App() {
                   ],
                   [
                     "Inspect",
-                    "View the result and its actual settlement state. Demo, off-chain and Devnet results are labelled separately.",
+                    "Verify worker and gateway signatures, source and output hashes, then inspect the actual settlement state.",
                   ],
                 ].map(([title, detail], index) => (
                   <div className="console-guide-step" key={title}>

@@ -21,18 +21,107 @@ gateway = Gateway(solana_client, DEMO_MODE, WORKER_TOKEN)
 require_worker = gateway.require_worker
 nodes = {}
 request_rate_buckets = {}
+request_rate_calls = 0
+RATE_LIMIT_WINDOW_SECONDS = 60
+RATE_LIMIT_MAX_BUCKETS = 10_000
 grid_stats = {"tasks_completed": 0, "total_compute_seconds": 0.0, "total_sol_burned": 0.0, "threats_blocked": 0, "start_time": time.time()}
 
 def worker_token_is_configured(token):
     return len(token or "") >= 16 and (token or "").strip().lower() not in {"replace-with-a-long-random-secret", "change-me", "example-token"}
 
 def enforce_rate_limit(scope, client_id, limit):
-    now = time.time()
+    global request_rate_calls
+    now = time.monotonic()
     key = f"{scope}:{client_id}"
-    recent = [item for item in request_rate_buckets.get(key, []) if now - item < 60]
+    request_rate_calls += 1
+    if request_rate_calls % 256 == 0:
+        expired = [bucket for bucket, timestamps in request_rate_buckets.items()
+                   if not timestamps or now - timestamps[-1] >= RATE_LIMIT_WINDOW_SECONDS]
+        for bucket in expired:
+            request_rate_buckets.pop(bucket, None)
+    recent = [item for item in request_rate_buckets.get(key, []) if now - item < RATE_LIMIT_WINDOW_SECONDS]
     if len(recent) >= limit:
         raise HTTPException(429, "Rate limit exceeded. Retry shortly.")
+    if key not in request_rate_buckets and len(request_rate_buckets) >= RATE_LIMIT_MAX_BUCKETS:
+        oldest = min(request_rate_buckets, key=lambda bucket: request_rate_buckets[bucket][-1])
+        request_rate_buckets.pop(oldest, None)
     request_rate_buckets[key] = recent + [now]
+
+
+class RequestBodyLimitMiddleware:
+    """Reject oversized JSON bodies before FastAPI/Pydantic buffers and parses them."""
+    def __init__(self, app, max_body_bytes):
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("method") not in {"POST", "PUT", "PATCH"}:
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path")
+        limit = 3 if path == "/faucet/airdrop" else 30 if path in {"/quotes", "/execute/challenge", "/execute", "/agents/challenge", "/agents", "/analyze"} else None
+        if limit is not None:
+            client = scope.get("client")
+            try:
+                enforce_rate_limit(path, client[0] if client else "unknown", limit)
+            except HTTPException as error:
+                await self._reject(send, status=error.status_code, detail=error.detail)
+                return
+
+        content_length = next((value for name, value in scope.get("headers", []) if name.lower() == b"content-length"), None)
+        if content_length is not None:
+            try:
+                declared_size = int(content_length)
+                if declared_size < 0:
+                    await self._reject(send, status=400, detail="Invalid Content-Length header.")
+                    return
+                if declared_size > self.max_body_bytes:
+                    await self._reject(send)
+                    return
+            except ValueError:
+                await self._reject(send, status=400, detail="Invalid Content-Length header.")
+                return
+
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message.get("type") == "http.disconnect":
+                return
+            if message.get("type") != "http.request":
+                continue
+            body.extend(message.get("body", b""))
+            if len(body) > self.max_body_bytes:
+                await self._reject(send)
+                return
+            if not message.get("more_body", False):
+                break
+
+        buffered_body = bytes(body)
+        delivered = False
+
+        async def buffered_receive():
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {"type": "http.request", "body": buffered_body, "more_body": False}
+            return await receive()
+
+        await self.app(scope, buffered_receive, send)
+
+    async def _reject(self, send, status=413, detail="Request body exceeds the configured size limit."):
+        body = ("{\"detail\":\"" + detail + "\"}").encode("utf-8")
+        headers = [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode("ascii")),
+            (b"x-content-type-options", b"nosniff"),
+            (b"x-frame-options", b"DENY"),
+            (b"referrer-policy", b"no-referrer"),
+            (b"cache-control", b"no-store"),
+        ]
+        await send({"type": "http.response.start", "status": status, "headers": headers})
+        await send({"type": "http.response.body", "body": body, "more_body": False})
+
 
 @asynccontextmanager
 async def lifespan(app):
@@ -42,16 +131,11 @@ async def lifespan(app):
     await solana_client.close()
 
 app = FastAPI(title="Aperture Compute Gateway", version="2.0.0", lifespan=lifespan)
+app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=max(1024, int(os.getenv("APERTURE_MAX_REQUEST_BYTES", "2500000"))))
 app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
 
 @app.middleware("http")
 async def security_and_admission(request, call_next):
-    if request.method == "POST" and request.url.path in {"/quotes", "/execute/challenge", "/execute", "/agents/challenge", "/agents", "/analyze"}:
-        try:
-            enforce_rate_limit(request.url.path, request.client.host if request.client else "unknown", 30)
-        except HTTPException as error:
-            from fastapi.responses import JSONResponse
-            return JSONResponse(status_code=error.status_code, content={"detail": error.detail})
     response = await call_next(request)
     response.headers.update({"X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store"})
     return response
@@ -73,6 +157,8 @@ class NodeInfo(BaseModel):
     tflops: Optional[float] = Field(default=None, ge=0, le=100_000)
     status: str = Field(default="ONLINE", max_length=32)
     execution_mode: str = Field(default="unknown", max_length=32)
+    source_policy: str = Field(default="unknown", max_length=32)
+    approved_source_count: Optional[int] = Field(default=None, ge=1, le=10_000)
 
 class AirdropRequest(BaseModel):
     wallet: str = Field(min_length=32, max_length=44)
@@ -80,7 +166,7 @@ class AirdropRequest(BaseModel):
 
 @app.get("/")
 def root():
-    return {"protocol": "Aperture Compute", "version": "2.0.0", "status": "online", "network": "Solana Devnet", "demo_mode": DEMO_MODE}
+    return {"protocol": "Aperture Compute", "version": "2.0.0", "status": "online", "network": "off_chain" if DEMO_MODE else "devnet", "demo_mode": DEMO_MODE}
 
 @app.get("/health")
 async def health():
@@ -91,10 +177,22 @@ async def health():
             config = await solana_client.get_protocol_config()
         except Exception:
             pass
-    ready = worker_token_is_configured(WORKER_TOKEN) and (DEMO_MODE or config is not None)
-    return {"status": "ready" if ready else "configuration_required", "environment": APP_ENV,
+    configured = worker_token_is_configured(WORKER_TOKEN) and (DEMO_MODE or config is not None)
+    active_workers = [node for node in gateway.store.list("workers") if time.time() - node.get("last_seen", 0) < 45]
+    issues = []
+    if not worker_token_is_configured(WORKER_TOKEN):
+        issues.append("worker_authentication")
+    if not DEMO_MODE and not signer_configured:
+        issues.append("oracle_signer")
+    if not DEMO_MODE and config is None:
+        issues.append("protocol_configuration")
+    if not active_workers:
+        issues.append("worker_connection")
+    return {"status": "ready" if configured and active_workers else "workers_unavailable" if configured else "configuration_required", "environment": APP_ENV,
             "demo_mode": DEMO_MODE, "worker_auth_configured": worker_token_is_configured(WORKER_TOKEN),
             "oracle_signer_configured": signer_configured, "protocol_config_initialized": bool(config) if not DEMO_MODE else None,
+            "network": "off_chain" if DEMO_MODE else "devnet", "gateway_pubkey": str(solana_client.ai_signer.pubkey()),
+            "active_worker_count": len(active_workers), "configuration_issues": issues,
             "protocol_version": 2, "durable_state": True, "kya": "owner-issued delegation; not legal KYC", "execution_scope": "bounded Python CPU"}
 
 @app.post("/analyze")
@@ -331,7 +429,7 @@ subprocess.run(["cat", "/etc/shadow"])
 def get_stats():
     """Aggregated protocol telemetry for the DePIN network."""
     now = time.time()
-    active = [n for n in nodes.values() if now - n["last_seen"] < 45]
+    active = [n for n in gateway.store.list("workers") if now - n["last_seen"] < 45]
     known_temps = [n["gpu_temp"] for n in active if n.get("gpu_temp") is not None]
     known_utils = [n["gpu_util"] for n in active if n.get("gpu_util") is not None]
     avg_temp = round(sum(known_temps) / len(known_temps), 1) if known_temps else None
@@ -340,19 +438,23 @@ def get_stats():
     used_vram = round(sum(n.get("vram_used") or 0.0 for n in active), 1)
     total_tflops = round(sum(float(n.get("tflops") or 0.0) for n in active), 1)
     done = [job for job in gateway.store.list('jobs') if job['state'] == 'completed']
-    grid_stats['tasks_completed'] = len(done)
+    grid_stats['tasks_completed'] = sum(job['receipt'].get('execution_status') == 'completed' for job in done)
     grid_stats['total_compute_seconds'] = sum(job['receipt']['execution_time'] for job in done)
-    grid_stats['total_sol_burned'] = sum(job['receipt'].get('cost_sol') or 0 for job in done)
+    charged_lamports = sum(job['receipt'].get('charged_lamports') or 0 for job in done
+                           if job['receipt'].get('settlement_type') == 'DEVNET')
+    grid_stats['total_sol_burned'] = charged_lamports / 1_000_000_000
 
     return {
         "tasks_completed": grid_stats["tasks_completed"],
         "total_compute_seconds": round(grid_stats["total_compute_seconds"], 2),
-        "total_sol_burned": round(grid_stats["total_sol_burned"], 6),
-        "threats_blocked": grid_stats["threats_blocked"],
+        "total_sol_burned": grid_stats["total_sol_burned"],
+        "total_charged_lamports": charged_lamports,
+        "tasks_finished": len(done),
+        "history_scope": "retained_gateway_records",
         "active_nodes": len(active),
         "active_workers_count": len(active),
-        "sol_price": get_sol_price_from_pyth(),
-        "network": "Solana Devnet",
+        "sol_price": get_sol_price_from_pyth() if not DEMO_MODE else None,
+        "network": "Off-chain execution" if DEMO_MODE else "Solana Devnet",
         "program_id": str(solana_client.program_id),
         "hardware": {
             "avg_temp": avg_temp,
@@ -369,8 +471,6 @@ async def faucet_airdrop(req: AirdropRequest, request: Request):
     """Requests Devnet SOL airdrop to help evaluators test without a funded wallet."""
     if APP_ENV == "production":
         raise HTTPException(status_code=404, detail="Devnet faucet is disabled in production.")
-    client_id = request.client.host if request.client else "unknown"
-    enforce_rate_limit("faucet", f"{client_id}:{req.wallet}", 3)
     success = await solana_client.request_airdrop(req.wallet, int(req.amount_sol * 1_000_000_000))
     if success:
         return {"status": "success", "amount_sol": req.amount_sol, "wallet": req.wallet}
@@ -379,4 +479,4 @@ async def faucet_airdrop(req: AirdropRequest, request: Request):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=os.getenv("APERTURE_BIND_HOST", "127.0.0.1"), port=8000)

@@ -9,7 +9,7 @@
 .agents-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .agent-passport { border-top: 1px solid #e9e0f1; margin-top: 18px; padding-top: 18px; }
 .agent-passport h3 { font-size: 15px; }
-.agent-passport code { display: block; color: #8a6c9b; margin: 14px 0; }
+.agent-passport code { display: block; color: #72527f; margin: 14px 0; }
 .agent-passport dl > div { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; font-size: 12px; }
 .agent-passport dt { color: #786787; }
 .agent-passport dd { text-align: right; }
