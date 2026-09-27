@@ -18,6 +18,16 @@ program owner, version, oracle and treasury before enabling live quotes.
 Close/refund active v1 channels through their original program before moving
 funds. Do not point a new gateway at an old deployment.
 
+## Build toolchain
+
+Use Anchor CLI and Anchor Lang 0.32.2 with Agave CLI 4.3.0 for a fresh Devnet
+deployment. CI builds the program with `cargo build-sbf --arch v3` and executes
+the resulting artifact on a temporary local validator. Preserve the deployed
+program ID and the compile-time `APERTURE_CONFIG_AUTHORITY`; rebuilding under a
+different authority requires deploying a new program. Regenerate and review the
+IDL whenever changing Anchor versions, then verify the hand-built SDK accounts
+and instruction data against it.
+
 The build pins APERTURE_CONFIG_AUTHORITY; initialize_config accepts only that
 key. The config fixes the authority/oracle signer and treasury for the program
 deployment. Protect their keys. No such signing key belongs in source control.
@@ -110,8 +120,8 @@ charge.
 - start_task(task_hash, source_hash, agent, rate, max_cost, max_runtime) uses
   [config, channel writable, oracle signer+writable, treasury writable,
   optional passport writable, receipt writable/init, system program]. Direct
-  owner execution omits passport using the program-ID sentinel in this
-  Anchor-0.29 manual client path.
+  owner execution omits passport using the program-ID sentinel in the manual
+  client path.
 - stop_task(task_hash) uses [config, channel writable, oracle signer,
   treasury writable, optional passport writable, receipt writable].
 - close_channel is owner-signed and takes the config, channel, owner,

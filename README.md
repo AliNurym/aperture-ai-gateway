@@ -47,6 +47,8 @@ Keep `APERTURE_DEMO_MODE=false`. The browser demo is independent of this backend
 
 The protocol initializer is pinned to `APERTURE_CONFIG_AUTHORITY` at program build time. Choose and protect that signing wallet first, set the same public key in `backend/.env`, and build the program from the project root with that environment variable:
 
+Use Agave CLI 4.3.0 and Anchor CLI 0.32.2 for a fresh Devnet deployment. `Anchor.toml` pins both versions; AVM must be installed to switch Anchor CLI versions. This program uses Anchor Lang 0.32.2; the CI build explicitly targets sBPF v3 with `cargo build-sbf --arch v3`. Build and deploy with these compatible versions so the emitted program matches the current Solana deployment target.
+
 ```powershell
 # v2 uses a new program address because the previous Devnet config account has
 # an incompatible layout. This checkout's program key is local and git-ignored.

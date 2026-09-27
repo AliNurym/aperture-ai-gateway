@@ -55,11 +55,10 @@ jobs:
       - run: npm ci --prefix frontend
       - name: Install matching Devnet validator tools
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/v1.18.26/install)"
+          sh -c "$(curl -sSfL https://release.anza.xyz/v4.3.0/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
-          mkdir -p "$HOME/.cache/solana"
       - name: Build deployable SBF program with test-only authority
-        run: cargo build-sbf --tools-version v1.54 --manifest-path programs/Cargo.toml --sbf-out-dir target/deploy
+        run: cargo build-sbf --arch v3 --manifest-path programs/Cargo.toml --sbf-out-dir target/deploy
         env:
           APERTURE_CONFIG_AUTHORITY: GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB
       - name: Exercise instructions on a local Solana validator
