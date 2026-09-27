@@ -92,11 +92,11 @@ try {
   }
   for (const key of [authority, owner, wrongOracle]) await airdrop(key);
 
-  const initialize = ix('initialize_config', [treasury.publicKey.toBuffer()], requireKeys([
-    [config, false, true], [authority.publicKey, true, true], [system],
+  const initialize = signer => ix('initialize_config', [treasury.publicKey.toBuffer()], requireKeys([
+    [config, false, true], [signer, true, true], [system],
   ], 'initialize'));
-  await expectRejected(send(initialize, [wrongOracle]), 'non-pinned config authority');
-  await send(initialize, [authority]);
+  await expectRejected(send(initialize(wrongOracle.publicKey), [wrongOracle]), 'non-pinned config authority');
+  await send(initialize(authority.publicKey), [authority]);
 
   const configAccount = await connection.getAccountInfo(config);
   assert(configAccount);
