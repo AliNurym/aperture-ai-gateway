@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import {
-  Connection, Keypair, PublicKey, sendAndConfirmTransaction,
+  Connection, Keypair, PublicKey,
   SystemProgram, Transaction, TransactionInstruction,
 } from '@solana/web3.js';
 
@@ -34,9 +34,21 @@ const send = async (ix, signers) => {
     blockhash: latest.blockhash,
     lastValidBlockHeight: latest.lastValidBlockHeight,
   }).add(ix);
-  return sendAndConfirmTransaction(connection, transaction, signers, {
-    commitment: 'processed', preflightCommitment: 'processed',
+  transaction.sign(...signers);
+  const signature = await connection.sendRawTransaction(transaction.serialize(), {
+    preflightCommitment: 'processed',
   });
+  const confirmation = await connection.confirmTransaction({
+    signature,
+    blockhash: latest.blockhash,
+    lastValidBlockHeight: latest.lastValidBlockHeight,
+  }, 'processed');
+  if (confirmation.value.err) {
+    const error = new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+    error.transactionMessage = error.message;
+    throw error;
+  }
+  return signature;
 };
 const ix = (name, data, keys) => new TransactionInstruction({
   programId, data: Buffer.concat([discriminator('global:' + name), ...data]),
