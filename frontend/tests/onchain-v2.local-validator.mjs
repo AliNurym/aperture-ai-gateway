@@ -177,7 +177,6 @@ try {
       'owner close with persistent settled receipt'],
   }, null, 2));
 } finally {
-  await connection?.close().catch(() => {});
   validator.kill('SIGTERM');
   await new Promise(resolve => {
     if (validator.exitCode !== null) resolve();
