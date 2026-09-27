@@ -33,12 +33,12 @@ const ix = (name, data, keys) => new TransactionInstruction({
   keys: keys.map(([pubkey, isSigner = false, isWritable = false]) => ({ pubkey, isSigner, isWritable })),
 });
 const requireKeys = (accounts, name) => {
-  for (const [pubkey, signer, writable] of accounts) {
+  for (const [pubkey, signer = false, writable = false] of accounts) {
     assert(pubkey instanceof PublicKey);
     assert.equal(typeof signer, 'boolean', name);
     assert.equal(typeof writable, 'boolean', name);
   }
-  return accounts;
+  return accounts.map(([pubkey, signer = false, writable = false]) => [pubkey, signer, writable]);
 };
 const expectRejected = async (promise, label) => {
   let failed = false;
