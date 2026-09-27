@@ -59,11 +59,17 @@ let connection;
 try {
   connection = new Connection(url, 'confirmed');
   let ready = false;
+  let lastRpcError;
   for (let attempt = 0; attempt < 90; attempt++) {
     if (validator.exitCode !== null) throw new Error('Local validator exited: ' + validatorOutput);
-    try { await connection.getHealth(); ready = true; break; } catch { await new Promise(resolve => setTimeout(resolve, 1000)); }
+    try {
+      if (await connection.getSlot('processed') > 0) { ready = true; break; }
+    } catch (error) {
+      lastRpcError = error;
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
   }
-  assert(ready, 'Local validator failed to start: ' + validatorOutput);
+  assert(ready, `Local validator failed to start: ${validatorOutput}; RPC: ${lastRpcError?.message ?? 'no slot produced'}`);
 
   async function airdrop(keypair, sol = 2) {
     const signature = await connection.requestAirdrop(keypair.publicKey, sol * 1_000_000_000);
