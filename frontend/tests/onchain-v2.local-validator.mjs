@@ -38,17 +38,30 @@ const send = async (ix, signers) => {
   const signature = await connection.sendRawTransaction(transaction.serialize(), {
     preflightCommitment: 'processed',
   });
-  const confirmation = await connection.confirmTransaction({
-    signature,
-    blockhash: latest.blockhash,
-    lastValidBlockHeight: latest.lastValidBlockHeight,
-  }, 'processed');
-  if (confirmation.value.err) {
-    const error = new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-    error.transactionMessage = error.message;
-    throw error;
+  const deadline = Date.now() + 30_000;
+  let nextBlockHeightCheck = 0;
+  while (Date.now() < deadline) {
+    const { value: [status] } = await connection.getSignatureStatuses([signature], {
+      searchTransactionHistory: true,
+    });
+    if (status) {
+      if (status.err) {
+        const error = new Error(`Transaction failed: ${JSON.stringify(status.err)}`);
+        error.transactionMessage = error.message;
+        throw error;
+      }
+      return signature;
+    }
+    if (Date.now() >= nextBlockHeightCheck) {
+      const blockHeight = await connection.getBlockHeight('processed');
+      if (blockHeight > latest.lastValidBlockHeight) {
+        throw new Error(`Transaction ${signature} expired before processing`);
+      }
+      nextBlockHeightCheck = Date.now() + 1_000;
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
   }
-  return signature;
+  throw new Error(`Timed out waiting for transaction ${signature} to be processed`);
 };
 const ix = (name, data, keys) => new TransactionInstruction({
   programId, data: Buffer.concat([discriminator('global:' + name), ...data]),
