@@ -71,8 +71,9 @@ try {
   }
   assert(ready, `Local validator failed to start: ${validatorOutput}; RPC: ${lastRpcError?.message ?? 'no slot produced'}`);
 
-  async function airdrop(keypair, sol = 2) {
-    const signature = await connection.requestAirdrop(keypair.publicKey, sol * 1_000_000_000);
+  async function airdrop(keypairOrPublicKey, sol = 2) {
+    const publicKey = keypairOrPublicKey.publicKey ?? keypairOrPublicKey;
+    const signature = await connection.requestAirdrop(publicKey, sol * 1_000_000_000);
     const latest = await connection.getLatestBlockhash('confirmed');
     await connection.confirmTransaction({ signature, ...latest }, 'confirmed');
   }
@@ -109,6 +110,8 @@ try {
     [passport, false, true], [receipt, false, true], [system],
   ];
   const startData = [taskHash, sourceHash, agent.publicKey.toBuffer(), u64(10_000), u64(100_000), u32(20)];
+  await expectRejected(send(ix('start_task', startData, startAccounts(authority.publicKey)), [authority]), 'unfunded treasury');
+  await airdrop(treasury.publicKey);
   await expectRejected(send(ix('start_task', startData, startAccounts(wrongOracle.publicKey)), [wrongOracle]), 'wrong oracle start');
   await expectRejected(send(ix('start_task', [
     taskHash, sourceHash, agent.publicKey.toBuffer(), u64(25_001), u64(100_000), u32(20),

@@ -39,9 +39,11 @@ Copy `backend/.env.example` to `backend/.env` and configure:
 - `APERTURE_WORKER_TOKEN`: a unique secret of at least 16 characters, shared with approved workers. Example placeholders are rejected.
 - `APERTURE_CONFIG_AUTHORITY`: public key pinned into the Anchor program at build time. It must match the protected backend signing wallet used to initialize the protocol config.
 - `BACKEND_PRIVATE_KEY`: your development oracle signer, for Devnet payment-channel operations.
-- `APERTURE_TREASURY_PUBKEY`: the shared payout wallet for confirmed channel charges.
+- `APERTURE_TREASURY_PUBKEY`: the shared payout wallet for confirmed channel charges. Fund it to its rent-exempt minimum before starting tasks; the program rejects an unfunded treasury so small first charges cannot fail at settlement.
 - `SOLANA_RPC_URL` and `SOLANA_PROGRAM_ID`: the intended Devnet deployment.
 - `CORS_ORIGINS`: your frontend's exact origins. The defaults permit localhost and 127.0.0.1 on port 3000.
+
+Check the treasury wallet's current rent-exempt minimum with `solana rent 0` and fund it before initializing the v2 config.
 
 Keep `APERTURE_DEMO_MODE=false`. The browser demo is independent of this backend setting.
 

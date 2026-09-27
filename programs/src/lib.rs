@@ -247,7 +247,12 @@ fn settle_task_state(
     Ok(Some(charge))
 }
 
-fn pay_from_channel(channel: &AccountInfo, destination: &AccountInfo, amount: u64) -> Result<()> {
+fn pay_from_channel(
+    channel: &AccountInfo,
+    destination: &AccountInfo,
+    amount: u64,
+    require_rent_exempt_destination: bool,
+) -> Result<()> {
     require!(
         channel.key != destination.key,
         ApertureError::InvalidTreasury
@@ -264,10 +269,24 @@ fn pay_from_channel(channel: &AccountInfo, destination: &AccountInfo, amount: u6
         .lamports()
         .checked_add(amount)
         .ok_or(ApertureError::MathOverflow)?;
+    if amount > 0 && require_rent_exempt_destination {
+        require!(
+            credited >= Rent::get()?.minimum_balance(destination.data_len()),
+            ApertureError::PaymentRecipientNotRentExempt
+        );
+    }
     if amount > 0 {
         **channel.try_borrow_mut_lamports()? = remaining;
         **destination.try_borrow_mut_lamports()? = credited;
     }
+    Ok(())
+}
+
+fn require_rent_exempt_payment_destination(destination: &AccountInfo) -> Result<()> {
+    require!(
+        destination.lamports() >= Rent::get()?.minimum_balance(destination.data_len()),
+        ApertureError::PaymentRecipientNotRentExempt
+    );
     Ok(())
 }
 
@@ -415,6 +434,7 @@ pub mod aperture_gateway {
         max_runtime: u32,
     ) -> Result<()> {
         require_v2(&ctx.accounts.config)?;
+        require_rent_exempt_payment_destination(&ctx.accounts.treasury.to_account_info())?;
         require!(
             ctx.accounts.channel.burn_rate == 0 && ctx.accounts.channel.task_hash == [0; 32],
             ApertureError::ChannelBusy
@@ -516,6 +536,7 @@ pub mod aperture_gateway {
                 &ctx.accounts.channel.to_account_info(),
                 &ctx.accounts.treasury.to_account_info(),
                 charge,
+                true,
             )?;
             emit!(TaskSettledEvent {
                 owner: ctx.accounts.receipt.owner,
@@ -576,6 +597,7 @@ pub mod aperture_gateway {
                 &ctx.accounts.channel.to_account_info(),
                 &ctx.accounts.treasury.to_account_info(),
                 charge,
+                true,
             )?;
             emit!(TaskSettledEvent {
                 owner: receipt.owner,
@@ -595,6 +617,7 @@ pub mod aperture_gateway {
             &ctx.accounts.channel.to_account_info(),
             &ctx.accounts.user.to_account_info(),
             refund,
+            false,
         )?;
         ctx.accounts.channel.balance = 0;
         // Anchor's close constraint refunds rent and any direct donations. Receipt is not closed.
@@ -848,6 +871,8 @@ pub enum ApertureError {
     BoundedTaskRequired,
     #[msg("An active task receipt is required to close this channel")]
     MissingReceipt,
+    #[msg("Payment recipient must be rent-exempt before it can receive a charge")]
+    PaymentRecipientNotRentExempt,
 }
 
 #[cfg(test)]

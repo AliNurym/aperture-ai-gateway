@@ -17,6 +17,9 @@ program ID for v2, deploy a compatible build, initialize its config, and verify
 program owner, version, oracle and treasury before enabling live quotes.
 Close/refund active v1 channels through their original program before moving
 funds. Do not point a new gateway at an old deployment.
+Fund the configured treasury to its rent-exempt minimum before enabling tasks.
+`start_task` rejects an unfunded treasury, and settlement rejects a charge that
+would leave its recipient below the current rent-exempt minimum.
 
 ## Build toolchain
 
