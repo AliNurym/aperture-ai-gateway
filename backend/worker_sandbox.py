@@ -74,7 +74,8 @@ class DockerSandbox:
             "--mount", f"type=bind,source={self.host_source(task_directory)},target=/task,readonly",
             "--workdir", "/tmp", "--env", "PYTHONIOENCODING=utf-8",
             "--env", "OPENBLAS_NUM_THREADS=1", "--env", "OMP_NUM_THREADS=1",
-            "--entrypoint", "python", self.image, "-I", "-u", "/task/payload.py",
+            "--entrypoint", "python", self.image, "-I", "-u",
+            "/task/runner.py" if (task_directory / "runner.py").exists() else "/task/payload.py",
         ]
 
     def launch(self, task_directory: Path, container_name: str):
@@ -134,7 +135,7 @@ class TrustedLocalExecutor:
         safe_env = {name: os.environ[name] for name in ("PATH", "SYSTEMROOT", "WINDIR", "COMSPEC") if name in os.environ}
         safe_env["PYTHONIOENCODING"] = "utf-8"
         return subprocess.Popen(
-            [sys.executable, "-I", "-u", str(task_directory / "payload.py")],
+            [sys.executable, "-I", "-u", str(task_directory / ("runner.py" if (task_directory / "runner.py").exists() else "payload.py"))],
             cwd=task_directory, env=safe_env, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, bufsize=0,
         )

@@ -1,24 +1,71 @@
-.agents-intro { margin-bottom: 23px; }
-.agents-intro h2 { max-width: 650px; margin: 14px 0; line-height: 1.5; }
-.agents-intro p, .agents-form p { color: #786787; font-size: 13px; line-height: 1.8; margin: 12px 0; }
-.agents-grid { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(300px, 1.2fr); gap: 23px; align-items: start; }
-.agents-form label, .studio-budget label { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; color: #786787; font-size: 12px; }
-.agents-form input, .studio-budget input { width: 100%; min-width: 0; background: #fcf9fe; color: #4d3c5d; border: 1px solid #e9e0f1; border-radius: 10px; padding: 11px 12px; font: 13px "Roboto", sans-serif; }
-.agents-form input:disabled { opacity: 0.6; }
-.agents-owner, .agent-passport code { overflow-wrap: anywhere; font: 11px/1.8 "Roboto Mono", Consolas, monospace; }
+.agents-intro { margin-bottom: 24px; }
+.agents-intro-heading { display: flex; align-items: center; gap: 16px; }
+.agents-intro-heading > div:nth-child(2) { min-width: 0; flex: 1; }
+.agents-intro-heading h2 { font-size: 18px; line-height: 1.4; font-weight: 500; margin-bottom: 6px; }
+.agents-intro-heading p { max-width: 650px; color: var(--console-muted); font-size: 13px; line-height: 1.7; }
+.agents-intro-heading > button { flex-shrink: 0; }
+.agents-connect-icon { display: grid; place-items: center; width: 48px; height: 48px; flex-shrink: 0; border-radius: 16px; background: var(--console-tonal); color: var(--console-primary); }
+.agents-onboarding { padding: 28px; }
+.agents-boundaries { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; padding-top: 24px; margin-top: 24px; border-top: 1px solid var(--console-line); }
+.agents-boundaries dt { font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+.agents-boundaries dd { color: var(--console-muted); font-size: 13px; line-height: 1.7; }
+.agents-help { color: var(--console-muted); font-size: 13px; line-height: 1.7; }
+.agents-help summary { width: fit-content; min-height: 36px; padding: 6px 0; cursor: pointer; color: var(--console-primary); border-radius: 4px; font-weight: 500; }
+.agents-help p { margin: 8px 0 12px; max-width: 760px; }
+.agents-intro-help { margin-top: 16px; }
+.agents-grid { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(300px, 1.15fr); gap: 24px; align-items: start; }
+.agents-form p { color: var(--console-muted); font-size: 12px; line-height: 1.7; margin: 12px 0; }
+.agents-form .agents-owner { margin: 10px 0 20px; color: var(--console-muted); font: 12px/1.6 "Roboto Mono", Consolas, monospace; overflow-wrap: anywhere; }
+.agents-form label { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 18px 0; color: var(--console-muted); font-size: 13px; line-height: 1.5; }
+.agents-form input { width: 100%; min-width: 0; min-height: 44px; padding: 11px 12px; background: #fcf9fe; color: #4d3c5d; border: 1px solid #e9e0f1; border-radius: 10px; font: 14px Roboto, "Segoe UI", sans-serif; }
+.agents-form input:hover:not(:disabled) { border-color: var(--md-sys-color-outline); }
+.agents-form input:focus-visible { outline: 3px solid #9d80ca; outline-offset: 2px; }
+.agents-form input:disabled { opacity: .6; }
+.agents-form .agents-field-help { margin: -10px 0 20px; font-size: 12px; }
 .agents-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.agent-passport { border-top: 1px solid #e9e0f1; margin-top: 18px; padding-top: 18px; }
-.agent-passport h3 { font-size: 15px; }
-.agent-passport code { display: block; color: #72527f; margin: 14px 0; }
-.agent-passport dl > div { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; font-size: 12px; }
-.agent-passport dt { color: #786787; }
-.agent-passport dd { text-align: right; }
-.agents-actions { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 14px; }
-.studio-quote { padding: 16px; margin-top: 15px; background: #f6f0fb; border-radius: 12px; }
-.studio-quote strong { display: block; margin-bottom: 8px; }
-.studio-quote p { margin: 8px 0; }
-.studio-quote button { margin-top: 10px; }
-.studio-receipt-evidence { font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
-.studio-receipt-evidence dt { color: #786787; }
-.studio-receipt-evidence dd { font-family: "Roboto Mono", Consolas, monospace; margin-bottom: 10px; }
-@media (max-width: 850px) { .agents-grid { grid-template-columns: 1fr; } }
+.agents-fields label { display: grid; grid-template-rows: minmax(40px, auto) 44px; align-items: end; margin: 0; }
+.agents-form .agents-signing-note { margin: 20px 0; padding-top: 16px; border-top: 1px solid var(--console-line); }
+.agents-form form > .console-text-button { margin-left: 12px; }
+.agents-count { display: inline-grid; place-items: center; min-width: 24px; height: 24px; margin-left: 8px; padding: 0 6px; border-radius: 8px; color: var(--console-muted); background: var(--console-tonal); font-size: 12px; font-weight: 400; }
+.agents-list .console-section-heading { align-items: center; }
+.agents-list .console-section-heading > button { flex-shrink: 0; }
+.agents-empty { min-height: 280px; padding: 44px 12px; }
+.agents-empty > svg { color: #baa9cd; margin-bottom: 16px; }
+.agents-empty p { max-width: 300px; font-size: 13px; }
+.agent-passport { border-top: 1px solid var(--console-line); margin-top: 20px; padding-top: 20px; }
+.agent-passport h3 { min-width: 0; font-size: 16px; line-height: 1.5; font-weight: 500; overflow-wrap: anywhere; }
+.agent-attestation { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--console-muted); font-size: 12px; line-height: 1.7; margin: 6px 0 16px; }
+.agent-passport dl { margin: 0; }
+.agent-passport dl > div { display: flex; justify-content: space-between; gap: 20px; padding: 9px 0; font-size: 13px; line-height: 1.6; }
+.agent-passport dt { color: var(--console-muted); }
+.agent-passport dd { min-width: 0; text-align: right; margin: 0; overflow-wrap: anywhere; }
+.agent-passport .agent-remaining { margin: 8px 0; padding: 12px 0; border-block: 1px solid var(--console-line); font-weight: 500; }
+.agent-passport code { overflow-wrap: anywhere; font: 12px/1.7 "Roboto Mono", Consolas, monospace; }
+.agent-allowance-source { color: var(--console-muted); font-size: 12px; line-height: 1.6; margin: 12px 0 0; }
+.agent-details { margin-top: 12px; }
+.agent-details dl { padding: 8px 0; }
+.agent-details dl > div:first-child { display: block; }
+.agent-details dl > div:first-child dd { text-align: left; margin-top: 6px; }
+.agents-actions { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 12px; }
+.agents-actions .agent-revoke { color: var(--md-sys-color-error); }
+@media (max-width: 1050px) { .agents-grid { grid-template-columns: 1fr; } }
+@media (max-width: 980px) {
+  .agents-intro-heading { flex-wrap: wrap; }
+  .agents-intro-heading > button { margin-left: 64px; }
+}
+@media (max-width: 600px) {
+  .agents-onboarding { padding: 24px 20px; }
+  .agents-intro-heading { align-items: flex-start; gap: 12px; }
+  .agents-intro-heading > div:nth-child(2) { flex-basis: calc(100% - 60px); }
+  .agents-intro-heading h2 { font-size: 17px; }
+  .agents-intro-heading > button { margin: 8px 0 0; width: 100%; }
+  .agents-boundaries { grid-template-columns: 1fr; gap: 16px; margin-top: 20px; padding-top: 20px; }
+  .agents-boundaries > div { display: grid; grid-template-columns: 80px 1fr; gap: 12px; align-items: baseline; }
+  .agents-boundaries dt { margin-bottom: 0; }
+}
+@media (max-width: 400px) {
+  .agents-fields { grid-template-columns: 1fr; gap: 18px; }
+  .agents-fields label { grid-template-rows: auto 44px; }
+  .agents-form form > .console-button { width: 100%; }
+  .agents-form form > .console-text-button { margin: 8px 0 0; }
+}

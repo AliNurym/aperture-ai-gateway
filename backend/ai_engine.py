@@ -1,26 +1,9 @@
 import ast
 import math
-import json
-import os
 import time
 import requests
-from dotenv import load_dotenv
 
-load_dotenv()
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-
-# Initializing Google GenAI client safely if key exists
-genai_client = None
-if GEMINI_API_KEY:
-    try:
-        from google import genai
-        from google.genai import types
-        genai_client = genai.Client(api_key=GEMINI_API_KEY)
-    except Exception as e:
-        print(f"[!] Google GenAI initialization note: {e}")
-        genai_client = None
-
+MAX_SOURCE_BYTES = 32_000
 
 _cached_sol_price: float | None = None
 _last_sol_price_fetch = 0.0
@@ -79,13 +62,12 @@ def sigmoid(x: float) -> float:
         return 0.0 if x < 0.4 else 1.0
 
 
-def calculate_quantum_price(complexity_sum: float, hw_power: float = 2.5, telemetry_delta: float = 0.0) -> float:
+def calculate_ast_quote_rate(complexity_sum: float, hw_power: float = 2.5, telemetry_delta: float = 0.0) -> float:
+    """Return a bounded per-second SOL rate from configured complexity inputs.
+
+    This deterministic heuristic is not a worker benchmark or a live market price.
     """
-    Aperture Dynamic Pricing Engine ("Robin Hood" micro-rate).
-    Target: ~$0.80 - $3.50 / hour for typical computational workloads.
-    Calculates per-second rate in SOL (convertible to Lamports: 1 SOL = 10^9 lamports).
-    """
-    # Base rate: 0.00000150 SOL/sec ≈ 1500 lamports/sec ≈ $0.99/hour at $185/SOL
+    # Base rate in SOL per second (converted to lamports by the caller).
     base_rate_sol = 0.00000150
 
     if complexity_sum <= 0:
@@ -110,20 +92,14 @@ class CodeComplexityVisitor(ast.NodeVisitor):
     Python AST source-policy and workload-complexity analyzer.
     It flags selected syntax patterns; it is not a sandbox or a safety guarantee.
     """
-    DANGEROUS_MODULES = {
-        "os", "sys", "subprocess", "shutil", "socket", "pty", "commands",
-        "builtins", "importlib", "pickle", "ctypes", "posix", "nt",
-        "urllib", "http.client", "ftplib", "telnetlib"
-    }
-
     DANGEROUS_FUNCTIONS = {
-        "eval", "exec", "__import__", "compile", "globals", "locals",
+        "eval", "exec", "__import__", "compile", "globals", "locals", "vars", "getattr", "setattr", "delattr", "exit", "quit",
         "system", "popen", "spawn", "fork", "kill", "rmdir", "remove", "unlink"
     }
-    # A deny-list alone is not a sandbox: newly discovered stdlib modules and
-    # indirect imports would otherwise execute on a worker. Keep workloads
-    # intentionally small and deterministic until they run in containers.
-    ALLOWED_MODULES = {"math", "random", "time", "hashlib", "statistics", "decimal", "fractions", "json"}
+    # The allowlist shapes the supported workload API; Docker provides the
+    # execution boundary. NumPy is installed in the isolated CPU task image.
+    HIGH_PERFORMANCE_MODULES = {"numpy", "aperture"}
+    ALLOWED_MODULES = {"math", "random", "time", "hashlib", "statistics", "decimal", "fractions", "json"} | HIGH_PERFORMANCE_MODULES
 
     def __init__(self):
         self.security_violations = []
@@ -176,6 +152,8 @@ class CodeComplexityVisitor(ast.NodeVisitor):
     def visit_Name(self, node):
         if node.id.startswith("__"):
             self.security_violations.append(f"Dunder access is forbidden: '{node.id}' (line {node.lineno})")
+        elif node.id in self.DANGEROUS_FUNCTIONS:
+            self.security_violations.append(f"Forbidden function reference: '{node.id}' (line {node.lineno})")
         self.generic_visit(node)
 
     def visit_Attribute(self, node):
@@ -228,10 +206,17 @@ def analyze_code_ast(code_snippet: str) -> dict:
     Performs deterministic AST-based source-policy checks and rough workload estimates.
     A passing result does not isolate execution or certify arbitrary Python as safe.
     """
-    if not isinstance(code_snippet, str) or len(code_snippet.encode("utf-8")) > 32_000:
+    try:
+        source_size = len(code_snippet.encode("utf-8")) if isinstance(code_snippet, str) else MAX_SOURCE_BYTES + 1
+    except UnicodeEncodeError:
         return {
             "security": "DANGEROUS", "syntax_valid": False, "predicted_sec": 0,
-            "cpu": 0, "ram": 0, "reason": "Payload rejected: maximum source size is 32 KiB"
+            "cpu": 0, "ram": 0, "reason": "Payload rejected: source must be valid UTF-8"
+        }
+    if source_size > MAX_SOURCE_BYTES:
+        return {
+            "security": "DANGEROUS", "syntax_valid": False, "predicted_sec": 0,
+            "cpu": 0, "ram": 0, "reason": "Payload rejected: maximum source size is 32,000 UTF-8 bytes"
         }
 
     try:
@@ -246,6 +231,11 @@ def analyze_code_ast(code_snippet: str) -> dict:
             "ram": 0,
             "reason": f"Payload rejected: Python Syntax Error at line {e.lineno}"
         }
+    except (RecursionError, MemoryError, ValueError):
+        return {
+            "security": "DANGEROUS", "syntax_valid": False, "predicted_sec": 0,
+            "cpu": 0, "ram": 0, "reason": "Payload rejected: Python source is too deeply nested or cannot be parsed"
+        }
 
     if sum(1 for _ in ast.walk(tree)) > 5_000:
         return {
@@ -254,7 +244,13 @@ def analyze_code_ast(code_snippet: str) -> dict:
         }
 
     visitor = CodeComplexityVisitor()
-    visitor.visit(tree)
+    try:
+        visitor.visit(tree)
+    except RecursionError:
+        return {
+            "security": "DANGEROUS", "syntax_valid": True, "predicted_sec": 0,
+            "cpu": 0, "ram": 0, "reason": "Payload rejected: Python source is too deeply nested"
+        }
 
     # 1. Security check
     if visitor.security_violations:
@@ -302,8 +298,9 @@ def analyze_code_ast(code_snippet: str) -> dict:
         ram_score += 15
         predicted_sec += 3
 
-    # Detected high-performance libraries
-    if any(lib in visitor.imported_modules for lib in ["numpy", "torch", "scipy", "pandas"]):
+    # Account for both `import numpy` and submodule imports such as
+    # `import numpy.linalg`; only allowlisted modules can reach this point.
+    if any(module.split(".", 1)[0] in visitor.HIGH_PERFORMANCE_MODULES for module in visitor.imported_modules):
         cpu_score += 15
         ram_score += 20
         predicted_sec += 2
@@ -345,82 +342,34 @@ def analyze_code_ast(code_snippet: str) -> dict:
 
 def analyze_code_complexity(code_snippet: str) -> dict:
     """
-    Main workload-analysis entry point.
-    Combines deterministic AST checks with optional Gemini reasoning and a recent
-    SOL/USD reference price when an external feed is available.
-    """
-    # 1. Deterministic Layer 1: Static AST Analysis
-    ast_audit = analyze_code_ast(code_snippet)
+    Return bounded, deterministic workload estimates from local AST analysis.
 
-    # Immediate cutoff if security threat detected
-    if ast_audit.get("security") == "DANGEROUS":
+    Submitted source is never sent to a third-party model provider.
+    """
+    ast_audit = analyze_code_ast(code_snippet)
+    sol_price = get_sol_price_from_pyth()
+    if ast_audit.get("security") != "SAFE":
         return {
             "status": "blocked",
-            "security": "DANGEROUS",
+            "security": ast_audit.get("security", "DANGEROUS"),
             "predicted_sec": 0,
             "complexity_score": 100,
             "scores": ast_audit,
             "calculated_rate_sol_sec": 0.0,
-            "sol_market_price": get_sol_price_from_pyth(),
+            "sol_market_price": sol_price,
             "reason": ast_audit.get("reason", "Malicious code detected.")
         }
 
-    # 2. Optional Layer 2: Gemini AI Semantic Reasoner (if API key provided)
-    gemini_scores = None
-    if genai_client:
-        try:
-            prompt = f"""
-            You are the strict AI Sentinel for the Aperture DePIN compute grid on Solana.
-            Review this Python payload for algorithmic intensity:
-            1. CPU score (1-100)
-            2. RAM score (1-100)
-            3. Predicted execution seconds (1-60)
-            4. 1-sentence technical reasoning
-
-            Code:
-            {code_snippet}
-
-            Return strict JSON:
-            {{
-              "security": "SAFE",
-              "predicted_sec": 5,
-              "cpu": 30,
-              "ram": 20,
-              "reason": "..."
-            }}
-            """
-            response = genai_client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.1
-                ),
-            )
-            gemini_scores = json.loads(response.text)
-        except Exception as e:
-            print(f"[!] AI Sentinel Gemini fallback to AST engine: {e}")
-
-    # Combine scores (AST ground truth + Gemini reasoning if available)
-    final_scores = ast_audit
-    if gemini_scores and isinstance(gemini_scores, dict) and gemini_scores.get("security") == "SAFE":
-        # Blend AST metrics with Gemini insights
-        final_scores["cpu"] = int((ast_audit["cpu"] * 0.6) + (gemini_scores.get("cpu", ast_audit["cpu"]) * 0.4))
-        final_scores["ram"] = int((ast_audit["ram"] * 0.6) + (gemini_scores.get("ram", ast_audit["ram"]) * 0.4))
-        final_scores["predicted_sec"] = gemini_scores.get("predicted_sec", ast_audit["predicted_sec"])
-        final_scores["reason"] = f"{ast_audit['reason']} | AI Verdict: {gemini_scores.get('reason', '')}"
-
-    total_complexity = final_scores.get("cpu", 20) + final_scores.get("ram", 15)
-    price_per_sec = calculate_quantum_price(total_complexity, hw_power=2.5, telemetry_delta=0.0)
-    sol_price = get_sol_price_from_pyth()
+    total_complexity = ast_audit["cpu"] + ast_audit["ram"]
+    price_per_sec = calculate_ast_quote_rate(total_complexity, hw_power=2.5, telemetry_delta=0.0)
 
     return {
         "status": "success",
         "security": "SAFE",
-        "predicted_sec": final_scores.get("predicted_sec", 3),
+        "predicted_sec": ast_audit["predicted_sec"],
         "complexity_score": total_complexity,
         "complexity_sum": total_complexity,
-        "scores": final_scores,
+        "scores": ast_audit,
         "calculated_rate_sol_sec": price_per_sec,
         "calculated_rate_lamports_sec": int(price_per_sec * 1_000_000_000),
         "sol_market_price": sol_price

@@ -1,0 +1,11 @@
+category,amount
+compute,12.5
+storage,8.25
+compute,7.5
+network,3.75
+storage,invalid
+storage,4
+support,6.5
+network,1.25
+compute,10
+support,invalid

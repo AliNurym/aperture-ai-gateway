@@ -152,7 +152,7 @@ def execute(workload, deposit_lamports):
     client.verify_protocol_config()
     if deposit_lamports:
         print('Payment channel funding:', client.fund_channel(owner, deposit_lamports), flush=True)
-    policy = client.request('GET', '/agents', params={'owner': str(owner.pubkey())}).json()
+    policy = client.list_agent_passports(owner)
     if not any(item.get('agent_pubkey') == client.agent and not item.get('revoked')
                and item.get('expires_at', 0) > time.time() for item in policy):
         client.passport(owner, name='Devnet risk analysis agent', max_cost_lamports=1_000_000,

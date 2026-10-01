@@ -84,9 +84,13 @@ does not create a second task as a retry.
 start_task records task and source hashes, agent, lamports/second, maximum
 lamports and maximum runtime. The rate is bounded at 25,000 lamports/second and
 runtime at 3,600 seconds on chain (the gateway currently admits up to 180
-seconds). The full task cap is reserved against the channel. A delegated task
-also reserves that allowance against the passport. An owner executing as its
-own agent does not need a passport.
+seconds). The gateway derives the executable window as
+`min(requested_runtime, floor(max_cost / rate))`. The program independently
+rejects a start unless `max_runtime <= floor(max_cost / rate)`, so the stored
+on-chain deadline cannot exceed the time covered by the authorized cost cap.
+The full task cap is reserved against the channel. A delegated task also
+reserves that allowance against the passport. An owner executing as its own
+agent does not need a passport.
 
 Settlement charges:
 
@@ -109,6 +113,34 @@ a time. If RPC confirmation is uncertain, the task remains pending and the
 gateway reconciles the original task receipt/transaction before reporting an
 exact charge. An off-chain task reports OFF_CHAIN and does not claim a chain
 charge.
+
+Worker claims are idempotent while their execution lease remains active. If a
+claim response is lost, polling `/get_task` with the same registered worker ID
+returns that task and its original lease, source and deadline without another
+start transaction. The gateway assigns at most one active lease per worker;
+pending settlement must finish before a new claim. The worker journals received
+leases and interrupted execution is reported as failed rather than repeated.
+
+Gateway statistics are accumulated atomically with each completed job and survive
+receipt pruning and process restarts. The migration seeds totals from retained
+records; it cannot reconstruct history pruned by an older gateway version. `/stats`
+includes `totals_tracked_since` and the separate `retained_tasks_finished` count.
+
+Agents can recover their own recent tasks after an MCP process restart. The
+gateway accepts signed POST requests at `/agents/tasks/list` and
+`/agents/tasks/resume`. Each signature uses the agent key and binds the owner,
+agent, action, timestamp, random nonce, requested task ID or list limit, cursor,
+and pinned program, gateway, and network to the `Aperture agent task access v1`
+audience. Requests expire quickly, and the gateway consumes each nonce once.
+Each list page is capped at 50 records and returns a task-ID cursor for the next
+page. Unexpired read nonce markers are preserved during cache pressure; when
+capacity is full, the gateway returns HTTP 429 until older authorizations expire.
+Each cursor is bound into the agent signature. The list omits source text and
+task capabilities. Resume checks the exact owner/agent pair stored with the
+task and returns its existing capability to the local SDK; it does not create a
+new admission. The SDK verifies the recovered quote and the stored agent
+authorization signature when available. Completed tasks remain recoverable only
+while their job records are retained.
 
 ## Transaction ABI
 
@@ -141,7 +173,13 @@ quote/owner/agent/version, source and full-output hashes, status, run limits,
 charge and settlement evidence, worker receipt, and signer keys. A client must
 recompute the message from all evidence fields, verify the expected gateway
 key, check quote limits and hashes, and independently read the persistent task
-receipt and confirmed transaction for DEVNET claims.
+receipt and confirmed transaction for DEVNET claims. The reported transaction
+signature must also appear in the successful signature history for that task's
+receipt PDA.
+The settlement label must also match the signed quote network: `DEVNET` or
+`NOT_STARTED` for a Devnet quote, and `OFF_CHAIN` or `NOT_STARTED` for an
+off-chain quote. `NOT_STARTED` means the gateway did not dispatch the task to a
+worker. Clients reject unknown labels and network mismatches.
 
 The worker signs canonical aperture.worker.result.v1 JSON binding its stable
 registered key, task and lease IDs, source/output hashes, mode, duration and

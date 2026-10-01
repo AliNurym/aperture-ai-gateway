@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+.worker.env
 oracle_keypair.json
 *.key
 *.pem

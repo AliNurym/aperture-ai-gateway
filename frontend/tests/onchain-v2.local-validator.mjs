@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import {
   Connection, Keypair, PublicKey,
@@ -11,6 +11,7 @@ import {
 
 const url = 'http://127.0.0.1:8899';
 const project = process.cwd();
+const programSo = resolve(project, process.env.APERTURE_TEST_PROGRAM_SO || 'target/deploy/aperture_gateway.so');
 const programId = new PublicKey('A5HfdyRWy77i5DxhTMBa1ZinxVGZbVZnb35EvXUvkNzQ');
 const authority = Keypair.fromSeed(new Uint8Array(32).fill(7));
 const owner = Keypair.fromSeed(new Uint8Array(32).fill(8));
@@ -88,7 +89,7 @@ const expectRejected = async (promise, label) => {
 const ledger = await mkdtemp(join(tmpdir(), 'aperture-v2-ledger-'));
 const validator = spawn('solana-test-validator', [
   '--reset', '--quiet', '--ledger', ledger, '--rpc-port', '8899', '--bind-address', '127.0.0.1',
-  '--bpf-program', programId.toBase58(), join(project, 'target', 'deploy', 'aperture_gateway.so'),
+  '--bpf-program', programId.toBase58(), programSo,
 ], { stdio: ['ignore', 'pipe', 'pipe'] });
 let validatorOutput = '';
 validator.stdout.on('data', chunk => { validatorOutput = (validatorOutput + chunk.toString()).slice(-4000); });
@@ -147,9 +148,12 @@ try {
     [config], [channel, false, true], [oracle, true, true], [treasury.publicKey, false, true],
     [passport, false, true], [receipt, false, true], [system],
   ];
-  const startData = [taskHash, sourceHash, agent.publicKey.toBuffer(), u64(10_000), u64(100_000), u32(20)];
+  const startData = [taskHash, sourceHash, agent.publicKey.toBuffer(), u64(10_000), u64(100_000), u32(10)];
   await expectRejected(send(ix('start_task', startData, startAccounts(authority.publicKey)), [authority]), 'unfunded treasury');
   await airdrop(treasury.publicKey);
+  await expectRejected(send(ix('start_task', [
+    taskHash, sourceHash, agent.publicKey.toBuffer(), u64(10_000), u64(100_000), u32(11),
+  ], startAccounts(authority.publicKey)), [authority]), 'runtime above affordable task budget');
   await expectRejected(send(ix('start_task', startData, startAccounts(wrongOracle.publicKey)), [wrongOracle]), 'wrong oracle start');
   await expectRejected(send(ix('start_task', [
     taskHash, sourceHash, agent.publicKey.toBuffer(), u64(25_001), u64(100_000), u32(20),
@@ -195,13 +199,13 @@ try {
   await send(ix('revoke_agent', [], [[passport, false, true], [owner.publicKey, true]]), [owner]);
   const revokedTask = hash('revoked task');
   await expectRejected(send(ix('start_task', [
-    revokedTask, sourceHash, agent.publicKey.toBuffer(), u64(10_000), u64(100_000), u32(20),
+    revokedTask, sourceHash, agent.publicKey.toBuffer(), u64(10_000), u64(100_000), u32(10),
   ], [...startAccounts(authority.publicKey).slice(0, 4), [passport, false, true], [seeds('task', revokedTask), false, true], [system]]), [authority]), 'revoked agent');
 
   const ownerTaskHash = hash('owner closes active channel');
   const ownerReceipt = seeds('task', ownerTaskHash);
   await send(ix('start_task', [
-    ownerTaskHash, sourceHash, owner.publicKey.toBuffer(), u64(10_000), u64(100_000), u32(20),
+    ownerTaskHash, sourceHash, owner.publicKey.toBuffer(), u64(10_000), u64(100_000), u32(10),
   ], [
     [config], [channel, false, true], [authority.publicKey, true, true], [treasury.publicKey, false, true],
     [programId], [ownerReceipt, false, true], [system],

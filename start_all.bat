@@ -2,8 +2,9 @@
 setlocal
 cd /d "%~dp0"
 echo Starting the Aperture workspace and local gateway.
-echo The browser demo works even if the gateway needs configuration.
+echo Execution requires a configured gateway and an authenticated worker.
 start "Aperture Frontend" cmd /c call "%~dp0start_frontend.bat"
 start "Aperture Backend" cmd /c call "%~dp0start_backend.bat"
 echo Open http://127.0.0.1:3000 after the frontend reports ready.
-echo To execute trusted local workloads, configure backend/.env and run start_worker.bat separately.
+echo For isolated execution, configure backend/.env and backend/.worker.env, then run start_worker.bat with Docker available.
+echo For the complete reviewed local preview, use start_preview.bat instead.

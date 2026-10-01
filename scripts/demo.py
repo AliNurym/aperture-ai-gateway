@@ -73,7 +73,7 @@ def execute(workload):
     health = client.request("GET", "/health").json()
     if health.get("status") != "ready" or health.get("gateway_pubkey") != public["gateway_pubkey"]:
         raise SystemExit("Configured gateway and authenticated worker are not ready.")
-    policy = client.request("GET", "/agents", params={"owner": str(owner.pubkey())}).json()
+    policy = client.list_agent_passports(owner)
     if not any(item.get("agent_pubkey") == str(agent.pubkey()) and not item.get("revoked")
                and item.get("expires_at", 0) > time.time() for item in policy):
         client.passport(owner, name="Local risk analysis agent", max_cost_lamports=1_000_000,

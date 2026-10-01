@@ -161,6 +161,14 @@ fn bounded_charge(
         .min(u128::from(balance)) as u64
 }
 
+fn validate_runtime_budget(rate: u64, max_cost: u64, max_runtime: u32) -> Result<()> {
+    require!(
+        rate > 0 && max_runtime > 0 && u64::from(max_runtime) <= max_cost / rate,
+        ApertureError::InvalidRuntime
+    );
+    Ok(())
+}
+
 fn settle_task_state(
     channel: &mut ChannelState,
     passport: Option<&mut AgentPassport>,
@@ -459,6 +467,7 @@ pub mod aperture_gateway {
             max_cost > 0 && max_cost <= ctx.accounts.channel.balance,
             ApertureError::InsufficientBalance
         );
+        validate_runtime_budget(rate, max_cost, max_runtime)?;
         let now = Clock::get()?.unix_timestamp;
         let deadline = if agent == ctx.accounts.channel.user {
             require!(
@@ -845,7 +854,7 @@ pub enum ApertureError {
     InvalidVersion,
     #[msg("Agent policy has invalid cost or total budget")]
     InvalidPolicy,
-    #[msg("Runtime exceeds its allowed bound or is zero")]
+    #[msg("Runtime is zero, exceeds its allowed bound, or is not covered by the budget")]
     InvalidRuntime,
     #[msg("The agent permission has expired")]
     PassportExpired,
@@ -908,7 +917,7 @@ mod tests {
             agent: p.agent,
             task_hash: [2; 32],
             task_max_cost: 100,
-            task_deadline: 120,
+            task_deadline: 110,
             task_started_at: 100,
             last_task_hash: [0; 32],
             last_charged: 0,
@@ -921,7 +930,7 @@ mod tests {
             rate: 10,
             max_cost: 100,
             started_at: 100,
-            deadline: 120,
+            deadline: 110,
             settled_at: 0,
             charged_lamports: 0,
             settled: false,
@@ -935,6 +944,15 @@ mod tests {
         assert_eq!(bounded_charge(500, 10, 100, 100, 120, 9_999, None), 100);
         assert_eq!(bounded_charge(500, 3, 100, 100, 120, 9_999, None), 60);
         assert_eq!(bounded_charge(17, 10, 100, 100, 120, 9_999, None), 17);
+    }
+
+    #[test]
+    fn requested_runtime_must_fit_the_authorized_cost_budget() {
+        assert!(validate_runtime_budget(1_500, 4_500, 3).is_ok());
+        assert!(validate_runtime_budget(1_500, 2_000, 1).is_ok());
+        assert!(validate_runtime_budget(1_500, 4_499, 3).is_err());
+        assert!(validate_runtime_budget(1_500, 2_999, 2).is_err());
+        assert!(validate_runtime_budget(0, 4_500, 3).is_err());
     }
 
     #[test]
@@ -1103,7 +1121,7 @@ mod tests {
             agent: Pubkey::new_unique(),
             rate: 10,
             max_cost: 100,
-            max_runtime: 20,
+            max_runtime: 10,
         }
         .data();
         assert_eq!(data.len(), 124);

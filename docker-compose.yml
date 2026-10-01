@@ -20,26 +20,39 @@ services:
 
   # Trusted coordinator: the Docker socket gives host-level Docker control.
   # It is available only when the worker profile is explicitly started.
+  task-image:
+    profiles: ["worker"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.sandbox
+    image: aperture-task:local
+    entrypoint: ["python", "-I", "-u", "-c", "pass"]
+    restart: "no"
+
   worker:
     profiles: ["worker"]
     build:
       context: ./backend
       dockerfile: Dockerfile.worker
     env_file:
-      - ./backend/.env
+      - ./backend/.worker.env
     environment:
       GATEWAY_API_URL: http://gateway:8000
+      # This ID must have a matching entry in APERTURE_WORKER_CREDENTIALS when mapped credentials are enabled.
       APERTURE_NODE_ID: NODE-CPU-COMPOSE
       APERTURE_WORKER_STATE_DIR: /var/lib/aperture-worker
       APERTURE_SANDBOX_HOST_ROOT: ${APERTURE_WORKER_STATE_PATH:-/tmp/aperture-worker}
       APERTURE_SANDBOX_IMAGE: aperture-task:local
       APERTURE_ALLOW_UNSAFE_LOCAL_EXECUTION: "false"
+      APERTURE_ALLOW_INSECURE_COMPOSE_GATEWAY: "true"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${APERTURE_WORKER_STATE_PATH:-/tmp/aperture-worker}:/var/lib/aperture-worker
     depends_on:
       gateway:
         condition: service_healthy
+      task-image:
+        condition: service_completed_successfully
     restart: unless-stopped
     read_only: true
     tmpfs:

@@ -11,14 +11,13 @@ export default class ErrorBoundary extends Component {
     if (this.state.failed) {
       return (
         <main
-          className="console-panel"
-          style={{ maxWidth: 520, margin: "15vh auto", padding: 32 }}
+          className="console-panel console-fallback"
           role="alert"
         >
-          <h1 style={{ fontSize: 24, marginBottom: 14 }}>
+          <h1>
             The workspace hit a snag.
           </h1>
-          <p style={{ lineHeight: 1.7, marginBottom: 22 }}>
+          <p>
             Reload to open the workspace again. If a gateway task was running,
             check its status before submitting it again.
           </p>

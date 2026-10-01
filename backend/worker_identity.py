@@ -46,6 +46,8 @@ class WorkerIdentity:
             "worker_pubkey": self.pubkey, "agent_pubkey": task.get("agent_pubkey"),
             "quote_id": task.get("quote_id"),
         }
+        if "workload_sha256" in result:
+            receipt.update(workload_sha256=result["workload_sha256"], artifacts=result.get("artifacts", []))
         signed = self.key.sign(receipt_bytes(receipt))
         return {**result, "worker_pubkey": self.pubkey, "worker_receipt": receipt,
                 "worker_signature": base58.b58encode(signed.signature).decode("ascii")}

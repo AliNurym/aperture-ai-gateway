@@ -4,7 +4,7 @@
   --motion-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
   --motion-fast: 150ms;
   --motion-medium: 260ms;
-  --motion-enter: 380ms;
+  --motion-enter: 280ms;
 }
 
 /* A measured indicator follows the selected item at every breakpoint. */
@@ -12,13 +12,13 @@
   position: relative;
   isolation: isolate;
   display: grid;
-  gap: 7px;
+  gap: 6px;
 }
 .console-sidebar .console-nav-item {
   position: relative;
   z-index: 1;
-  height: 50px;
-  min-height: 50px;
+  height: 48px;
+  min-height: 48px;
   margin: 0;
 }
 .console-sidebar .console-nav-item.selected {
@@ -37,7 +37,7 @@
 
 @media (max-width: 980px) {
   .console-sidebar nav {
-    width: 58px;
+    width: 56px;
   }
   .console-sidebar .console-nav-item {
     height: 54px;
@@ -48,7 +48,7 @@
   }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 640px) {
   .console-sidebar nav {
     display: flex;
     width: 100%;
@@ -59,14 +59,14 @@
     flex: 1 1 0;
     width: auto;
     min-width: 0;
-    height: 56px;
+    height: 58px;
     flex-direction: column;
     gap: 4px;
     padding: 8px 1px;
     border-radius: 19px;
   }
   .console-nav-item > span {
-    font-size: clamp(7px, 2.2vw, 9px);
+    font-size: 11px;
     letter-spacing: -0.15px;
     white-space: nowrap;
   }
@@ -88,7 +88,7 @@
   .console-breadcrumb strong,
   .console-main > .console-hero,
   .console-metrics,
-  .console-readiness,
+  .console-setup-nudge,
   .console-home-grid > .console-panel,
   .console-main > .console-tip,
   .console-guide > section,
@@ -98,6 +98,7 @@
   .console-worker,
   .console-studio:not([hidden]) > .console-mode-bar,
   .console-studio:not([hidden]) .studio-editor,
+  .console-studio:not([hidden]) .studio-status-card,
   .console-studio:not([hidden]) .studio-inspector > *,
   .console-studio:not([hidden]) .studio-terminal,
   .console-studio:not([hidden]) .studio-history {
@@ -247,7 +248,7 @@
   .console-status[aria-busy="true"] > svg,
   .console-network-banner button[aria-busy="true"] > svg,
   .agents-page button[aria-busy="true"] > svg,
-  .studio-run-bar button[aria-busy="true"] > svg,
+  .studio-run-control button[aria-busy="true"] > svg,
   .studio-channel-action[aria-busy="true"] > svg {
     animation: studio-spin 1400ms linear infinite;
   }
@@ -279,18 +280,12 @@
     .console-text-button:hover:not(:disabled) > svg:last-child {
       transform: translateX(3px);
     }
-    .console-home-grid > .console-panel:hover,
-    .console-worker:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 10px 28px #3e2a5810;
-    }
   }
 }
 
 @keyframes aperture-enter {
   from {
-    opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -299,8 +294,7 @@
 }
 @keyframes aperture-awaken {
   from {
-    opacity: 0;
-    transform: rotate(-42deg) scale(0.84);
+    transform: rotate(-24deg) scale(0.92);
   }
   to {
     opacity: 1;
@@ -309,8 +303,7 @@
 }
 @keyframes aperture-code-arrive {
   from {
-    opacity: 0;
-    transform: translate(-10px, 9px) rotate(-12deg);
+    transform: translate(-6px, 5px) rotate(-9deg);
   }
   to {
     opacity: 1;
@@ -319,8 +312,7 @@
 }
 @keyframes aperture-result-arrive {
   from {
-    opacity: 0;
-    transform: translate(10px, 9px) rotate(12deg);
+    transform: translate(6px, 5px) rotate(9deg);
   }
   to {
     opacity: 1;

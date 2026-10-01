@@ -5,9 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aperture-agent-client"
 version = "0.2.0"
-description = "Budgeted Python compute client with owner-issued agent delegation"
+description = "Budgeted Python compute SDK and optional MCP server for delegated AI agents"
 requires-python = ">=3.11"
 dependencies = ["requests>=2.31", "PyNaCl>=1.5", "base58>=2.1", "solders>=0.21"]
+
+[project.optional-dependencies]
+mcp = ["mcp>=2,<3"]
+
+[project.scripts]
+aperture-mcp = "aperture_client.mcp_server:main"
 
 [tool.setuptools]
 packages = ["aperture_client"]

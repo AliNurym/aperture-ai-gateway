@@ -29,6 +29,7 @@ load_dotenv()
 
 DEFAULT_PROGRAM_ID = "A5HfdyRWy77i5DxhTMBa1ZinxVGZbVZnb35EvXUvkNzQ"
 DEVNET_RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.devnet.solana.com")
+DEVNET_GENESIS_HASH = "GH7ome3EiwEr7tu9JuTh2dpYWBJK3z69Xm1ZE3MEE6JC"
 KEYPAIR_PATH = Path(__file__).parent / "oracle_keypair.json"
 SYSTEM_PROGRAM_ID = Pubkey.from_string("11111111111111111111111111111111")
 
@@ -37,6 +38,9 @@ def validate_devnet_rpc_url(value: str) -> str:
     parsed = urlparse(value)
     host = (parsed.hostname or "").lower().rstrip(".")
     local = host in {"localhost", "127.0.0.1", "::1"}
+    environment = (os.getenv("APERTURE_ENV") or "development").strip().lower()
+    if local and environment in {"staging", "production"}:
+        raise ValueError("Loopback Solana RPC endpoints are not allowed in staging or production.")
     allowed_schemes = {"http", "https"} if local else {"https"}
     if parsed.scheme not in allowed_schemes:
         raise ValueError("Aperture supports Devnet only; remote RPC endpoints must use HTTPS.")
@@ -62,6 +66,7 @@ class SolanaClient:
     def __init__(self):
         self.rpc_url = validate_devnet_rpc_url(os.getenv("SOLANA_RPC_URL", DEVNET_RPC_URL))
         self.client = AsyncClient(self.rpc_url, commitment=Confirmed)
+        self._devnet_cluster_verified = urlparse(self.rpc_url).hostname in {"localhost", "127.0.0.1", "::1"}
         
         # 1. Program ID initialization
         program_id_str = os.getenv("SOLANA_PROGRAM_ID") or DEFAULT_PROGRAM_ID
@@ -121,7 +126,20 @@ class SolanaClient:
             raise ValueError("APERTURE_CONFIG_AUTHORITY must be a signing-wallet address.")
         return authority
 
+    async def verify_devnet_cluster(self):
+        """Verify remote RPC identity; loopback is reserved for local validators."""
+        if self._devnet_cluster_verified:
+            return
+        try:
+            response = await self.client.get_genesis_hash()
+        except Exception as error:
+            raise RuntimeError("Could not verify the configured RPC cluster genesis hash.") from error
+        if str(response.value) != DEVNET_GENESIS_HASH:
+            raise ValueError("SOLANA_RPC_URL does not point to the canonical Solana Devnet cluster.")
+        self._devnet_cluster_verified = True
+
     async def get_protocol_config(self) -> dict | None:
+        await self.verify_devnet_cluster()
         expected_authority = self._configured_protocol_authority()
         config_pda, _bump = self.get_config_pda()
         response = await self.client.get_account_info(config_pda)
@@ -318,6 +336,7 @@ class SolanaClient:
         return await self._send_and_confirm(await self._build_task_instruction(name, owner, task_hash, agent, extra))
 
     async def prepare_start_task(self, owner, task_hash, source_hash, agent, rate, max_cost, max_runtime):
+        await self.verify_devnet_cluster()
         extra = bytes.fromhex(source_hash) + bytes(Pubkey.from_string(agent)) + struct.pack('<QQI', rate, max_cost, max_runtime)
         instruction = await self._build_task_instruction('start_task', owner, task_hash, agent, extra)
         latest = await self.client.get_latest_blockhash()
@@ -327,6 +346,7 @@ class SolanaClient:
                 'signature': str(transaction.signatures[0]), 'last_valid_block_height': latest.value.last_valid_block_height}
 
     async def send_prepared_start(self, prepared):
+        await self.verify_devnet_cluster()
         transaction = VersionedTransaction.from_bytes(base64.b64decode(prepared['transaction']))
         if str(transaction.signatures[0]) != prepared['signature']:
             raise ValueError('Prepared transaction signature does not match stored start intent.')
@@ -387,6 +407,7 @@ class SolanaClient:
         return state["balance_lamports"] if state else 0
 
     async def _send_and_confirm(self, instruction: Instruction) -> str:
+        await self.verify_devnet_cluster()
         latest = await self.client.get_latest_blockhash()
         msg = Message.new_with_blockhash([instruction], self.ai_signer.pubkey(), latest.value.blockhash)
         tx = VersionedTransaction(msg, [self.ai_signer])
@@ -407,6 +428,7 @@ class SolanaClient:
     async def request_airdrop(self, pubkey_str: str, lamports: int = 1_000_000_000) -> bool:
         """Helper to fund test wallets on Solana Devnet."""
         try:
+            await self.verify_devnet_cluster()
             target = Pubkey.from_string(pubkey_str)
             resp = await self.client.request_airdrop(target, lamports)
             print(f"💧 [AIRDROP] Sent {lamports / 1e9} SOL to {pubkey_str}: {resp.value}")

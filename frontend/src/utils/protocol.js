@@ -1,11 +1,17 @@
 import { PublicKey } from '@solana/web3.js';
 
+const viteEnv = import.meta.env || {};
 export const DEFAULT_APERTURE_PROGRAM_ID = 'A5HfdyRWy77i5DxhTMBa1ZinxVGZbVZnb35EvXUvkNzQ';
-export const APERTURE_PROGRAM_ID = (import.meta.env.VITE_APERTURE_PROGRAM_ID || '').trim() || DEFAULT_APERTURE_PROGRAM_ID;
-export const GATEWAY_PUBKEY_PIN = (import.meta.env.VITE_APERTURE_GATEWAY_PUBKEY || '').trim();
-export const TREASURY_PUBKEY_PIN = (import.meta.env.VITE_APERTURE_TREASURY_PUBKEY || '').trim();
+export const APERTURE_PROGRAM_ID = (viteEnv.VITE_APERTURE_PROGRAM_ID || '').trim() || DEFAULT_APERTURE_PROGRAM_ID;
+export const GATEWAY_PUBKEY_PIN = (viteEnv.VITE_APERTURE_GATEWAY_PUBKEY || '').trim();
+export const TREASURY_PUBKEY_PIN = (viteEnv.VITE_APERTURE_TREASURY_PUBKEY || '').trim();
 
 export const QUOTE_MESSAGE_KEYS = ['quote_id', 'wallet', 'agent_pubkey', 'code_sha256', 'rate_lamports', 'max_cost_lamports', 'max_runtime_seconds', 'expires_at', 'passport_version', 'program_id', 'network', 'gateway_pubkey', 'treasury'];
+
+export function isPortableFilename(name) {
+  return typeof name === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(name)
+    && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name) && !name.endsWith('.');
+}
 
 export function canonicalJson(value) {
   if (Array.isArray(value)) return '[' + value.map(canonicalJson).join(',') + ']';
@@ -23,7 +29,12 @@ export async function sha256Hex(value) {
 export function canonicalQuoteMessage(quote) {
   if (QUOTE_MESSAGE_KEYS.some(key => !Object.hasOwn(quote, key))) throw new Error('The gateway returned an incomplete authorization quote.');
   const bound = Object.fromEntries(QUOTE_MESSAGE_KEYS.map(key => [key, quote[key]]));
-  return 'Aperture execution authorization v2\naudience:aperture-gateway\naction:execute\n' + canonicalJson(bound);
+  const version = Object.hasOwn(quote, 'workload') ? 3 : 2;
+  if (version === 3) {
+    if (!/^[0-9a-f]{64}$/.test(quote.workload_sha256)) throw new Error('Data job has no valid manifest digest.');
+    bound.workload_sha256 = quote.workload_sha256;
+  } else if (Object.hasOwn(quote, 'workload_sha256')) throw new Error('A job digest requires its manifest.');
+  return 'Aperture execution authorization v' + version + '\naudience:aperture-gateway\naction:execute\n' + canonicalJson(bound);
 }
 
 export async function anchorDiscriminator(name) {
@@ -81,6 +92,74 @@ async function verifyEd25519(publicKey, signature, message) {
   return crypto.subtle.verify({ name: 'Ed25519' }, key, signature, new TextEncoder().encode(message));
 }
 
+export async function verifyAgentPassport(agent, expectedOwner, verifyAllowance = true) {
+  const fail = reason => ({ verified: false, reason });
+  try {
+    if (!agent || typeof agent !== 'object' || agent.owner !== expectedOwner
+        || !['devnet', 'off_chain'].includes(agent.network)
+        || agent.attestation !== (agent.network === 'devnet' ? 'SOLANA_DEVNET' : 'OWNER_SIGNED_OFF_CHAIN')) {
+      return fail('Passport owner, network or attestation does not match.');
+    }
+    const passportKeys = [
+      'owner', 'agent_pubkey', 'name', 'max_cost_lamports', 'max_runtime_seconds',
+      'total_budget_lamports', 'expires_at', 'capabilities', 'program_id', 'network',
+      'version', 'metadata_hash',
+    ];
+    const passport = Object.fromEntries(passportKeys.map(key => [key, agent[key]]));
+    if (typeof passport.agent_pubkey !== 'string' || new PublicKey(passport.agent_pubkey).toBase58() !== passport.agent_pubkey
+        || typeof passport.name !== 'string' || passport.name.length < 1 || passport.name.length > 80 || !passport.name.trim()
+        || !Number.isSafeInteger(passport.max_cost_lamports) || passport.max_cost_lamports <= 0 || passport.max_cost_lamports > 1_000_000_000
+        || !Number.isSafeInteger(passport.max_runtime_seconds) || passport.max_runtime_seconds < 1 || passport.max_runtime_seconds > 180
+        || !Number.isSafeInteger(passport.total_budget_lamports) || passport.total_budget_lamports < passport.max_cost_lamports || passport.total_budget_lamports > 100_000_000_000
+        || !Number.isSafeInteger(passport.expires_at) || passport.expires_at <= 0
+        || !Number.isSafeInteger(passport.version) || passport.version < 1
+        || !Array.isArray(passport.capabilities) || passport.capabilities.length !== 1 || passport.capabilities[0] !== 'python.execute'
+        || passport.program_id !== APERTURE_PROGRAM_ID || !/^[0-9a-f]{64}$/.test(passport.metadata_hash)) {
+      return fail('Passport policy fields are invalid.');
+    }
+    const prefix = 'Aperture agent delegation v1\naudience:aperture-gateway\n';
+    const message = agent.owner_signed_message;
+    if (typeof message !== 'string' || !message.startsWith(prefix)) return fail('Passport has no owner-signed message.');
+    const payloadText = message.slice(prefix.length);
+    let signed;
+    try { signed = JSON.parse(payloadText); }
+    catch { return fail('Owner-signed passport message is not valid JSON.'); }
+    if (canonicalJson(signed) !== payloadText
+        || !equalJsonValue(Object.keys(signed).sort(), ['action', 'challenge_expires_at', 'nonce', 'passport'])
+        || !['register', 'update', 'revoke'].includes(signed.action)
+        || typeof signed.nonce !== 'string' || signed.nonce.length < 16 || signed.nonce.length > 128
+        || !Number.isSafeInteger(signed.challenge_expires_at) || signed.challenge_expires_at <= 0
+        || !equalJsonValue(signed.passport, passport)
+        || agent.revoked !== (signed.action === 'revoke')) {
+      return fail('Returned passport differs from the owner-signed policy.');
+    }
+    const { metadata_hash: metadataHash, ...metadata } = passport;
+    if (await sha256Hex(canonicalJson(metadata)) !== metadataHash) return fail('Passport metadata hash is invalid.');
+    const ownerSignature = Array.isArray(agent.owner_signature) && agent.owner_signature.length === 64
+      && agent.owner_signature.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+      ? Uint8Array.from(agent.owner_signature) : null;
+    if (!await verifyEd25519(expectedOwner, ownerSignature, message)) return fail('Owner signature verification failed.');
+
+    if (verifyAllowance) {
+      const source = agent.network === 'devnet' ? 'solana_devnet' : 'gateway_ledger';
+      if (agent.allowance_source !== source) return fail('Allowance source does not match passport network.');
+      if (agent.allowance_status === 'available') {
+        const { spent_lamports: spent, reserved_lamports: reserved, remaining_lamports: remaining } = agent;
+        if (![spent, reserved, remaining].every(value => Number.isSafeInteger(value) && value >= 0)
+            || remaining !== Math.max(0, passport.total_budget_lamports - spent - reserved)) {
+          return fail('Allowance counters are invalid or inconsistent.');
+        }
+      } else if (agent.allowance_status !== 'unavailable'
+          || agent.spent_lamports !== null || agent.reserved_lamports !== null || agent.remaining_lamports !== null) {
+        return fail('Allowance status is invalid.');
+      }
+    }
+    return { verified: true };
+  } catch (error) {
+    return fail(error?.message || 'Passport verification is unavailable.');
+  }
+}
+
 const RECEIPT_WRAPPER_KEYS = new Set(['gateway_pubkey', 'gateway_signature', 'signed_message', 'receipt_sha256', 'explorer_url', 'status']);
 function equalJsonValue(left, right) {
   if (left === right) return true;
@@ -116,6 +195,14 @@ export async function verifyGatewayReceipt(receipt, quote, taskId, fullLog) {
 
     const outputHash = await sha256Hex(fullLog);
     const taskHash = await sha256Hex(taskId);
+    if (!Number.isSafeInteger(quote.rate_lamports) || quote.rate_lamports <= 0
+        || !Number.isSafeInteger(quote.max_cost_lamports) || quote.max_cost_lamports < quote.rate_lamports
+        || !Number.isSafeInteger(quote.max_runtime_seconds) || quote.max_runtime_seconds <= 0) {
+      return fail('The approved quote has invalid runtime bounds.');
+    }
+    const effectiveRuntime = Math.min(quote.max_runtime_seconds, Math.floor(quote.max_cost_lamports / quote.rate_lamports));
+    // Older tab records omit this derived value; the signed bounds still define it.
+    if (Object.hasOwn(quote, 'effective_runtime_seconds') && quote.effective_runtime_seconds !== effectiveRuntime) return fail('The approved quote effective runtime differs from its budget and rate.');
     const expected = {
       receipt_version: 1, task_id: taskId, task_hash: taskHash, quote_id: quote.quote_id,
       owner_wallet: quote.wallet, agent_pubkey: quote.agent_pubkey, passport_version: quote.passport_version,
@@ -123,10 +210,30 @@ export async function verifyGatewayReceipt(receipt, quote, taskId, fullLog) {
       max_cost_lamports: quote.max_cost_lamports, max_runtime_seconds: quote.max_runtime_seconds,
     };
     if (Object.entries(expected).some(([key, value]) => receipt[key] !== value)) return fail('Receipt identity, authorization, or raw-output hash differs from the approved task.');
+    if (quote.workload_sha256) {
+      if (receipt.workload_sha256 !== quote.workload_sha256 || !Array.isArray(receipt.artifacts)
+          || receipt.artifacts.length > 16) return fail('Result files are not bound to the approved data job.');
+      const names = new Set();
+      let total = 0;
+      for (const item of receipt.artifacts) {
+        if (!item || Object.keys(item).sort().join(',') !== 'name,object_id,sha256,size_bytes'
+            || !isPortableFilename(item.name)
+            || !/^obj-[0-9a-f]{32}$/.test(item.object_id) || !/^[0-9a-f]{64}$/.test(item.sha256)
+            || !Number.isSafeInteger(item.size_bytes) || item.size_bytes < 1 || item.size_bytes > 8 * 1024 * 1024
+            || names.has(item.name.toLowerCase())) return fail('Result file manifest is invalid.');
+        total += item.size_bytes;
+        names.add(item.name.toLowerCase());
+      }
+      if (total > 16 * 1024 * 1024) return fail('Result files exceed the approved output bounds.');
+    } else if (Object.hasOwn(receipt, 'workload_sha256') || Object.hasOwn(receipt, 'artifacts')) return fail('Unexpected data job evidence for a source-only task.');
     if (typeof receipt.execution_time !== 'number' || !Number.isFinite(receipt.execution_time)
-        || receipt.execution_time < 0 || receipt.execution_time > quote.max_runtime_seconds) return fail('Receipt runtime exceeds the approved limit.');
+        || receipt.execution_time < 0 || receipt.execution_time > effectiveRuntime) return fail('Receipt runtime exceeds the budgeted execution limit.');
     if (receipt.charged_lamports !== null && (!Number.isSafeInteger(receipt.charged_lamports)
         || receipt.charged_lamports < 0 || receipt.charged_lamports > quote.max_cost_lamports)) return fail('Receipt charge exceeds the approved maximum.');
+    const allowedSettlementTypes = quote.network === 'devnet'
+      ? ['DEVNET', 'NOT_STARTED']
+      : quote.network === 'off_chain' ? ['OFF_CHAIN', 'NOT_STARTED'] : [];
+    if (!allowedSettlementTypes.includes(receipt.settlement_type)) return fail('Receipt settlement type does not match the approved network.');
     if (receipt.settlement_type === 'DEVNET' && (quote.network !== 'devnet'
         || receipt.charged_lamports === null || typeof receipt.settlement_signature !== 'string' || !receipt.settlement_signature)) {
       return fail('The reported Devnet settlement is incomplete.');
@@ -142,10 +249,14 @@ export async function verifyGatewayReceipt(receipt, quote, taskId, fullLog) {
         output_hash: outputHash, quote_id: quote.quote_id, agent_pubkey: quote.agent_pubkey,
         worker_id: receipt.worker_id, exit_code: receipt.exit_code,
       };
+      if (quote.workload_sha256) {
+        workerExpected.workload_sha256 = quote.workload_sha256;
+        if (!equalJsonValue(worker.artifacts, receipt.artifacts)) return fail('Worker result files differ from the gateway receipt.');
+      }
       if (Object.entries(workerExpected).some(([key, value]) => worker[key] !== value)
           || worker.execution_mode !== receipt.execution_backend
           || !Number.isSafeInteger(worker.execution_time_ms) || worker.execution_time_ms < 0
-          || worker.execution_time_ms > quote.max_runtime_seconds * 1000 + 1000) return fail('Worker attestation differs from the gateway receipt or approved bounds.');
+          || worker.execution_time_ms > effectiveRuntime * 1000) return fail('Worker attestation differs from the gateway receipt or budgeted execution bounds.');
     } else if (receipt.execution_status === 'completed') return fail('A successful task has no signed worker receipt.');
 
     return { verified: true, reason: worker
@@ -160,14 +271,24 @@ export async function verifyDevnetSettlement(connection, receipt, quote, taskId)
   if (quote.network !== 'devnet' || receipt.settlement_type !== 'DEVNET') {
     throw new Error('The receipt does not describe a Devnet settlement.');
   }
+  if (!Number.isSafeInteger(quote.rate_lamports) || quote.rate_lamports <= 0
+      || !Number.isSafeInteger(quote.max_cost_lamports) || quote.max_cost_lamports < quote.rate_lamports
+      || !Number.isSafeInteger(quote.max_runtime_seconds) || quote.max_runtime_seconds <= 0) {
+    throw new Error('The approved quote has invalid runtime bounds.');
+  }
+  const effectiveRuntime = Math.min(quote.max_runtime_seconds, Math.floor(quote.max_cost_lamports / quote.rate_lamports));
+  if (Object.hasOwn(quote, 'effective_runtime_seconds') && quote.effective_runtime_seconds !== effectiveRuntime) {
+    throw new Error('The approved quote effective runtime differs from its budget and rate.');
+  }
   const taskHash = await sha256Hex(taskId);
   if (receipt.task_hash !== taskHash) throw new Error('The settlement task identifier differs.');
   const hashBytes = Uint8Array.from(taskHash.match(/.{2}/g), pair => parseInt(pair, 16));
   const program = new PublicKey(quote.program_id);
   const [address] = PublicKey.findProgramAddressSync([new TextEncoder().encode('task'), hashBytes], program);
-  const [account, statuses] = await Promise.all([
+  const [account, statuses, receiptHistory] = await Promise.all([
     connection.getAccountInfo(address, 'confirmed'),
     connection.getSignatureStatuses([receipt.settlement_signature], { searchTransactionHistory: true }),
+    connection.getSignaturesForAddress(address, { limit: 20 }, 'confirmed'),
   ]);
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('account:TaskReceipt')));
   const bytes = account?.data;
@@ -186,9 +307,17 @@ export async function verifyDevnetSettlement(connection, receipt, quote, taskId)
       || view.getBigUint64(176, true) > BigInt(quote.max_cost_lamports)) {
     throw new Error('On-chain owner, source, rate or charge differs from the approved task.');
   }
+  const startedAt = view.getBigInt64(152, true);
+  const deadline = view.getBigInt64(160, true);
+  if (startedAt <= 0n || deadline <= startedAt || deadline > startedAt + BigInt(effectiveRuntime)) {
+    throw new Error('The on-chain task runtime exceeds the approved quote limit.');
+  }
   const status = statuses.value[0];
   if (!status || status.err !== null || !['confirmed', 'finalized'].includes(status.confirmationStatus)) {
     throw new Error('The settlement transaction has not confirmed successfully.');
+  }
+  if (!receiptHistory.some(item => item.signature === receipt.settlement_signature && item.err === null)) {
+    throw new Error('The settlement transaction is not associated with this task receipt account.');
   }
   return { verified: true, chainReceipt: address.toBase58(),
     reason: 'The on-chain task receipt and confirmed Devnet transaction match the approved task.' };

@@ -26,6 +26,28 @@ Compute Studio has one execution path: signed source and limits, authenticated g
 
 This is actual host execution of reviewed sources, without a Solana payment or a container security boundary. Use the normal Docker launcher when isolation is required.
 
+For the complete interactive workspace, run `start_preview.bat` from the
+project root. It prepares dependencies, starts the console/gateway/worker and
+pins the console to its own gateway signing key. Data and development keys stay
+in the ignored `.aperture/preview/` directory. Keep the launcher open; Ctrl+C
+stops its services without deleting state. Occupied ports cause a clear refusal
+instead of replacing a running workspace.
+
+Choose Temporary key in the development wallet dialog, open Agent workflows
+and select Use example data. Review and approve both batches and the final
+merge, then open the verified JSON/CSV files. This uses real uploads and worker
+execution. The temporary private key exists only in memory; a persistent wallet
+is required for new approvals after reload. Saved task capabilities can still
+recover accepted results in the same tab.
+
+Advanced launch with different ports:
+
+```powershell
+backend\venv\Scripts\python.exe scripts\preview_workflows.py --frontend --temporary-key --supervise --port 8001 --frontend-port 3001
+```
+
+The following older demo helper is a separate profile under `.aperture/demo/`:
+
 ```powershell
 node scripts/export-demo-workloads.mjs
 # Review the exported .py files in .aperture/demo/approved.

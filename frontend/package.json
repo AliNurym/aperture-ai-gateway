@@ -7,6 +7,7 @@
     "dev": "node scripts/vite.mjs",
     "build": "node scripts/vite.mjs build",
     "lint": "eslint .",
+    "test:protocol": "node --test tests/protocol.test.mjs",
     "preview": "node scripts/vite.mjs preview"
   },
   "dependencies": {

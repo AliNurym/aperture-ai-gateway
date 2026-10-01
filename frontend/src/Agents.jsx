@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 import { PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
 import Icon from './components/Icon';
-import { APERTURE_PROGRAM_ID, agentInstructionData, canonicalJson, sha256Hex } from './utils/protocol';
+import { APERTURE_PROGRAM_ID, agentInstructionData, canonicalJson, sha256Hex, verifyAgentPassport } from './utils/protocol';
+import { requestErrorMessage as errorText } from './utils/requestError';
 import './Agents.css';
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 const localDate = value => new Date(value - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 const defaults = () => ({ agent_pubkey: '', name: 'Research agent', maxCost: '0.001', maxRuntime: '30', totalBudget: '0.01', expires: localDate(Date.now() + 7 * 86400000) });
-const errorText = error => typeof error.response?.data?.detail === 'string' ? error.response.data.detail : error.message;
+const formatSol = value => (value / 1e9).toFixed(9).replace(/\.?0+$/, '');
 const bytesEqual = (left, right) => left.length === right.length && left.every((value, index) => value === right[index]);
 const decodeBase64 = value => Uint8Array.from(atob(value), character => character.charCodeAt(0));
 const lamports = value => {
@@ -52,7 +53,7 @@ async function verifyAgentChallenge(challenge, selectedPolicy, expectedNetwork) 
 }
 
 export default function Agents() {
-  const { publicKey, signMessage, sendTransaction } = useWallet();
+  const { publicKey, signMessage, sendTransaction, wallet, connect, connecting } = useWallet();
   const { connection } = useConnection();
   const { setVisible } = useWalletModal();
   const owner = publicKey?.toBase58();
@@ -62,21 +63,68 @@ export default function Agents() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const readSequence = useRef(0);
+  const currentOwner = useRef(owner);
   const refresh = useCallback(async () => {
-    if (!owner) { setAgents([]); return; }
+    if (!owner) { setAgents([]); setLoaded(false); return; }
+    const requestId = ++readSequence.current;
     setLoading(true);
+    setNotice('');
     try {
-      const { data } = await axios.get(API_URL + '/agents', { params: { owner }, timeout: 10000 });
-      setAgents(Array.isArray(data) ? data : []);
-    } catch (error) { setNotice('Cannot load agent passports: ' + errorText(error)); }
-    finally { setLoading(false); }
+      if (!signMessage) throw new Error('Choose a wallet that supports message signing to view your passports.');
+      const issuedAt = Math.floor(Date.now() / 1000);
+      const nonce = crypto.randomUUID();
+      const message = 'Aperture agent allowance read v1\naudience:aperture-gateway\n' + canonicalJson({ owner, issued_at: issuedAt, nonce });
+      const signature = await signMessage(new TextEncoder().encode(message));
+      if (readSequence.current !== requestId) return;
+      const { data } = await axios.post(API_URL + '/agents/usage', {
+        owner, issued_at: issuedAt, nonce, signature: Array.from(signature),
+      }, { timeout: 15000 });
+      if (readSequence.current !== requestId) return;
+      if (!Array.isArray(data)) throw new Error('Gateway returned an invalid passport list.');
+      for (const passport of data) {
+        const verification = await verifyAgentPassport(passport, owner);
+        if (!verification.verified) throw new Error(verification.reason);
+      }
+      if (readSequence.current !== requestId) return;
+      setAgents(data);
+      setLoaded(true);
+    } catch (error) {
+      if (readSequence.current !== requestId) return;
+      setAgents(current => current.map(agent => ({
+        ...agent, allowance_status: 'unavailable', spent_lamports: null,
+        reserved_lamports: null, remaining_lamports: null,
+      })));
+      setNotice('Cannot load agent passports: ' + errorText(error));
+    }
+    finally { if (readSequence.current === requestId) setLoading(false); }
+  }, [owner, signMessage]);
+  const upsertPassport = passport => {
+    if (currentOwner.current !== passport.owner || !loaded) return;
+    const item = {
+      ...passport, allowance_status: 'requires_signature', allowance_source: null,
+      spent_lamports: null, reserved_lamports: null, remaining_lamports: null,
+    };
+    setAgents(current => current.some(existing => existing.agent_pubkey === item.agent_pubkey)
+      ? current.map(existing => existing.agent_pubkey === item.agent_pubkey ? item : existing)
+      : [...current, item]);
+  };
+  useEffect(() => {
+    currentOwner.current = owner;
+    readSequence.current += 1;
+    setAgents([]); setLoaded(false); setEditing(false); setForm(defaults()); setNotice('');
   }, [owner]);
-  useEffect(() => { refresh(); setEditing(false); setForm(defaults()); }, [refresh]);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(timer); }, []);
   const updateField = event => setForm(previous => ({ ...previous, [event.target.name]: event.target.value }));
+  const connectWallet = async () => {
+    if (!wallet) { setVisible(true); return; }
+    try { await connect(); }
+    catch (error) { setNotice('Wallet connection failed: ' + errorText(error)); }
+  };
   const authorize = async (action, source = form) => {
-    if (!publicKey) { setVisible(true); return; }
+    if (!publicKey) { await connectWallet(); return; }
     if (!signMessage) { setNotice('Choose a wallet that supports message signing.'); return; }
     setBusy(true); setNotice('');
     try {
@@ -99,6 +147,7 @@ export default function Agents() {
       if (expectedNetwork === 'devnet' && !challenge.chain_instruction && challenge.chain_already_matches !== true) throw new Error('The gateway did not provide a matching Devnet instruction or confirm the existing passport.');
       // Sign the exact canonical owner policy before broadcasting a chain action.
       const signature = await signMessage(new TextEncoder().encode(challenge.message));
+      if (currentOwner.current !== owner) throw new Error('The connected owner wallet changed. Retry with the intended wallet.');
       let transactionSignature = null;
       if (challenge.chain_instruction) {
         if (!sendTransaction) throw new Error('This wallet cannot send the required Devnet transaction.');
@@ -127,8 +176,11 @@ export default function Agents() {
         if (result.value.err) throw new Error('Devnet transaction did not succeed.');
       }
       const { data } = await axios.post(API_URL + '/agents', { nonce: challenge.nonce, message: challenge.message, signature: Array.from(signature) }, { timeout: 15000 });
-      setNotice((action === 'revoke' ? 'Agent revoked.' : 'Agent policy saved.') + ' ' + (data.attestation === 'SOLANA_DEVNET' ? 'Confirmed on Solana Devnet.' : 'Owner-signed off-chain development policy; no chain transaction.') + (transactionSignature ? ' Transaction: ' + transactionSignature : ''));
-      setEditing(false); setForm(defaults()); await refresh();
+      if (currentOwner.current !== owner) return;
+      const passportVerification = await verifyAgentPassport(data, owner, false);
+      if (!passportVerification.verified) throw new Error(passportVerification.reason);
+      setNotice((action === 'revoke' ? 'Agent revoked.' : 'Agent policy saved.') + ' ' + (data.attestation === 'SOLANA_DEVNET' ? 'Confirmed on Solana Devnet.' : 'Owner-signed off-chain development policy; no chain transaction.') + (transactionSignature ? ' Transaction: ' + transactionSignature : '') + (!loaded ? ' Sign to view your complete passport list.' : ''));
+      upsertPassport(data); setEditing(false); setForm(defaults());
     } catch (error) { setNotice(errorText(error) || 'Owner authorization was declined.'); }
     finally { setBusy(false); }
   };
@@ -140,28 +192,70 @@ export default function Agents() {
   });
 
   return <div className="agents-page">
-    <section className="console-panel agents-intro"><span className="console-eyebrow">KNOW YOUR AGENT</span><h2>Give each agent a clear identity and a spending boundary.</h2><p>Your wallet issues a passport to an agent public key. You control its task budget, runtime, total allowance and expiration. Revocation stops its authorization. This is owner-issued delegation, with no legal identity or KYC claim.</p><p>Generate and keep the agent private key in your SDK environment. This page only accepts its public key.</p></section>
+    <section className={'console-panel agents-intro ' + (!owner ? 'agents-onboarding' : '')}>
+      <div className="agents-intro-heading">
+        <div className="agents-connect-icon"><Icon name="shield" size={25} /></div>
+        <div>
+          <h2>Keep each agent within its limits.</h2>
+          <p>Issue a passport with a task budget, runtime limit and total allowance. Your wallet stays in control.</p>
+        </div>
+        {!owner && <button className="console-button primary" disabled={connecting} onClick={connectWallet}><Icon name="wallet" size={18} />{connecting ? 'Connecting…' : 'Connect owner wallet'}</button>}
+      </div>
+      {!owner && <dl className="agents-boundaries">
+        <div><dt>Spending</dt><dd>Per-task cap and total allowance</dd></div>
+        <div><dt>Runtime</dt><dd>A time limit for every workload</dd></div>
+        <div><dt>Access</dt><dd>Expiration and owner revocation</dd></div>
+      </dl>}
+      <details className="agents-help agents-intro-help">
+        <summary>How passports work</summary>
+        <p>Your wallet delegates Python CPU execution to an agent public key. A passport records its task budget, runtime and total allowance. This is owner-issued permission, with no legal identity or KYC claim.</p>
+        <p>Generate and keep the agent private key in your SDK environment. This page only accepts its public key.</p>
+      </details>
+    </section>
     {notice && <div className="studio-notice" role="status"><Icon name="shield" size={18} /><p>{notice}</p></div>}
-    <div className="agents-grid">
+    {owner && <div className="agents-grid">
       <section className="console-panel agents-form"><div className="console-section-heading"><h2>{editing ? 'Update passport' : 'Issue a passport'}</h2><Icon name="shield" /></div>
-        {!owner ? <><p>Connect the owner wallet to issue and manage agent passports.</p><button className="console-button primary" onClick={() => setVisible(true)}>Connect owner wallet</button></> : <form onSubmit={event => { event.preventDefault(); authorize(editing ? 'update' : 'register'); }}>
-          <p className="agents-owner">Owner · {owner}</p>
-          <label>Agent public key<input name="agent_pubkey" value={form.agent_pubkey} onChange={updateField} disabled={busy || editing} placeholder="Solana / Ed25519 public key" required autoComplete="off" /></label>
+        <form onSubmit={event => { event.preventDefault(); authorize(editing ? 'update' : 'register'); }}>
+          <p className="agents-owner" title={owner}>Owner · {owner.slice(0, 8)}…{owner.slice(-8)}</p>
+          <label>Agent public key<input name="agent_pubkey" value={form.agent_pubkey} onChange={updateField} disabled={busy || editing} placeholder="Solana / Ed25519 public key" required autoComplete="off" aria-describedby="agent-key-help" /></label>
+          <p id="agent-key-help" className="agents-field-help">Keep the private key in your SDK environment.</p>
           <label>Name<input name="name" value={form.name} onChange={updateField} disabled={busy} maxLength={80} required /></label>
           <div className="agents-fields"><label>Max cost per task · SOL<input name="maxCost" type="number" min="0.000000001" max="1" step="0.000001" value={form.maxCost} onChange={updateField} disabled={busy} required /></label><label>Max runtime · seconds<input name="maxRuntime" type="number" min="1" max="180" step="1" value={form.maxRuntime} onChange={updateField} disabled={busy} required /></label></div>
           <label>Total spending allowance · SOL<input name="totalBudget" type="number" min="0.000000001" max="100" step="0.001" value={form.totalBudget} onChange={updateField} disabled={busy} required /></label>
           <label>Expiration · your local time<input name="expires" type="datetime-local" value={form.expires} onChange={updateField} disabled={busy} required /></label>
-          <p>Capability: Python CPU execution. Devnet mode also asks your wallet to confirm an on-chain policy transaction.</p>
+          <p className="agents-signing-note">Allows Python CPU execution. In Devnet mode, your wallet also confirms an on-chain policy transaction.</p>
           <button className="console-button primary" disabled={busy} aria-busy={busy}><Icon name={busy ? 'refresh' : 'shield'} size={17} />{busy ? 'Authorizing…' : editing ? 'Sign policy update' : 'Sign & issue passport'}</button>
           {editing && <button className="console-text-button" type="button" disabled={busy} onClick={() => { setEditing(false); setForm(defaults()); }}>Cancel update</button>}
-        </form>}
+        </form>
       </section>
-      <section className="console-panel agents-list"><div className="console-section-heading"><div><h2>Your agents</h2><p>Passports issued by the connected owner wallet.</p></div><button className="console-text-button" onClick={refresh} disabled={loading || busy || !owner} aria-busy={loading}><Icon name="refresh" size={17} />Refresh</button></div>
-        {!agents.length ? <div className="console-empty"><Icon name="shield" size={32} /><h3>{loading ? 'Loading passports…' : 'No passports yet'}</h3><p>Issue one to enable an SDK agent to submit budgeted tasks.</p></div> : agents.map(agent => {
+      <section className="console-panel agents-list"><div className="console-section-heading"><h2>Your agents{agents.length > 0 && <span className="agents-count">{agents.length}</span>}</h2><button className="console-text-button" onClick={refresh} disabled={loading || busy || !signMessage} aria-busy={loading}><Icon name="refresh" size={17} />{loaded ? 'Sign & refresh' : 'Sign to view'}</button></div>
+        {!agents.length ? <div className="console-empty agents-empty"><Icon name="shield" size={28} /><h3>{loading ? 'Loading passports…' : loaded ? 'No passports yet' : 'Passports are private'}</h3><p>{loading ? 'Waiting for the owner wallet…' : loaded ? 'Your agents will appear here once you issue a passport.' : 'Sign with the connected owner wallet to view passports and allowance usage.'}</p></div> : agents.map(agent => {
           const expired = agent.expires_at * 1000 <= now;
-          return <article key={agent.agent_pubkey} className="agent-passport"><div className="console-section-heading"><h3>{agent.name}</h3><span className={'console-tag ' + (agent.revoked || expired ? 'error' : '')}>{agent.revoked ? 'Revoked' : expired ? 'Expired' : 'Active'}</span></div><code>{agent.agent_pubkey}</code><dl><div><dt>Per-task cost</dt><dd>{agent.max_cost_lamports / 1e9} SOL</dd></div><div><dt>Runtime</dt><dd>{agent.max_runtime_seconds}s</dd></div><div><dt>Total allowance</dt><dd>{agent.total_budget_lamports / 1e9} SOL</dd></div><div><dt>Expires</dt><dd>{new Date(agent.expires_at * 1000).toLocaleString()}</dd></div><div><dt>Evidence</dt><dd>{agent.attestation === 'SOLANA_DEVNET' ? 'Solana Devnet' : 'Owner-signed off-chain'}</dd></div><div><dt>Policy version</dt><dd>{agent.version}</dd></div></dl><div className="agents-actions"><button className="console-text-button" disabled={busy} onClick={() => { setForm(fieldsFrom(agent)); setEditing(true); }}>Update limits<Icon name="arrow" size={15} /></button>{!agent.revoked && <button className="console-text-button" disabled={busy} onClick={() => authorize('revoke', fieldsFrom(agent))}>Revoke agent<Icon name="stop" size={15} /></button>}</div></article>;
+          return <article key={agent.agent_pubkey} className="agent-passport">
+            <div className="console-section-heading"><h3>{agent.name}</h3><span className={'console-tag ' + (agent.revoked || expired ? 'error' : '')}>{agent.revoked ? 'Revoked' : expired ? 'Expired' : 'Active'}</span></div>
+            <p className="agent-attestation"><code title={agent.agent_pubkey}>{agent.agent_pubkey.slice(0, 6)}…{agent.agent_pubkey.slice(-6)}</code><span>{agent.attestation === 'SOLANA_DEVNET' ? 'Solana Devnet' : 'Owner-signed off-chain'}</span></p>
+            <dl>
+              <div><dt>Cost per task</dt><dd>{agent.max_cost_lamports / 1e9} SOL</dd></div>
+              <div><dt>Runtime</dt><dd>{agent.max_runtime_seconds}s</dd></div>
+              <div><dt>Total allowance</dt><dd>{formatSol(agent.total_budget_lamports)} SOL</dd></div>
+              <div><dt>Spent</dt><dd>{agent.allowance_status === 'available' ? `${formatSol(agent.spent_lamports)} SOL` : agent.allowance_status === 'requires_signature' ? 'Sign to load' : 'Unavailable'}</dd></div>
+              <div><dt>Reserved by active tasks</dt><dd>{agent.allowance_status === 'available' ? `${formatSol(agent.reserved_lamports)} SOL` : agent.allowance_status === 'requires_signature' ? 'Sign to load' : 'Unavailable'}</dd></div>
+              <div className="agent-remaining"><dt>Remaining</dt><dd>{agent.allowance_status === 'available' ? `${formatSol(agent.remaining_lamports)} SOL` : agent.allowance_status === 'requires_signature' ? 'Sign to load' : 'Unavailable'}</dd></div>
+              <div><dt>Expires</dt><dd>{new Date(agent.expires_at * 1000).toLocaleString()}</dd></div>
+            </dl>
+            <p className="agent-allowance-source" role="status">{agent.allowance_status === 'available'
+              ? `Usage source: ${agent.allowance_source === 'solana_devnet' ? 'Solana Devnet' : 'gateway ledger'}.`
+              : agent.allowance_status === 'requires_signature'
+                ? 'Sign with the connected owner wallet to load private usage data.'
+                : 'Usage is unavailable from the configured source. Sign and refresh to try again.'}</p>
+            <details className="agents-help agent-details"><summary>Passport details</summary><dl><div><dt>Public key</dt><dd><code>{agent.agent_pubkey}</code></dd></div><div><dt>Policy version</dt><dd>{agent.version}</dd></div></dl></details>
+            <div className="agents-actions">
+              <button className="console-text-button" disabled={busy} onClick={() => { setForm(fieldsFrom(agent)); setEditing(true); }}>Update limits</button>
+              {!agent.revoked && <button className="console-text-button agent-revoke" disabled={busy} onClick={() => authorize('revoke', fieldsFrom(agent))}>Revoke access</button>}
+            </div>
+          </article>;
         })}
       </section>
-    </div>
+    </div>}
   </div>;
 }

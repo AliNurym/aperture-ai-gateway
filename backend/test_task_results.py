@@ -7,6 +7,7 @@ from solders.keypair import Keypair
 
 class TaskResultTests(unittest.TestCase):
     def test_main_import_and_security_headers_from_clean_configuration(self):
+        os.environ['APERTURE_ENV'] = 'test'
         os.environ['APERTURE_STATE_DB'] = ':memory:'
         os.environ['APERTURE_WORKER_TOKEN'] = 'test-worker-secret'
         os.environ['APERTURE_DEMO_MODE'] = 'true'
@@ -18,7 +19,7 @@ class TaskResultTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.headers['x-content-type-options'], 'nosniff')
             health = client.get('/health').json()
-            self.assertTrue(health['durable_state'])
+            self.assertFalse(health['durable_state'])
             self.assertEqual(health['protocol_version'], 2)
             self.assertNotIn('test-worker-secret', response.text)
 

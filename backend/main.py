@@ -3,31 +3,69 @@ import os
 import time
 from contextlib import asynccontextmanager
 from typing import Optional
+from urllib.parse import urlsplit
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import Field
 from ai_engine import analyze_code_ast, get_sol_price_from_pyth
 from solana_client import KEYPAIR_PATH, SolanaClient
-from gateway import Gateway
+from gateway import Gateway, SourceRequest, Utf8Request
+from security_config import load_worker_credentials
 
 load_dotenv()
-APP_ENV = os.getenv("APERTURE_ENV", "development").lower()
-DEMO_MODE = os.getenv("APERTURE_DEMO_MODE", "false").lower() == "true"
-WORKER_TOKEN = os.getenv("APERTURE_WORKER_TOKEN", "")
+APP_ENV = os.getenv("APERTURE_ENV", "development").strip().lower()
+DEMO_MODE = os.getenv("APERTURE_DEMO_MODE", "false").strip().lower() == "true"
+WORKER_TOKEN = (os.getenv("APERTURE_WORKER_TOKEN") or "").strip()
+WORKER_CREDENTIALS = load_worker_credentials(os.getenv("APERTURE_WORKER_CREDENTIALS"))
 CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if origin.strip()]
+
+def validate_runtime_configuration():
+    if APP_ENV not in {"development", "test", "staging", "production"}:
+        raise RuntimeError("APERTURE_ENV must be development, test, staging, or production.")
+    if APP_ENV not in {"staging", "production"}:
+        return
+    issues = []
+    if DEMO_MODE:
+        issues.append("APERTURE_DEMO_MODE must be false in staging and production")
+    if not WORKER_CREDENTIALS:
+        issues.append("APERTURE_WORKER_CREDENTIALS must define a distinct 32+ character secret for every approved worker ID")
+    state_db = (os.getenv("APERTURE_STATE_DB") or "").strip()
+    if not state_db or state_db == ":memory:" or not os.path.isabs(state_db):
+        issues.append("APERTURE_STATE_DB must be set to an absolute path on persistent storage in staging and production")
+    invalid_origins = []
+    for origin in CORS_ORIGINS:
+        try:
+            parsed = urlsplit(origin)
+            parsed.port
+            valid = (
+                parsed.scheme.lower() == "https"
+                and bool(parsed.hostname)
+                and parsed.username is None
+                and parsed.password is None
+                and parsed.path == ""
+                and not parsed.query
+                and not parsed.fragment
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            invalid_origins.append(origin)
+    if not CORS_ORIGINS or invalid_origins:
+        issues.append("CORS_ORIGINS must contain only explicit HTTPS origins without paths, credentials, queries, or fragments")
+    if issues:
+        raise RuntimeError("Invalid production configuration: " + "; ".join(issues) + ".")
+
+validate_runtime_configuration()
 solana_client = SolanaClient()
-gateway = Gateway(solana_client, DEMO_MODE, WORKER_TOKEN)
+legacy_worker_token = WORKER_TOKEN if APP_ENV in {"development", "test"} else ""
+gateway = Gateway(solana_client, DEMO_MODE, legacy_worker_token, worker_credentials=WORKER_CREDENTIALS)
 require_worker = gateway.require_worker
 nodes = {}
 request_rate_buckets = {}
 request_rate_calls = 0
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_MAX_BUCKETS = 10_000
-grid_stats = {"tasks_completed": 0, "total_compute_seconds": 0.0, "total_sol_burned": 0.0, "threats_blocked": 0, "start_time": time.time()}
-
-def worker_token_is_configured(token):
-    return len(token or "") >= 16 and (token or "").strip().lower() not in {"replace-with-a-long-random-secret", "change-me", "example-token"}
 
 def enforce_rate_limit(scope, client_id, limit):
     global request_rate_calls
@@ -41,11 +79,15 @@ def enforce_rate_limit(scope, client_id, limit):
             request_rate_buckets.pop(bucket, None)
     recent = [item for item in request_rate_buckets.get(key, []) if now - item < RATE_LIMIT_WINDOW_SECONDS]
     if len(recent) >= limit:
-        raise HTTPException(429, "Rate limit exceeded. Retry shortly.")
+        retry_after = max(1, int(RATE_LIMIT_WINDOW_SECONDS - (now - recent[0])) + 1)
+        raise HTTPException(429, "Rate limit exceeded. Retry shortly.", headers={"Retry-After": str(retry_after)})
     if key not in request_rate_buckets and len(request_rate_buckets) >= RATE_LIMIT_MAX_BUCKETS:
         oldest = min(request_rate_buckets, key=lambda bucket: request_rate_buckets[bucket][-1])
         request_rate_buckets.pop(oldest, None)
     request_rate_buckets[key] = recent + [now]
+
+
+gateway.object_rate_limiter = enforce_rate_limit
 
 
 class RequestBodyLimitMiddleware:
@@ -60,13 +102,24 @@ class RequestBodyLimitMiddleware:
             return
 
         path = scope.get("path")
-        limit = 3 if path == "/faucet/airdrop" else 30 if path in {"/quotes", "/execute/challenge", "/execute", "/agents/challenge", "/agents", "/analyze"} else None
+        # Immutable blob uploads authorize their exact size and hash before reading.
+        # Preserve streaming instead of buffering up to 64 MiB in this JSON guard.
+        if scope.get("method") == "PUT" and path.startswith("/objects/"):
+            client = scope.get("client")
+            try:
+                enforce_rate_limit("object-upload", client[0] if client else "unknown", 3000)
+            except HTTPException as error:
+                await self._reject(send, status=error.status_code, detail=error.detail, extra_headers=error.headers)
+                return
+            await self.app(scope, receive, send)
+            return
+        limit = 3 if path == "/faucet/airdrop" else 30 if path in {"/quotes", "/execute/challenge", "/execute", "/agents/challenge", "/agents", "/agents/usage", "/agents/tasks/list", "/agents/tasks/resume", "/objects/authorize", "/objects/usage", "/objects/release", "/analyze"} else None
         if limit is not None:
             client = scope.get("client")
             try:
                 enforce_rate_limit(path, client[0] if client else "unknown", limit)
             except HTTPException as error:
-                await self._reject(send, status=error.status_code, detail=error.detail)
+                await self._reject(send, status=error.status_code, detail=error.detail, extra_headers=error.headers)
                 return
 
         content_length = next((value for name, value in scope.get("headers", []) if name.lower() == b"content-length"), None)
@@ -109,7 +162,7 @@ class RequestBodyLimitMiddleware:
 
         await self.app(scope, buffered_receive, send)
 
-    async def _reject(self, send, status=413, detail="Request body exceeds the configured size limit."):
+    async def _reject(self, send, status=413, detail="Request body exceeds the configured size limit.", extra_headers=None):
         body = ("{\"detail\":\"" + detail + "\"}").encode("utf-8")
         headers = [
             (b"content-type", b"application/json"),
@@ -119,6 +172,8 @@ class RequestBodyLimitMiddleware:
             (b"referrer-policy", b"no-referrer"),
             (b"cache-control", b"no-store"),
         ]
+        if extra_headers and "Retry-After" in extra_headers:
+            headers.append((b"retry-after", extra_headers["Retry-After"].encode("ascii")))
         await send({"type": "http.response.start", "status": status, "headers": headers})
         await send({"type": "http.response.body", "body": body, "more_body": False})
 
@@ -142,10 +197,10 @@ async def security_and_admission(request, call_next):
 
 app.include_router(gateway.router)
 
-class AnalyzeRequest(BaseModel):
-    code: str = Field(min_length=1, max_length=32_000)
+class AnalyzeRequest(SourceRequest):
+    pass
 
-class NodeInfo(BaseModel):
+class NodeInfo(Utf8Request):
     node_id: str = Field(min_length=1, max_length=64)
     worker_pubkey: str = Field(min_length=32, max_length=44)
     gpu_name: str = Field(min_length=1, max_length=128)
@@ -160,7 +215,7 @@ class NodeInfo(BaseModel):
     source_policy: str = Field(default="unknown", max_length=32)
     approved_source_count: Optional[int] = Field(default=None, ge=1, le=10_000)
 
-class AirdropRequest(BaseModel):
+class AirdropRequest(Utf8Request):
     wallet: str = Field(min_length=32, max_length=44)
     amount_sol: float = Field(default=1.0, gt=0, le=2.0)
 
@@ -172,16 +227,18 @@ def root():
 async def health():
     signer_configured = bool(os.getenv("BACKEND_PRIVATE_KEY")) or KEYPAIR_PATH.exists()
     config = None
-    if not DEMO_MODE and worker_token_is_configured(WORKER_TOKEN) and signer_configured:
+    if not DEMO_MODE and gateway.worker_auth_configured and signer_configured:
         try:
             config = await solana_client.get_protocol_config()
         except Exception:
             pass
-    configured = worker_token_is_configured(WORKER_TOKEN) and (DEMO_MODE or config is not None)
+    configured = gateway.worker_auth_configured and gateway.store.durable_state and (DEMO_MODE or config is not None)
     active_workers = [node for node in gateway.store.list("workers") if time.time() - node.get("last_seen", 0) < 45]
     issues = []
-    if not worker_token_is_configured(WORKER_TOKEN):
+    if not gateway.worker_auth_configured:
         issues.append("worker_authentication")
+    if not gateway.store.durable_state:
+        issues.append("non_durable_state")
     if not DEMO_MODE and not signer_configured:
         issues.append("oracle_signer")
     if not DEMO_MODE and config is None:
@@ -189,11 +246,20 @@ async def health():
     if not active_workers:
         issues.append("worker_connection")
     return {"status": "ready" if configured and active_workers else "workers_unavailable" if configured else "configuration_required", "environment": APP_ENV,
-            "demo_mode": DEMO_MODE, "worker_auth_configured": worker_token_is_configured(WORKER_TOKEN),
+            "demo_mode": DEMO_MODE, "worker_auth_configured": gateway.worker_auth_configured,
             "oracle_signer_configured": signer_configured, "protocol_config_initialized": bool(config) if not DEMO_MODE else None,
             "network": "off_chain" if DEMO_MODE else "devnet", "gateway_pubkey": str(solana_client.ai_signer.pubkey()),
+            "program_id": str(solana_client.program_id), "data_job_version": 1,
             "active_worker_count": len(active_workers), "configuration_issues": issues,
-            "protocol_version": 2, "durable_state": True, "kya": "owner-issued delegation; not legal KYC", "execution_scope": "bounded Python CPU"}
+            "protocol_version": 2, "durable_state": gateway.store.durable_state,
+            "kya": "owner-issued delegation; not legal KYC", "execution_scope": "bounded Python CPU"}
+
+@app.get("/health/worker-auth")
+def worker_auth_health():
+    """Bootstrap probe used to start workers before Devnet config is initialized."""
+    if not gateway.worker_auth_configured:
+        raise HTTPException(503, "Worker authentication is not configured.")
+    return {"status": "configured", "worker_auth_configured": True}
 
 @app.post("/analyze")
 def analyze(req: AnalyzeRequest):
@@ -437,20 +503,19 @@ def get_stats():
     total_vram = round(sum(n.get("vram_total") or 0.0 for n in active), 1)
     used_vram = round(sum(n.get("vram_used") or 0.0 for n in active), 1)
     total_tflops = round(sum(float(n.get("tflops") or 0.0) for n in active), 1)
-    done = [job for job in gateway.store.list('jobs') if job['state'] == 'completed']
-    grid_stats['tasks_completed'] = sum(job['receipt'].get('execution_status') == 'completed' for job in done)
-    grid_stats['total_compute_seconds'] = sum(job['receipt']['execution_time'] for job in done)
-    charged_lamports = sum(job['receipt'].get('charged_lamports') or 0 for job in done
-                           if job['receipt'].get('settlement_type') == 'DEVNET')
-    grid_stats['total_sol_burned'] = charged_lamports / 1_000_000_000
+    totals = gateway.store.telemetry_totals()
+    retained_finished = gateway.store.count_completed_jobs()
+    charged_lamports = totals['total_charged_lamports']
 
     return {
-        "tasks_completed": grid_stats["tasks_completed"],
-        "total_compute_seconds": round(grid_stats["total_compute_seconds"], 2),
-        "total_sol_burned": grid_stats["total_sol_burned"],
+        "tasks_completed": totals["tasks_completed"],
+        "total_compute_seconds": round(totals["total_compute_seconds"], 2),
+        "total_sol_burned": charged_lamports / 1_000_000_000,
         "total_charged_lamports": charged_lamports,
-        "tasks_finished": len(done),
-        "history_scope": "retained_gateway_records",
+        "tasks_finished": totals["tasks_finished"],
+        "retained_tasks_finished": retained_finished,
+        "history_scope": "durable_gateway_totals",
+        "totals_tracked_since": totals["tracked_since"],
         "active_nodes": len(active),
         "active_workers_count": len(active),
         "sol_price": get_sol_price_from_pyth() if not DEMO_MODE else None,
@@ -469,8 +534,8 @@ def get_stats():
 @app.post("/faucet/airdrop")
 async def faucet_airdrop(req: AirdropRequest, request: Request):
     """Requests Devnet SOL airdrop to help evaluators test without a funded wallet."""
-    if APP_ENV == "production":
-        raise HTTPException(status_code=404, detail="Devnet faucet is disabled in production.")
+    if APP_ENV in {"staging", "production"}:
+        raise HTTPException(status_code=404, detail="Devnet faucet is disabled in staging and production.")
     success = await solana_client.request_airdrop(req.wallet, int(req.amount_sol * 1_000_000_000))
     if success:
         return {"status": "success", "amount_sol": req.amount_sol, "wallet": req.wallet}

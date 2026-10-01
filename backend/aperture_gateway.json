@@ -752,7 +752,7 @@
     {
       "code": 6011,
       "name": "InvalidRuntime",
-      "msg": "Runtime exceeds its allowed bound or is zero"
+      "msg": "Runtime is zero, exceeds its allowed bound, or is not covered by the budget"
     },
     {
       "code": 6012,

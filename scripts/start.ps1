@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Frontend', 'Backend', 'Worker')]
+    [ValidateSet('Frontend', 'Backend', 'Worker', 'Preview')]
     [string]$Service = 'Frontend',
     [switch]$Check
 )
@@ -26,11 +26,13 @@ function Find-Python {
         $candidate = Join-Path $env:LOCALAPPDATA "Programs\Python\$version\python.exe"
         if (Test-Path -LiteralPath $candidate) { return $candidate }
     }
+    $bundledPython = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
+    if (Test-Path -LiteralPath $bundledPython) { return $bundledPython }
     throw 'Python 3.11 or newer is missing. Install Python and reopen your terminal.'
 }
 
 try {
-    if ($Service -eq 'Frontend') {
+    if ($Service -in @('Frontend', 'Preview')) {
         Set-Location -LiteralPath (Join-Path $projectRoot 'frontend')
         $nodeRuntime = Find-Node
         $env:PATH = (Split-Path $nodeRuntime) + ';' + $env:PATH
@@ -39,7 +41,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Node.js could not start.' }
             if (-not (Test-Path 'node_modules\vite\bin\vite.js')) { throw 'Frontend dependencies are missing. Run start_frontend.bat to install them.' }
             Write-Host 'Frontend runtime and Vite are available.'
-            exit 0
+            if ($Service -eq 'Frontend') { exit 0 }
         }
         if (-not (Test-Path 'node_modules\vite\bin\vite.js')) {
             $npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
@@ -53,8 +55,10 @@ try {
             }
             if ($LASTEXITCODE -ne 0) { throw 'Frontend dependency installation failed. Review the error above.' }
         }
-        & $nodeRuntime scripts/vite.mjs --host 127.0.0.1 --port 3000 --strictPort
-        exit $LASTEXITCODE
+        if ($Service -eq 'Frontend') {
+            & $nodeRuntime scripts/vite.mjs --host 127.0.0.1 --port 3000 --strictPort
+            exit $LASTEXITCODE
+        }
     }
 
     Set-Location -LiteralPath (Join-Path $projectRoot 'backend')
@@ -77,11 +81,22 @@ try {
         & $venvPython -m pip install -r requirements.txt
         if ($LASTEXITCODE -ne 0) { throw 'Backend dependency installation failed.' }
     }
-    if ($Service -eq 'Backend') {
+    if ($Service -eq 'Preview') {
+        & $venvPython -X utf8 (Join-Path $projectRoot 'scripts\preview_workflows.py') --frontend --temporary-key --supervise
+    } elseif ($Service -eq 'Backend') {
         & $venvPython -m uvicorn main:app --host 127.0.0.1 --port 8000
     } else {
-        Write-Host 'Worker uses a separate Docker sandbox per task. Configure APERTURE_WORKER_TOKEN in backend/.env.'
-        Write-Host 'Build the task image first: docker build -f backend/Dockerfile.sandbox -t aperture-task:local backend'
+        Write-Host 'Worker uses a separate Docker sandbox per task. Configure APERTURE_WORKER_TOKEN in backend/.worker.env.'
+        $dockerCommand = Get-Command docker.exe -ErrorAction SilentlyContinue
+        if (-not $dockerCommand) { $dockerCommand = Get-Command docker -ErrorAction SilentlyContinue }
+        if (-not $dockerCommand) { throw 'Docker CLI with Linux container support is required to start the sandboxed worker.' }
+        $dockerExecutable = if ($dockerCommand.Source) { $dockerCommand.Source } else { $dockerCommand.Name }
+        & $dockerExecutable image inspect aperture-task:local *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host 'Building the per-task Docker sandbox image.'
+            & $dockerExecutable build -f Dockerfile.sandbox -t aperture-task:local .
+            if ($LASTEXITCODE -ne 0) { throw 'Could not build the task sandbox image. Check Docker Desktop and Linux container support.' }
+        }
         & $venvPython -u worker.py
     }
     exit $LASTEXITCODE

@@ -30,6 +30,7 @@ class FakeSolana:
         self.get_protocol_config = AsyncMock(return_value={'treasury': self.treasury})
         self.get_channel_state = AsyncMock(return_value={'balance_lamports': 1_000_000_000, 'effective_balance_lamports': 1_000_000_000, 'burn_rate_lamports': 0})
         self.get_agent_passport = AsyncMock(return_value=None)
+        self.get_task_receipt = AsyncMock(return_value=None)
         self.prepare_start_task = AsyncMock(return_value={'signature': str(Keypair().sign_message(b'prepare')), 'transaction': 'signed-public-bytes', 'last_valid_block_height': 100})
         self.send_prepared_start = AsyncMock(return_value='start-confirmed')
         self.stop_task = AsyncMock(return_value={'signature': 'stop-confirmed', 'charged_lamports': 1000, 'evidence': 'confirmed_task_receipt'})
@@ -136,6 +137,17 @@ class GatewayApiSecurityTests(unittest.TestCase):
         quote = self.quote(budget=1000, runtime=180).json()
         self.assertLessEqual(quote['effective_runtime_seconds'] * quote['rate_lamports'], quote['max_cost_lamports'])
 
+    def test_worker_result_cannot_exceed_budgeted_runtime(self):
+        reference = self.quote(runtime=10).json()
+        quote = self.quote(budget=reference['rate_lamports'], runtime=10).json()
+        self.assertEqual(quote['effective_runtime_seconds'], 1)
+        admitted = self.client.post('/execute', json=self.signed_run(quote))
+        self.assertEqual(admitted.status_code, 200, admitted.text)
+        task = self.claim()
+        response = self.client.post('/submit_result', headers=self.headers,
+                                    json=self.result(task, duration=1.01))
+        self.assertEqual(response.status_code, 422)
+
     def test_payment_channel_cannot_admit_parallel_tasks(self):
         self.admit()
         second = self.quote().json()
@@ -170,13 +182,20 @@ class GatewayApiSecurityTests(unittest.TestCase):
         self.store.put('agents', str(self.agent.pubkey()), {**passport, 'expires_at': int(time.time()) - 1})
         self.assertEqual(self.client.post('/execute', json=self.signed_run(quote, self.agent)).status_code, 403)
 
-    def test_revocation_cancels_queued_job_and_rejects_future_quotes(self):
+    def test_revocation_cancels_active_job_with_elapsed_duration(self):
         self.passport()
         admitted = self.admit(agent=self.agent)
+        self.claim()
+        job = self.store.get('jobs', admitted['task_id'])
+        job['started_at'] = time.time() - 2
+        self.store.save_job(job)
         self.passport(action='revoke')
         job = self.store.get('jobs', admitted['task_id'])
         self.assertTrue(job['cancelled'])
         self.assertEqual(job['state'], 'completed')
+        self.assertEqual(job['receipt']['execution_status'], 'cancelled')
+        self.assertGreater(job['receipt']['execution_time'], 0.5)
+        self.assertLessEqual(job['receipt']['execution_time'], job['effective_runtime_seconds'])
         self.assertEqual(self.quote(agent=self.agent).status_code, 403)
 
     def test_policy_changes_invalidate_outstanding_quotes(self):
@@ -237,6 +256,18 @@ class GatewayApiSecurityTests(unittest.TestCase):
     def test_result_is_durable_before_settlement_and_reconciles_without_worker(self):
         self.core.demo_mode = False
         admitted = self.admit()
+        job = self.store.get('jobs', admitted['task_id'])
+        started_at = int(time.time())
+        self.chain.get_task_receipt.return_value = {
+            'settled': False,
+            'owner': job['wallet'],
+            'agent_pubkey': job['agent_pubkey'],
+            'source_hash': job['code_sha256'],
+            'rate_lamports': job['rate_lamports'],
+            'max_cost_lamports': job['max_cost_lamports'],
+            'started_at': started_at,
+            'deadline': started_at + job['effective_runtime_seconds'],
+        }
         task = self.claim()
         self.chain.stop_task.return_value = None
         response = self.client.post('/submit_result', headers=self.headers, json=self.result(task))
@@ -279,7 +310,9 @@ class GatewayApiSecurityTests(unittest.TestCase):
         for route in ('result', 'stream_log', 'download', 'receipt'):
             self.assertEqual(self.client.get(f"/{route}/{admitted['task_id']}").status_code, 404)
             self.assertEqual(self.client.get(f"/{route}/{admitted['task_id']}?access_token=wrong").status_code, 404)
-        self.assertEqual(self.client.get(f"/result/{admitted['task_id']}?access_token={admitted['task_access_token']}").status_code, 200)
+        self.assertEqual(self.client.get(f"/result/{admitted['task_id']}?access_token={admitted['task_access_token']}").status_code, 404)
+        self.assertEqual(self.client.get(f"/result/{admitted['task_id']}", headers={'X-Aperture-Task-Token': 'wrong'}).status_code, 404)
+        self.assertEqual(self.client.get(f"/result/{admitted['task_id']}", headers={'X-Aperture-Task-Token': admitted['task_access_token']}).status_code, 200)
 
     def test_independent_deadline_recovery_does_not_reexecute(self):
         self.admit()
@@ -294,10 +327,15 @@ class GatewayApiSecurityTests(unittest.TestCase):
     def test_cancelled_worker_outbox_receives_terminal_ack(self):
         admitted = self.admit()
         task = self.claim()
-        self.client.post(f"/stop/{task['task_id']}", params={'access_token': admitted['task_access_token']})
+        job = self.store.get('jobs', task['task_id'])
+        job['started_at'] = time.time() - 2
+        self.store.save_job(job)
+        self.client.post(f"/stop/{task['task_id']}", headers={'X-Aperture-Task-Token': admitted['task_access_token']})
         result = self.client.post('/submit_result', headers=self.headers, json=self.result(task))
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.json()['execution_status'], 'cancelled')
+        self.assertGreater(result.json()['execution_time'], 0.5)
+        self.assertLessEqual(result.json()['execution_time'], job['effective_runtime_seconds'])
 
     def test_start_intent_is_persisted_before_broadcast(self):
         self.core.demo_mode = False
@@ -317,6 +355,20 @@ class GatewayApiSecurityTests(unittest.TestCase):
         self.assertEqual(self.store.get('jobs', task['task_id'])['state'], 'completed')
         self.assertTrue(self.store.get('jobs', task['task_id'])['cancelled'])
         self.assertIsNone(self.claim()['task_id'])
+
+    def test_restart_recovers_starting_job_without_started_at(self):
+        admitted = self.admit()
+        job = self.store.get('jobs', admitted['task_id'])
+        job.update(state='starting', started_at=None, deadline_unix=None,
+                   start_intent=True, prepared_start={'transaction': 'prepared'})
+        self.store.save_job(job)
+
+        asyncio.run(self.core.recover_once(restart=True))
+
+        recovered = self.store.get('jobs', admitted['task_id'])
+        self.assertEqual(recovered['state'], 'completed')
+        self.assertEqual(recovered['receipt']['execution_status'], 'failed')
+        self.assertEqual(recovered['receipt']['execution_time'], 0)
 
 class DurableStoreTests(unittest.TestCase):
     def test_reopen_preserves_receipt_nonce_and_wallet_reservation(self):

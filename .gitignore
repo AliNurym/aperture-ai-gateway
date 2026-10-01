@@ -93,6 +93,7 @@ backend/oracle_keypair.json
 backend/.env
 backend/.env.*
 !backend/.env.example
+backend/.worker.env
 frontend/.env
 frontend/.env.*
 !frontend/.env.example
@@ -119,3 +120,4 @@ frontend/.env.*
 ehthumbs.db
 Thumbs.db
 desktop.ini
+.aperture-runs/

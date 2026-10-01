@@ -53,6 +53,12 @@ class WorkerJournal:
             "SELECT result_json FROM jobs WHERE state='pending' AND next_attempt<=? ORDER BY started", (now,)
         )]
 
+    def task(self, task_id):
+        row = self.connection.execute("SELECT task_json FROM jobs WHERE task_id=?", (task_id,)).fetchone()
+        if row is None:
+            raise ValueError("Worker journal no longer contains this task.")
+        return json.loads(row[0])
+
     def acknowledge(self, task_id):
         self.connection.execute("DELETE FROM jobs WHERE task_id=?", (task_id,))
         self.connection.commit()

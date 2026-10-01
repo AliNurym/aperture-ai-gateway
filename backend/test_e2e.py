@@ -44,8 +44,8 @@ class OfflineExecutionIntegrationTests(unittest.TestCase):
             VerifyKey(base58.b58decode(receipt['gateway_pubkey'])).verify(receipt['signed_message'].encode(), bytes(receipt['gateway_signature']))
             replay = harness.client.post('/submit_result', headers=harness.headers, json=signed)
             self.assertEqual(replay.json()['receipt_sha256'], receipt['receipt_sha256'])
-            capability = {'access_token': admitted['task_access_token']}
-            self.assertEqual(harness.client.get(f"/result/{task['task_id']}", params=capability).json()['status'], 'completed')
+            capability = {'X-Aperture-Task-Token': admitted['task_access_token']}
+            self.assertEqual(harness.client.get(f"/result/{task['task_id']}", headers=capability).json()['status'], 'completed')
         finally:
             harness.tearDown()
 

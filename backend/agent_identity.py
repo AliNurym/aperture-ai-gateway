@@ -37,7 +37,11 @@ def quote_message(quote):
         "max_cost_lamports", "max_runtime_seconds", "expires_at", "passport_version",
         "program_id", "network", "gateway_pubkey", "treasury",
     )}
-    return "Aperture execution authorization v2\naudience:aperture-gateway\naction:execute\n" + canonical_json(bound)
+    version = 2
+    if "workload" in quote:
+        version = 3
+        bound["workload_sha256"] = quote["workload_sha256"]
+    return f"Aperture execution authorization v{version}\naudience:aperture-gateway\naction:execute\n" + canonical_json(bound)
 
 def receipt_message(receipt):
     return "Aperture compute receipt v1\n" + canonical_json(receipt)
