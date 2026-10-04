@@ -283,11 +283,12 @@ export default function App() {
           </div>
         </header>
         <main id="main-content" tabIndex={-1} className="console-main">
-          <div className="console-page-heading">
-            <div className="console-heading-copy" key={page}>
-              <h1>{activePage.title}</h1>
-              <p>{activePage.subtitle}</p>
-            </div>
+          <div key={page} className="console-page-stage">
+            <div className="console-page-heading">
+              <div className="console-heading-copy">
+                <h1>{activePage.title}</h1>
+                <p>{activePage.subtitle}</p>
+              </div>
             <button
               className="console-status"
               onClick={refresh}
@@ -729,6 +730,7 @@ export default function App() {
               </section>
             </div>
           )}
+          </div>
           <footer className="console-footer">
             <span>
               <img src={logo} alt="" width="18" height="18" />
