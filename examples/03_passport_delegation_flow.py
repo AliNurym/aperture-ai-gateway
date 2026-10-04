@@ -114,8 +114,32 @@ def run_passport_delegation_demo():
         print(f"     Reason: Requested budget {rogue_task_budget} exceeds delegated passport cap {passport_policy['max_cost_lamports']}.")
         print("  🛡️ Principal treasury successfully protected from runaway compute consumption.")
 
-    print("\n✅ Agent Passport delegation lifecycle demonstrated with complete cryptographic verification.")
+    # 7. Owner Inbox Workflow Delegation & Emergency Stop
+    print("\n[Step 6] Owner Workflow Inbox Delegation & Emergency Control:")
+    workflow_id = "wf-7c491e0a8b2d3f"
+    assigned_plan = {
+        "workflow_id": workflow_id,
+        "owner": owner_pubkey_str,
+        "agent_pubkey": agent_pubkey_str,
+        "max_cost_lamports": 150_000,
+        "steps_count": 3,
+        "status": "assigned",
+    }
+    print(f"  * Owner assigns Workflow ID: {workflow_id}")
+    print(f"  * Approved Workflow Ceiling: {assigned_plan['max_cost_lamports']:,} lamports")
+    print(f"  * Delegated Recipient:       {agent_pubkey_str}")
+    print("  * Agent admits steps autonomously using ONLY Agent key.")
+    print("  * Owner retains emergency STOP authority signed with 'Aperture owner control v1'.")
+
+    # Simulate Owner Emergency Stop Signature
+    stop_message = f"Aperture owner control v1\naction:stop-workflow\nworkflow_id:{workflow_id}"
+    owner_stop_sig = owner_keypair.sign_message(stop_message.encode("utf-8"))
+    verify_key.verify(stop_message.encode("utf-8"), bytes(owner_stop_sig))
+    print("  -> Owner Emergency Stop Signature VERIFIED: Immediate halt without leaking agent state.")
+
+    print("\n✅ Agent Passport delegation & Owner Inbox lifecycle demonstrated with complete cryptographic verification.")
 
 
 if __name__ == "__main__":
     run_passport_delegation_demo()
+

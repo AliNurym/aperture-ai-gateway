@@ -93,17 +93,8 @@ def run_demo():
             sys.exit(1)
         print("  -> Workload statically approved for execution.")
 
-    # 2. Check Gateway connectivity or execute locally in validation mode
-    gateway_url = os.getenv("APERTURE_GATEWAY_URL", "http://127.0.0.1:8000")
-    print(f"\n[Step 2] Target Aperture Gateway: {gateway_url}")
-
-    try:
-        from aperture_client import ApertureClient
-        print("  * Aperture Python SDK detected.")
-    except ImportError:
-        print("  * aperture_client SDK not installed in global env; running validation simulation.")
-
-    print("\n[Step 3] Executing Monte Carlo Workload locally to verify determinism...")
+    # 2. Local deterministic execution
+    print("\n[Step 2] Executing Monte Carlo Workload locally to verify determinism...")
     import io
     import contextlib
 
@@ -114,7 +105,7 @@ def run_demo():
     output_str = buffer.getvalue().strip()
     data = json.loads(output_str)
 
-    print("\n[Step 4] Execution Result:")
+    print("\n[Step 3] Local Execution Result:")
     print(f"  * Simulations:             {data['simulations']:,}")
     print(f"  * Initial Portfolio:       ${data['initial_portfolio']:,.2f}")
     print(f"  * 95% Value at Risk (VaR): ${data['var_95']:,.2f}")
@@ -124,5 +115,70 @@ def run_demo():
     print("\n✅ Monte Carlo computation completed with verified deterministic bounds.")
 
 
+def run_live(gateway_url: str):
+    print("\n[Step 2] Connecting to Live Aperture Gateway...")
+    print(f"  * Gateway URL: {gateway_url}")
+
+    from agent_identity import ephemeral_keypair
+    from aperture_client import ApertureClient
+
+    owner_kp = ephemeral_keypair()
+    client = ApertureClient(
+        gateway_url=gateway_url,
+        owner_keypair=owner_kp,
+        network="off_chain",
+    )
+    print(f"  * Generated Ephemeral Signer: {owner_kp['pubkey']}")
+
+    print("\n[Step 3] Requesting Signed Quote from Gateway...")
+    quote = client.quote(MONTE_CARLO_CODE, max_cost_lamports=100_000, max_runtime_seconds=30)
+    print(f"  * Quote ID:        {quote['quote_id']}")
+    print(f"  * Rate:            {quote['rate_lamports']} lamports/sec")
+    print(f"  * Code SHA-256:    {quote['code_sha256'][:16]}...")
+    print(f"  * Complexity:      {quote.get('analysis', {}).get('complexity_score')} units")
+
+    print("\n[Step 4] Submitting Workload to Worker Sandbox...")
+    task = client.execute(quote, MONTE_CARLO_CODE)
+    print(f"  * Task Admitted:   {task.task_id}")
+
+    print("\n[Step 5] Waiting for Sandbox Execution and Cryptographic Settlement...")
+    result = client.wait(task)
+    receipt = result["receipt"]
+    output = json.loads(result["output"])
+
+    print("\n[Step 6] Cryptographically Verified Sandbox Execution Result:")
+    print(f"  * Worker ID:               {receipt.get('worker_id')}")
+    print(f"  * Execution Time:          {receipt.get('execution_time')}s")
+    print(f"  * Charged:                 {receipt.get('charged_lamports')} lamports")
+    print(f"  * Settlement Type:         {receipt.get('settlement_type')}")
+    print(f"  * Simulations:             {output['simulations']:,}")
+    print(f"  * Initial Portfolio:       ${output['initial_portfolio']:,.2f}")
+    print(f"  * 95% Value at Risk (VaR): ${output['var_95']:,.2f}")
+    print(f"  * 99% Value at Risk (VaR): ${output['var_99']:,.2f}")
+    print(f"  * 95% Expected Shortfall:  ${output['expected_shortfall_95']:,.2f}")
+    print(f"  * Win Probability:         {output['prob_positive_return'] * 100:.2f}%")
+    print("\n✅ Live Monte Carlo computation executed and verified by Aperture Gateway.")
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Aperture Bounded Financial Monte Carlo Example")
+    parser.add_argument("--live", action="store_true", help="Submit and execute against running Aperture Gateway")
+    parser.add_argument("--gateway", default=os.getenv("APERTURE_GATEWAY_URL", "http://127.0.0.1:8000"),
+                        help="Gateway URL for live execution")
+    args = parser.parse_args()
+
+    if args.live:
+        try:
+            run_live(args.gateway)
+        except Exception as err:
+            print(f"❌ Live execution failed (is Gateway running at {args.gateway}?): {err}")
+            print("Falling back to local validation run...\n")
+            run_demo()
+    else:
+        run_demo()
+
+
 if __name__ == "__main__":
-    run_demo()
+    main()
+
