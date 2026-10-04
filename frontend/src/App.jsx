@@ -9,6 +9,7 @@ import Storage from "./Storage";
 import Icon from "./components/Icon";
 import CommandBlock from "./components/CommandBlock";
 import LiveDemoShowcase from "./components/LiveDemoShowcase";
+import ProofVerifierModal from "./components/ProofVerifierModal";
 import { WORKLOADS } from "./utils/workloads";
 import { installNavigationIndicator, installPressFeedback, syncNavigationIndicator } from "./utils/motion";
 import logo from "./assets/aperture-mark-v3.png";
@@ -99,6 +100,7 @@ export default function App() {
   const { connected, wallet } = useWallet();
   const { setVisible: chooseWallet } = useWalletModal();
   const [page, setPage] = useState(currentPage);
+  const [showGlobalProofModal, setShowGlobalProofModal] = useState(false);
   const [studioBusy, setStudioBusy] = useState(false);
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const busy = studioBusy || workflowBusy;
@@ -278,6 +280,14 @@ export default function App() {
             <span className="console-breadcrumb-root">Workspace</span><span aria-hidden="true">/</span><strong key={page}>{activePage.label}</strong>
           </div>
           <div className="console-top-actions">
+            <button
+              className="console-attestation-btn"
+              onClick={() => setShowGlobalProofModal(true)}
+              title="Inspect Cryptographic Attestation Certificate"
+            >
+              <Icon name="shield" size={15} />
+              <span>Verify Attestation</span>
+            </button>
             <span className="console-env-chip">{online ? telemetry.health?.demo_mode ? "Off-chain" : "Devnet" : "Gateway offline"}</span>
             {wallet && !connected && <button className="console-icon-button" aria-label="Choose wallet" title="Choose wallet" onClick={() => chooseWallet(true)}><Icon name="wallet" size={18} /></button>}
             <WalletMultiButton />
@@ -408,7 +418,10 @@ export default function App() {
                 ))}
               </section>
 
-              <LiveDemoShowcase onOpenStudio={() => navigate("studio")} />
+              <LiveDemoShowcase onOpenStudio={(presetId) => {
+                const sample = WORKLOADS.find(w => w.id === presetId) || WORKLOADS[0];
+                openSample(sample);
+              }} />
 
               <section className="console-panel console-pipeline" aria-label="Aperture computation pipeline">
                 <div className="console-section-heading">
@@ -743,6 +756,10 @@ export default function App() {
           </footer>
         </main>
       </div>
+      <ProofVerifierModal
+        isOpen={showGlobalProofModal}
+        onClose={() => setShowGlobalProofModal(false)}
+      />
     </div>
   );
 }

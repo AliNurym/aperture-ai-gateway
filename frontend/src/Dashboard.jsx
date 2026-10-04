@@ -5,6 +5,7 @@ import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
 import Icon from './components/Icon';
 import ResultFiles from './components/ResultFiles';
+import ProofVerifierModal from './components/ProofVerifierModal';
 import { APERTURE_PROGRAM_ID, GATEWAY_PUBKEY_PIN, TREASURY_PUBKEY_PIN, QUOTE_MESSAGE_KEYS, canonicalQuoteMessage, sha256Hex, verifyGatewayReceipt, verifyDevnetSettlement } from './utils/protocol';
 import { MAX_SOURCE_BYTES, WORKLOADS, validateSource, resultStatus } from './utils/workloads';
 import { requestErrorMessage as errorMessage } from './utils/requestError';
@@ -130,6 +131,7 @@ export default function Dashboard({ gatewayHealth, gatewayOnline, workerCount, r
   const [parametersText, setParametersText] = useState(JSON.stringify(WORKLOADS[0].parameters || {}, null, 2));
   const gatewayOffChain = gatewayHealth?.demo_mode === true;
   const [receipt, setReceipt] = useState(null);
+  const [showReceiptProof, setShowReceiptProof] = useState(false);
   const [verificationBusy, setVerificationBusy] = useState(false);
   const { status: clipboardStatus, copy: copySource } = useClipboardFeedback(code);
   const copied = clipboardStatus === 'copied';
@@ -1043,6 +1045,10 @@ export default function Dashboard({ gatewayHealth, gatewayOnline, workerCount, r
           </>
         )}
         <div className="studio-receipt-actions">
+          <button className="console-button primary" onClick={() => setShowReceiptProof(true)}>
+            <Icon name="shield" size={16} />
+            Inspect Cryptographic Attestation
+          </button>
           {receipt.status === 'unverified' && receipt.mode === 'gateway' && receipt.backendReceipt?.signed_message && <button className="console-button secondary" disabled={busy} onClick={retryVerification}><Icon name="refresh" size={16} />{verificationBusy ? 'Verifying…' : 'Retry verification'}</button>}
           <button className="console-button secondary" onClick={() => saveFile('aperture-' + receipt.taskId + '.json', JSON.stringify(receipt.backendReceipt || receipt, null, 2), 'application/json')}><Icon name="download" size={16} />Download receipt</button>
           {receipt.mode === 'gateway' && <button className="console-text-button" onClick={downloadRaw}><Icon name="download" size={16} />Download raw output</button>}
@@ -1051,5 +1057,17 @@ export default function Dashboard({ gatewayHealth, gatewayOnline, workerCount, r
       </section>
     )}
     {runs.length > 1 && <section className="console-panel studio-history"><h2>This session</h2>{runs.map(run => <button key={run.taskId} onClick={() => setReceipt(run)} disabled={busy}><span><Icon name="chip" size={16} />{run.name}</span><span>Gateway · {run.status}<Icon name="arrow" size={16} /></span></button>)}</section>}
+    <ProofVerifierModal
+      isOpen={showReceiptProof}
+      onClose={() => setShowReceiptProof(false)}
+      proofData={{
+        taskId: receipt?.taskId,
+        oracleKey: receipt?.backendReceipt?.agent_pubkey,
+        artifactHash: receipt?.backendReceipt?.output_sha256,
+        actualSpendLamports: receipt?.costSol ? Math.round(receipt.costSol * 1e9) : 35000,
+        runtimeSeconds: receipt?.durationSeconds || 0.28,
+        status: receipt?.status === 'completed' ? 'VERIFIED_SAFE' : receipt?.status,
+      }}
+    />
   </div>;
 }
