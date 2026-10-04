@@ -22,6 +22,16 @@ Keep the launcher open. Ctrl+C stops its services and preserves their state. On 
 
 This path runs the reviewed templates on the local host in **OFF_CHAIN** mode: real computation, no Solana payment, no Docker isolation. It accepts only the exact built-in sources exported at startup. Select **Temporary key** in the wallet chooser to use a real memory-only development signing key. Reload or disconnect loses that private key; use a persistent wallet for continuing approvals across reloads. Saved accepted-task capabilities can still recover results within the same browser tab.
 
+### Live Pitch & Demo Runner
+
+For live presentations, video demonstrations (Loom), or evaluator walkthroughs:
+
+```powershell
+.\start_demo.bat
+```
+
+Runs an end-to-end cryptographic compute verification in the terminal with colored telemetry, validates the DePIN gateway, and opens the Web Console directly to the **Interactive Agent Compute Simulator**.
+
 Python 3.11+ and Node.js with npm are required. The Windows launcher also recognizes the bundled Codex runtimes when installed.
 
 ### First useful result

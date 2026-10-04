@@ -8,6 +8,7 @@ import Workflows from "./Workflows";
 import Storage from "./Storage";
 import Icon from "./components/Icon";
 import CommandBlock from "./components/CommandBlock";
+import LiveDemoShowcase from "./components/LiveDemoShowcase";
 import { WORKLOADS } from "./utils/workloads";
 import { installNavigationIndicator, installPressFeedback, syncNavigationIndicator } from "./utils/motion";
 import logo from "./assets/aperture-mark-v3.png";
@@ -406,6 +407,8 @@ export default function App() {
                   </div>
                 ))}
               </section>
+
+              <LiveDemoShowcase onOpenStudio={() => navigate("studio")} />
 
               <section className="console-panel console-pipeline" aria-label="Aperture computation pipeline">
                 <div className="console-section-heading">
