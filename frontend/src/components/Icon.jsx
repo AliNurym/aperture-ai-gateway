@@ -20,6 +20,8 @@ const paths = {
   spark: "m12 2 3 7 7 3-7 3-3 7-3-7-7-3 7-3Z",
   wallet: "M3 5h16v4H3V5Zm0 4v11h18V9H3Zm14 5h4",
   external: "M14 3h7v7m0-7L10 14M10 3H3v18h18v-7",
+  search: "m21 21-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z",
+  command: "M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3Z",
 };
 
 export default function Icon({ name, size = 20, spinning = false, ...props }) {

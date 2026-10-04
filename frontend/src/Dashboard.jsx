@@ -932,8 +932,26 @@ export default function Dashboard({ gatewayHealth, gatewayOnline, workerCount, r
       <section className="studio-editor">
         <div className="studio-editor-heading"><div><span className="studio-file-dot" /><strong>workload.py</strong><span className="studio-language">PYTHON</span></div><div><button onClick={copyCode} title="Copy source" data-copied={copied} aria-label={copied ? 'Code copied' : 'Copy code'}><Icon name={copied ? 'check' : 'copy'} size={18} /></button><button onClick={() => inputRef.current.click()} disabled={draftLocked} title="Import Python file" aria-label="Import Python file"><Icon name="upload" size={18} /></button></div></div>
         <div className="studio-presets"><label htmlFor="workload-preset">Sample</label><select id="workload-preset" value={sampleId} disabled={draftLocked} onChange={event => selectSample(WORKLOADS.find(sample => sample.id === event.target.value))}>{WORKLOADS.map(sample => <option value={sample.id} key={sample.id}>{sample.name}</option>)}{sampleId === 'custom' && <option value="custom">Custom workload</option>}</select><button disabled={draftLocked} onClick={() => selectSample(WORKLOADS.find(sample => sample.id === sampleId) || WORKLOADS[0])} title="Reset sample" aria-label="Reset sample"><Icon name="refresh" size={16} /></button></div>
-        <div className="studio-source"><textarea aria-label="Python source code" value={code} spellCheck={false} disabled={draftLocked} onChange={event => { if (otherFlowBusy.current) return; setCode(event.target.value); setSampleId('custom'); setName('Custom workload'); setAnalysis(null); setReceipt(null); setStatus('idle'); }} /></div>
-        <div className="studio-editor-meta"><span>UTF-8 · {code.split('\n').length} lines</span><span>{new TextEncoder().encode(code).length.toLocaleString()} / {MAX_SOURCE_BYTES.toLocaleString()} bytes</span></div>
+        <div className="studio-source"><textarea
+            aria-label="Python source code"
+            value={code}
+            spellCheck={false}
+            disabled={draftLocked}
+            onChange={event => { if (otherFlowBusy.current) return; setCode(event.target.value); setSampleId('custom'); setName('Custom workload'); setAnalysis(null); setReceipt(null); setStatus('idle'); }}
+            onKeyDown={event => {
+              if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                event.preventDefault();
+                if (!draftLocked && !busy && !externalBusy && !channelBusy) {
+                  if (quote) {
+                    if (executionReady) start();
+                  } else {
+                    reviewQuote();
+                  }
+                }
+              }
+            }}
+          /></div>
+        <div className="studio-editor-meta"><span>UTF-8 · {code.split('\n').length} lines</span><span><kbd style={{fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: 'rgba(105, 80, 161, 0.1)', color: 'var(--console-primary)'}}>Ctrl + ↵</kbd> to run</span><span>{new TextEncoder().encode(code).length.toLocaleString()} / {MAX_SOURCE_BYTES.toLocaleString()} bytes</span></div>
         <input ref={inputRef} type="file" accept=".py,text/plain" hidden onChange={importFile} />
       </section>
       <aside className="studio-inspector" aria-label="Run settings">

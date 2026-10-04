@@ -10,6 +10,7 @@ import Icon from "./components/Icon";
 import CommandBlock from "./components/CommandBlock";
 import LiveDemoShowcase from "./components/LiveDemoShowcase";
 import ProofVerifierModal from "./components/ProofVerifierModal";
+import CommandPalette from "./components/CommandPalette";
 import { WORKLOADS } from "./utils/workloads";
 import { installNavigationIndicator, installPressFeedback, syncNavigationIndicator } from "./utils/motion";
 import logo from "./assets/aperture-mark-v3.png";
@@ -101,6 +102,7 @@ export default function App() {
   const { setVisible: chooseWallet } = useWalletModal();
   const [page, setPage] = useState(currentPage);
   const [showGlobalProofModal, setShowGlobalProofModal] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [studioBusy, setStudioBusy] = useState(false);
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const busy = studioBusy || workflowBusy;
@@ -123,6 +125,25 @@ export default function App() {
   const activePage = PAGES.find((item) => item.id === page);
 
   useEffect(() => installPressFeedback(appRef.current), []);
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setShowCommandPalette((prev) => !prev);
+        return;
+      }
+      if (
+        event.key === "/" &&
+        !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName) &&
+        !document.activeElement?.isContentEditable
+      ) {
+        event.preventDefault();
+        setShowCommandPalette(true);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
   useEffect(() => {
     const onHash = () => {
       const nextPage = currentPage();
@@ -280,6 +301,15 @@ export default function App() {
             <span className="console-breadcrumb-root">Workspace</span><span aria-hidden="true">/</span><strong key={page}>{activePage.label}</strong>
           </div>
           <div className="console-top-actions">
+            <button
+              className="console-search-trigger"
+              onClick={() => setShowCommandPalette(true)}
+              title="Quick Search & Actions (Ctrl + K)"
+            >
+              <Icon name="search" size={14} />
+              <span>Search or jump to...</span>
+              <kbd>Ctrl K</kbd>
+            </button>
             <button
               className="console-attestation-btn"
               onClick={() => setShowGlobalProofModal(true)}
@@ -759,6 +789,17 @@ export default function App() {
       <ProofVerifierModal
         isOpen={showGlobalProofModal}
         onClose={() => setShowGlobalProofModal(false)}
+      />
+      <CommandPalette
+        isOpen={showCommandPalette}
+        onClose={() => setShowCommandPalette(false)}
+        onNavigate={navigate}
+        onOpenSample={(sampleId) => {
+          const sample = WORKLOADS.find((w) => w.id === sampleId) || WORKLOADS[0];
+          openSample(sample);
+        }}
+        onOpenAttestation={() => setShowGlobalProofModal(true)}
+        onRefresh={refresh}
       />
     </div>
   );
