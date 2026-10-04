@@ -12,6 +12,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+BACKEND_DIR = Path(__file__).resolve().parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 import base58
 import requests
 from nacl.signing import VerifyKey

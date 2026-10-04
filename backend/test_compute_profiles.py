@@ -1,10 +1,15 @@
 """Rates depend on the exact reviewed template, never its AST size or input size."""
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+BACKEND_DIR = Path(__file__).resolve().parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 import test_api_security as fixtures
 from compute_profiles import SOURCES, csv_rate

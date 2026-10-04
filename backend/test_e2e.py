@@ -4,12 +4,17 @@ No server request or chain transaction is made when this module is imported.
 Docker isolation is separately verified by the opt-in worker tests and CI.
 """
 import hashlib
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock
 import base58
 from nacl.signing import VerifyKey
+
+BACKEND_DIR = Path(__file__).resolve().parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 import test_api_security as security
 import worker

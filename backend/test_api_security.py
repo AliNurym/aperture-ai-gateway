@@ -2,11 +2,16 @@
 import asyncio
 import json
 import os
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+
+BACKEND_DIR = Path(__file__).resolve().parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient

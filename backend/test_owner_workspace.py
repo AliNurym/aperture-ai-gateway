@@ -1,9 +1,15 @@
 """Functional owner/agent handoff, persistence, and delegated observation."""
 import asyncio
 import hashlib
+import sys
 import tempfile
 import time
 import unittest
+from pathlib import Path
+
+BACKEND_DIR = Path(__file__).resolve().parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 from solders.keypair import Keypair
 from agent_identity import canonical_json, sha256_text

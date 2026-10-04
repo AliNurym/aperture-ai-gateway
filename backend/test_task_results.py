@@ -1,9 +1,14 @@
-"""Process exit status and main API startup regressions."""
 import json
 import os
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 from solders.keypair import Keypair
+
+BACKEND_DIR = Path(__file__).resolve().parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 class TaskResultTests(unittest.TestCase):
     def test_main_import_and_security_headers_from_clean_configuration(self):
