@@ -119,16 +119,27 @@ def run_live(gateway_url: str):
     print("\n[Step 2] Connecting to Live Aperture Gateway...")
     print(f"  * Gateway URL: {gateway_url}")
 
-    from agent_identity import ephemeral_keypair
+    import requests
+    from solders.keypair import Keypair
     from aperture_client import ApertureClient
 
-    owner_kp = ephemeral_keypair()
+    resp = requests.get(gateway_url.rstrip("/") + "/health", timeout=5)
+    health = resp.json()
+    print(f"  * Gateway Status:  {health.get('status')} (Network: {health.get('network')})")
+    print(f"  * Gateway Pubkey:  {health.get('gateway_pubkey')}")
+
+    owner_kp = Keypair()
+    agent_kp = Keypair()
     client = ApertureClient(
-        gateway_url=gateway_url,
-        owner_keypair=owner_kp,
+        gateway_url,
+        owner=str(owner_kp.pubkey()),
+        agent_keypair=agent_kp,
+        program_id=health["program_id"],
+        gateway_pubkey=health["gateway_pubkey"],
         network="off_chain",
     )
-    print(f"  * Generated Ephemeral Signer: {owner_kp['pubkey']}")
+    print(f"  * Generated Owner: {owner_kp.pubkey()}")
+    print(f"  * Generated Agent: {agent_kp.pubkey()}")
 
     print("\n[Step 3] Requesting Signed Quote from Gateway...")
     quote = client.quote(MONTE_CARLO_CODE, max_cost_lamports=100_000, max_runtime_seconds=30)

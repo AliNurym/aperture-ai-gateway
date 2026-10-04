@@ -220,17 +220,25 @@ def run_live(gateway_url: str):
     print_header("APERTURE MCP SESSION: Live Gateway Interaction")
     print(f"Target Gateway: {gateway_url}")
 
-    from agent_identity import ephemeral_keypair
-    temp_owner = ephemeral_keypair()
-    temp_agent = ephemeral_keypair()
+    import requests
+    from solders.keypair import Keypair
 
-    print(f"Owner Pubkey: {temp_owner['pubkey']}")
-    print(f"Agent Pubkey: {temp_agent['pubkey']}")
+    resp = requests.get(gateway_url.rstrip("/") + "/health", timeout=5)
+    health = resp.json()
+    print(f"Gateway Status: {health.get('status')} (Pubkey: {health.get('gateway_pubkey')[:12]}...)")
+
+    temp_owner = Keypair()
+    temp_agent = Keypair()
+
+    print(f"Owner Pubkey: {temp_owner.pubkey()}")
+    print(f"Agent Pubkey: {temp_agent.pubkey()}")
 
     client = ApertureClient(
         gateway_url=gateway_url,
-        owner_keypair=temp_owner,
+        owner=str(temp_owner.pubkey()),
         agent_keypair=temp_agent,
+        program_id=health["program_id"],
+        gateway_pubkey=health["gateway_pubkey"],
         network="off_chain",
     )
 
