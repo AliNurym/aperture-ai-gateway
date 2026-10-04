@@ -383,10 +383,16 @@ export default function App() {
                     "Gateway total",
                   ],
                   [
+                    "shield",
+                    "Data isolation",
+                    "0 context leaks",
+                    "256 MiB quota · signed files",
+                  ],
+                  [
                     "wallet",
                     "Settlement",
                     online ? telemetry.health?.demo_mode ? "Off-chain" : "Devnet" : "—",
-                    online ? telemetry.health?.demo_mode ? "No on-chain payment" : telemetry.health?.protocol_config_initialized ? "Protocol configured" : "Protocol setup required" : "Gateway unavailable",
+                    online ? telemetry.health?.demo_mode ? "Local verified receipt" : telemetry.health?.protocol_config_initialized ? "Protocol configured" : "Protocol setup required" : "Gateway unavailable",
                   ],
                 ].map(([icon, label, value, caption]) => (
                   <div className="console-metric" key={label}>
@@ -398,6 +404,56 @@ export default function App() {
                     <p>{caption}</p>
                   </div>
                 ))}
+              </section>
+
+              <section className="console-panel console-pipeline" aria-label="Aperture computation pipeline">
+                <div className="console-section-heading">
+                  <div>
+                    <span className="console-eyebrow">
+                      <Icon name="spark" size={14} />
+                      ZERO-LEAK PIPELINE
+                    </span>
+                    <h2>How Aperture Protects Your Agent's Context</h2>
+                    <p>Dataset bytes stream directly into verified sandbox containers. Only cryptographic hashes and structured results return to the agent.</p>
+                  </div>
+                </div>
+                <div className="pipeline-steps">
+                  <div className="pipeline-step">
+                    <div className="pipeline-step-badge">1</div>
+                    <div className="pipeline-step-content">
+                      <strong>Private Inputs</strong>
+                      <p>CSV / JSON files stored with SHA-256 integrity</p>
+                      <span className="pipeline-pill">Up to 64 MiB</span>
+                    </div>
+                  </div>
+                  <div className="pipeline-connector"><Icon name="arrow" size={16} /></div>
+                  <div className="pipeline-step">
+                    <div className="pipeline-step-badge">2</div>
+                    <div className="pipeline-step-content">
+                      <strong>Signed Quote</strong>
+                      <p>Deterministic tariff & bounded runtime authorization</p>
+                      <span className="pipeline-pill">Ed25519 Sign</span>
+                    </div>
+                  </div>
+                  <div className="pipeline-connector"><Icon name="arrow" size={16} /></div>
+                  <div className="pipeline-step active">
+                    <div className="pipeline-step-badge">3</div>
+                    <div className="pipeline-step-content">
+                      <strong>Worker Sandbox</strong>
+                      <p>Isolated Python execution without network access</p>
+                      <span className="pipeline-pill">Docker / cgroups</span>
+                    </div>
+                  </div>
+                  <div className="pipeline-connector"><Icon name="arrow" size={16} /></div>
+                  <div className="pipeline-step">
+                    <div className="pipeline-step-badge">4</div>
+                    <div className="pipeline-step-content">
+                      <strong>Verified Artifacts</strong>
+                      <p>Named result files & on-chain / off-chain receipt</p>
+                      <span className="pipeline-pill">report.json · CSV</span>
+                    </div>
+                  </div>
+                </div>
               </section>
               <div className="console-home-grid">
                 <section className="console-panel">
