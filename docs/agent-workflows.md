@@ -17,6 +17,18 @@ The CSV pipeline in examples/batch_data_workflow.py:
 
 The dataset requires category and amount columns. The aggregation is an example
 template; the job and workflow APIs accept caller-provided source and parameters.
+
+The CLI batch template includes each category's minimum and maximum in addition
+to its row count, total and average. Browser batch workflows return counts,
+totals and averages; a single Studio dataset job returns counts and totals.
+These are different example templates. An exported browser plan keeps its exact
+sources when executed by the CLI; it does not automatically switch to the richer
+CLI batch template. Missing category values become `uncategorized`, and rows with
+a missing or nonnumeric amount are counted as skipped rather than stopping a batch.
+The CLI uploader rejects duplicate column names instead of silently overwriting
+their values. A row with more fields than its header reports its CSV line number;
+correct the dataset and reuse the same upload journal when its retained batches
+still match the selected file.
 Configure the existing SDK deployment and delegated agent key. The owner must
 already have issued a suitable passport and, on Devnet, funded the channel.
 The pipeline does not create a passport, increase its limits or deposit SOL.
@@ -281,3 +293,118 @@ The starter prints its public gateway key and program ID. Match the frontend's
 VITE_APERTURE_GATEWAY_PUBKEY and VITE_APERTURE_PROGRAM_ID to these public values,
 and use its gateway URL for VITE_API_URL. Keep the gateway pin enabled. The
 preview signer persists in the private state directory across restarts.
+
+### Hand data from the console to a delegated agent
+
+In Workflows, upload your own CSV export, select the grouping and amount columns,
+and set the delimiter and numeric separators. Missing groups can be included as
+`uncategorized` or excluded. The report includes exact decimal totals, averages,
+minimums, maximums and counts/reasons for excluded records. `quality.csv` gives
+the exclusions separately; duplicate records are not removed. Values support up
+to six fractional digits and absolute amounts up to 1e15. Invalid schemas fail
+with a column error rather than yielding a misleading empty success.
+
+Use **Load my agents**, select an owner-issued agent, then **Assign selected
+files**. One owner signature approves the complete input selection. Each input
+gets an agent-scoped immutable reference with the same name, byte count and hash;
+the original wallet file has an independent lifetime. Retrying this handoff
+reuses the assigned references. Each identity's logical storage quota still
+applies, even when a filesystem hard link avoids a second physical copy.
+
+Export the **assigned** plan and run it from that agent's MCP host or SDK. The
+unassigned browser plan uses the wallet's files and is intended for direct wallet
+execution. Assignment alone does not start compute or increase a passport budget.
+The agent can discover its assigned references through `get_compute_storage`.
+Dataset contents do not need to pass through the language model context.
+
+**Open agent workspace** signs a read-only observation window valid for fifteen
+minutes. Progress refreshes without repeated wallet prompts. The owner sees
+the selected agent's files, recent task states, charges and final results in the
+same console. Result preview/download verifies receipt signatures and byte
+hashes; Devnet results also require independent chain verification. Observation
+cannot start, cancel, release or modify work. Local preview remains OFF_CHAIN.
+
+The SDK equivalent is `delegated_client.assign_inputs(owner_references,
+owner_keypair=owner_key)`. The owner key signs locally and never goes to the gateway.
+For regional exports, `examples/batch_data_workflow.py` supports
+`--category-column`, `--amount-column`, `--delimiter`, `--decimal-separator`,
+`--thousands-separator` and `--missing-category`; these settings are retained in
+the upload journal and cannot silently change on resume. Browser and SDK use
+the same versioned workload sources. The preview also retains reviewed v1
+templates so existing journals remain usable.
+
+Reproduce the complete data handoff and admission recovery with:
+
+```bash
+python scripts/demo_workflow.py --rows 17000 --owner-handoff --regional-csv --output /tmp/aperture-owner-results
+```
+
+This check compares exact totals and excluded-row counts to the generated input,
+recovers an admission interrupted before its journal commit, verifies the owner's
+result downloads and checks idempotent assignment. It uses disposable keys,
+synthetic data and a reviewed local CPU worker; it makes no Solana payment.
+
+### Approve a chain once and receive it on the agent host
+
+Keep the owner wallet in the console and the dedicated agent key on its host.
+For an OFF_CHAIN local workspace, create the agent key once:
+
+```powershell
+backend\venv\Scripts\python.exe examples\create_agent_key.py --output .aperture\agent\keypair.json
+```
+
+The command prints only the public key and refuses to overwrite an existing key.
+Issue a passport for that public key in **Agents**, with a 100,000-lamport step
+cap, 60-second runtime and a total allowance sufficient for the complete plan.
+Keep the key and journal directory when restarting. A temporary browser wallet
+loses its owner key on reload; use a persistent owner wallet for repeat sessions.
+
+Configure the receiver using public keys from this gateway and your wallet:
+
+```powershell
+$env:APERTURE_GATEWAY_URL = "http://127.0.0.1:8000"
+$env:APERTURE_OWNER_PUBKEY = "<connected-owner-wallet-public-key>"
+$env:APERTURE_AGENT_KEYPAIR = (Resolve-Path .aperture\agent\keypair.json).Path
+$env:APERTURE_PROGRAM_ID = "<gateway-program-id>"
+$env:APERTURE_GATEWAY_PUBKEY = "<gateway-signing-public-key>"
+$env:APERTURE_NETWORK = "off_chain"
+$env:APERTURE_MCP_EXECUTION_ENABLED = "true"
+$env:APERTURE_MCP_MAX_COST_LAMPORTS = "100000"
+$env:APERTURE_MCP_MAX_RUNTIME_SECONDS = "60"
+$env:APERTURE_MCP_WORKFLOW_DIRECTORY = Join-Path (Get-Location) ".aperture\agent\workflows"
+$env:APERTURE_MCP_MAX_WORKFLOW_COST_LAMPORTS = "2000000"
+backend\venv\Scripts\python.exe examples\receive_workflows.py
+```
+
+In **Agent workflows**, upload/choose the CSV fields, load the agent and assign
+the inputs. **Approve ... SOL maximum** signs the exact plan hash and total cap.
+The receiver accepts it without a wallet prompt for each step. It still checks
+its own local ceilings and the owner-issued passport; console approval cannot
+raise either. Upload, assignment, passport and observation signatures are
+separate from the single workflow-budget approval.
+
+The owner can observe progress, result files and settled costs in the console.
+**Stop workflow** blocks new admissions immediately and cancels tracked tasks
+even if the agent host has disconnected. Wait for final receipts before treating
+the stop as settled. **Archive** frees an inbox history slot; it keeps files,
+which have their own explicit storage lifetime. The inbox retains at most 64
+workflows per owner/agent pair; archive finished work before admitting more.
+
+Restart the receiver with the same key, gateway and journal folder to recover.
+Admission and step identity commit atomically in the gateway; reconnecting must
+reuse the accepted task. An unrelated receiver cannot take over an uncertain
+admission. If the original host's folder is lost, stop the old chain before
+creating a new request. Terminal plans cannot be restarted as fresh executions.
+
+Instead of the polling receiver, an MCP host can call `get_assigned_workflows`,
+`start_assigned_workflow(workflow_id)` and `get_assigned_workflow_progress`.
+The full signed plan stays inside the host; list/progress responses contain
+compact metadata. The operator must enable execution and configure a durable
+workflow directory. The console inbox currently accepts only the reviewed CSV
+report preset. Use the generic SDK/MCP workflow tools for other bounded Python
+plans.
+
+Reproduce the assigned path with the comparison command in
+[MVP evidence](mvp-evidence.md). The current tariff, CPU bounds and source hashes
+are published in `/health` under `compute_profiles`. The CSV tariff is fixed for
+each issued quote; changing operator configuration does not rewrite old quotes.

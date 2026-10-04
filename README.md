@@ -27,18 +27,18 @@ Python 3.11+ and Node.js with npm are required. The Windows launcher also recogn
 ### First useful result
 
 1. Connect a wallet and open **Agent workflows**.
-2. Upload CSV batches with `category` and `amount` columns. Each selected file is one batch; the CLI below can split a larger dataset automatically.
-3. Prepare the plan, review the first quote and explicitly sign each step.
-4. Open `report.json` for category totals and invalid-row accounting, or `categories.csv` as a table. Downloads preserve the exact verified bytes.
+2. Upload your CSV export, choose grouping/amount columns and numeric separators. Each selected file is one batch; the CLI below can split a larger dataset automatically.
+3. Select an owner-issued agent, **Assign selected files**, then approve the plan's total maximum. Its configured receiver or MCP host executes the chain. The console shows progress and lets the owner stop the entire workflow.
+4. Open `report.json`, `categories.csv` and `quality.csv` for exact decimal totals, averages, minimums/maximums and excluded-row reasons. Downloads preserve the exact verified bytes.
 
-Every browser step needs its own approval. The unattended SDK/MCP path uses a separate delegated key and a disk journal. Uploads belong to the exact owner and agent pair; a different agent cannot reuse another identity's references.
+For unattended work, first configure a dedicated agent host using the [receiver guide](docs/agent-workflows.md#approve-a-chain-once-and-receive-it-on-the-agent-host). Upload, assignment, passport and observation are separate authorizations; the chain needs one budget approval, not a new owner prompt per step. The direct browser runner also remains available with a signature for every step. Uploads belong to the exact owner/agent pair; explicit owner assignment creates references for another agent.
 
 ## What is implemented
 
 | Area | Current behavior |
 | --- | --- |
 | Compute Studio | Source, private inputs, JSON parameters, source-bound quotes, execution, cancellation, result inspection and verified file downloads. |
-| Agent workflows | Batch/merge plan builder, per-step browser approval, verified dependencies, retained admission requests and recovery in the same tab. |
+| Agent workflows | Configurable CSV batch/merge plans, owner-approved agent inbox, whole-chain stop, console observation and durable admission recovery; optional direct browser execution. |
 | Files & results | Signed private storage usage, quota display and explicit file release. Active jobs and unexpired quotes protect their inputs from release. |
 | Python SDK | Signed uploads, quote/receipt verification, task history/recovery, named output files and serial DAG execution with a durable SQLite journal. |
 | MCP server | Local stdio tools for compute, private files and background workflow preparation, status, execution and cancellation. The host supplies its own AI model. |
@@ -94,7 +94,11 @@ Devnet payments additionally require a compatible program build, initialized pro
 | Private storage | Up to 256 MiB and 512 objects per owner/agent pair. |
 | Browser preview | JSON, CSV and text up to 1 MiB; tables show at most 100 rows and 32 columns. Download for full contents. |
 
-The source analyzer sets a **heuristic rate**. It does not predict exact runtime or prove a worst-case compute cost. Authorized spend and runtime are bounded separately. `OFF_CHAIN` receipts report authenticated execution without a payment; `DEVNET` settlement requires independent on-chain verification.
+The exact versioned CSV templates use the published `cpu-csv-v2` **operator tariff**, configured with `APERTURE_CSV_RATE_LAMPORTS_SEC` (illustrative default: 1,000 lamports/second). Custom and legacy sources retain the source analyzer's heuristic rate. Neither rate is a hardware benchmark or live market price. The authorized quote determines the rate and affordable runtime; spend and runtime remain bounded separately. `OFF_CHAIN` receipts report authenticated execution without payment; `DEVNET` settlement requires independent on-chain verification.
+
+Start sizing CSV workloads around 5,000 rows per batch, with no more than 10,000 report groups. Run `python scripts/benchmark_csv_profile.py --rows 50000 --groups 4 --output .aperture-runs/cpu-profile.json` on the intended worker to measure time and peak process memory. This local benchmark does not establish performance within Docker's 1-CPU/512-MiB limits. Docker preflight resolves the task image tag to an immutable image ID and includes it in execution metadata.
+
+Aperture's benefit is controlled delegation, durable recovery and result delivery without putting dataset bytes into the model context. A simple local Python script can be faster. Reproduce the same-host comparison with `python scripts/demo_workflow.py --rows 17000 --owner-handoff --regional-csv --console-workflow --compare-local --output .aperture-runs/comparison`; it verifies identical report bytes and records actual payment separately from a tariff estimate. See [the MVP evidence and limits](docs/mvp-evidence.md).
 
 Receipt signatures bind source/output hashes, identities and reported outcomes. They do **not** prove that remote hardware faithfully performed a computation. The reviewed local preview runs trusted host code; the Docker coordinator is also trusted because it controls the Docker socket. GPU inference, multi-gateway high availability and a cryptographic proof of computation are outside the implemented MVP.
 
@@ -116,6 +120,7 @@ The repository's [CI workflow](.github/workflows/ci.yml) contains backend/SDK, f
 cd frontend
 npm run lint
 npm run build
+npm run test:data
 ```
 
 Runtime execution, container isolation and Devnet settlement are separate checks; a successful frontend build does not establish worker or payment readiness.

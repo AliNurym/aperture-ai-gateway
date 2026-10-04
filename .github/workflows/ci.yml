@@ -22,6 +22,26 @@ jobs:
         env:
           APERTURE_TEST_DOCKER: "1"
 
+  workflow-examples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: pip install -r backend/requirements.txt -e "sdk[mcp]"
+      - run: python scripts/demo_workflow.py --rows 1000 --output .aperture/ci/workflow
+      - run: python scripts/demo_workflow.py --rows 17000 --owner-handoff --regional-csv --console-workflow --compare-local --output .aperture/ci/assigned-workflow
+      - run: python scripts/check_workflow_cancel.py --output .aperture/ci/cancellation
+      - run: python scripts/check_mcp_stdio.py --output .aperture/ci/mcp-stdio
+      - run: python scripts/check_mcp_stdio.py --assigned --output .aperture/ci/mcp-assigned
+      - run: python scripts/check_workspace_restart.py --output .aperture/ci/workspace-restart
+      - run: python scripts/check_exported_plan.py --output .aperture/ci/exported-plan
+
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -35,6 +55,8 @@ jobs:
       - run: npm run lint --prefix frontend
       - run: npm run build --prefix frontend
       - run: npm run test:protocol --prefix frontend
+      - run: npm run test:data --prefix frontend
+      - run: npm run test:motion --prefix frontend
 
   contract:
     runs-on: ubuntu-22.04

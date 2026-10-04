@@ -10,6 +10,15 @@ The server exposes source-only tools and data-job/workflow tools:
 See [Agent data jobs and workflows](agent-workflows.md) for immutable files,
 batch processing, dependent steps and durable background workflow control.
 
+The current server advertises 19 tools. For a chain approved in the console,
+call `get_assigned_workflows`, `start_assigned_workflow(workflow_id)` and
+`get_assigned_workflow_progress`. The owner approves the exact CSV plan and
+total maximum once; the configured host executes it within its local ceilings
+and retains its journal. Full plans and dataset bytes stay on the host/gateway,
+while the model receives compact workflow metadata. Follow the
+[receiver setup](agent-workflows.md#approve-a-chain-once-and-receive-it-on-the-agent-host)
+for key creation, console approval, observation, stop and recovery.
+
 - `quote_python` analyzes a source-bound quote without starting a task.
 - `start_python_task` runs the exact source held for that quote.
 - `list_python_tasks` lists recent task metadata for the configured owner and

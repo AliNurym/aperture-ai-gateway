@@ -68,6 +68,49 @@ For the browser, set `VITE_ENABLE_SESSION_KEY=true` in the ignored `frontend/.en
 
 The local worker admits only the exact approved files captured at startup. Review a modified file, export it to the approved directory and restart the worker before submitting its changed source. This source approval rule does not provide OS isolation. Existing development settings and keys are preserved; `prepare` refuses to overwrite them.
 
+## Functional workflow checks
+
+These checks create separate local gateway/worker workspaces, use synthetic CSV
+data and run in OFF_CHAIN mode. They require Node.js and a Python environment
+with `backend/requirements.txt` and the editable `sdk[mcp]` package installed.
+Run them from the repository root; on Linux, use `python` in place of the Windows
+interpreter path. Choose a fresh output directory for every run to preserve
+earlier evidence.
+
+```powershell
+backend/venv/Scripts/python.exe -X utf8 -m unittest discover -s sdk/tests -p test_batch_workflow.py -v
+npm run test:data --prefix frontend
+backend/venv/Scripts/python.exe -X utf8 scripts/demo_workflow.py --rows 1000 --output .aperture/checks/sdk
+backend/venv/Scripts/python.exe -X utf8 scripts/check_workflow_cancel.py --output .aperture/checks/cancellation
+backend/venv/Scripts/python.exe -X utf8 scripts/check_mcp_stdio.py --output .aperture/checks/stdio
+backend/venv/Scripts/python.exe -X utf8 scripts/check_workspace_restart.py --output .aperture/checks/restart
+backend/venv/Scripts/python.exe -X utf8 scripts/check_exported_plan.py --output .aperture/checks/exported-plan
+```
+
+The SDK demo interrupts and resumes the first accepted task. The cancellation
+check covers both the SDK runner and the background MCP controller. The stdio
+check launches two actual MCP server processes and resumes the same workflow
+after closing the first process. Successful checks retain their summaries,
+result files and journals under the chosen output directory and stop their own
+services. The workspace restart check completes the first step, restarts both
+gateway and worker, resumes the dependent step, then restarts again and checks
+that intermediate/final files and completed journals survive unchanged.
+The exported-plan check uses the actual frontend plan builder for 17 batches
+and executes its 20-step JSON through `examples/run_workflow.py`. Preparation
+submits no jobs; a completed replay verifies the same final files without
+creating more tasks.
+
+For repeated calculations and periodic service restarts:
+
+```powershell
+backend/venv/Scripts/python.exe -X utf8 scripts/soak_workflow.py --duration-seconds 600 --interval-seconds 60 --restart-every 10 --output .aperture/checks/soak
+```
+
+`summary.json` records the final status; `cycles.jsonl` records each verified
+cycle. A `running` summary is not proof of completion. These checks establish
+local CPU computation and recovery for the included templates; browser clicks,
+Docker execution and Solana settlement require their own verification.
+
 ## Windows Devnet build and launch
 
 Microsoft C++ Build Tools (x64/x86), Windows SDK, Rust and Agave 4.3.0 are required. Build with the exact gateway signing key that will initialize the protocol; the program rejects another initializer.
