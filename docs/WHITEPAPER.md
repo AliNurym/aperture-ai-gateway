@@ -1,6 +1,6 @@
 # APERTURE: Verifiable Bounded Compute & Settlement Protocol for Autonomous AI Agents
 
-**Version:** 2.1 (Devnet Architecture Specification)  
+**Version:** 2.2 (Autonomous Agent & DePIN Grid Architecture Specification)  
 **Authors:** Aperture Protocol Core Contributors  
 **Classification:** Technical Whitepaper & Cryptographic Specification  
 **Solana Program ID:** `A5HfdyRWy77i5DxhTMBa1ZinxVGZbVZnb35EvXUvkNzQ`
@@ -142,13 +142,49 @@ Workers (`backend/worker.py`) implement defence-in-depth:
 * **Worker Leases:** Tasks are assigned via lease tokens with lease expirations and heartbeats. If a worker goes offline mid-execution, the gateway detects the expired lease and recovers state safely.
 
 ### 3.4 Layer 4: Model Context Protocol (MCP) Integration
-Aperture provides an Anthropic-compliant **Model Context Protocol (MCP)** server (`sdk/python/aperture_client/mcp_server.py`) exposing standard tools to Claude Desktop, Cursor, and autonomous agents:
-* `aperture_get_quote`: Evaluates script complexity and quotes worst-case lamport expenditure.
-* `aperture_execute_python`: Dispatches the bounded task and polls for verified results.
-* `aperture_get_task_status`: Real-time task inspection.
-* `aperture_cancel_task`: Revocation of queued jobs.
+Aperture provides an Anthropic-compliant **Model Context Protocol (MCP)** stdio server (`sdk/python/aperture_client/mcp_server.py`) exposing **19 standardized tools** across 4 capability tiers:
 
-**Security Innovation:** The MCP server maintains capability tokens and private key material in an **In-Memory Capability Store**. Sensitive authentication tokens are filtered from LLM context windows, eliminating Prompt Injection leakage vectors.
+1. **Tier 1: Bounded Python Compute**
+   * `quote_python`: Analyzes Python source, validates AST security, and calculates bounded rates.
+   * `start_python_task`: Submits a quoted script for containerized execution.
+   * `list_python_tasks`: Queries the authenticated agent's recent task history.
+   * `resume_python_task`: Reconnects to an in-flight task without duplicate charge.
+   * `get_python_task`: Polls task execution progress, stdout, and signed receipts.
+   * `cancel_python_task`: Issues an early termination request to free allocated resources.
+
+2. **Tier 2: Private Storage & Artifact Management**
+   * `upload_compute_input`: Uploads raw data as immutable objects without exposing bytes to LLM context.
+   * `quote_compute_job`: Binds private input hashes, parameters, and reviewed templates into one quote.
+   * `start_compute_job`: Dispatches data processing jobs to authenticated workers.
+   * `read_compute_artifact`: Retrieves verified output artifacts (`report.json`, `categories.csv`) with hash checks.
+   * `get_compute_storage`: Inspects current storage usage against the 256 MiB quota.
+   * `release_compute_object`: Purges temporary input files once execution concludes.
+
+3. **Tier 3: DAG Workflows & Data Pipelines**
+   * `prepare_compute_workflow`: Pre-validates a multi-step batch/merge DAG and budget envelope.
+   * `step_compute_workflow`: Advances the workflow by executing the next ready dependency step.
+   * `get_compute_workflow_status`: Provides real-time visibility into overall DAG progress.
+
+4. **Tier 4: Owner Delegation & Workflow Inbox**
+   * `get_assigned_workflows`: Checks the agent's inbox for owner-assigned workflow pipelines.
+   * `start_assigned_workflow`: Executes owner-authorized DAGs with durable recovery.
+   * `get_assigned_workflow_progress`: Inspects live progress and admitted task IDs.
+   * `stop_assigned_workflow`: Gracefully terminates an assigned workflow run.
+
+**Security Innovation:** The MCP server stores authorization secrets, bearer tokens, and private keypairs in a process-private **In-Memory Capability Store**. Cryptographic credentials never appear in LLM completion prompts or context windows, entirely eliminating prompt injection leakage.
+
+### 3.5 Layer 5: Zero-Leak Private Data & Artifact Substrate
+Aperture enforces strict data hygiene for data-intensive agent tasks:
+* **Quota Enforcement:** Each owner/agent pair is constrained to a 256 MiB storage quota and a maximum of 512 concurrent objects (`backend/artifact_store.py`).
+* **Content Addressing:** Files are referenced strictly by their SHA-256 hash and unique `obj-<hex>` identifiers.
+* **Lease Locking:** Files cannot be deleted while bound to active quotes or in-progress DAG stages.
+* **Read-Only Mounting:** In worker containers, data inputs are mounted with read-only permissions (`0o444`), preventing script tampering.
+
+### 3.6 Layer 6: Owner Delegation Workflow Inbox
+To eliminate human-in-the-loop bottlenecks during large-scale workflows:
+* **One-Time Budget Authorization:** The owner issues a single cryptographic budget ceiling (e.g. 500,000 lamports) for an entire DAG workflow.
+* **Autonomous Ingestion:** The agent polls its assigned inbox (`/agents/workflows/assigned`), discovers pending pipelines, and executes individual steps without requesting human signatures per batch.
+* **Emergency Halt Sovereign Authority:** The principal retains a non-repudiable emergency kill-switch (`Aperture owner control v1`) allowing instant termination of runaway agent workloads without corrupting finished state.
 
 ---
 
