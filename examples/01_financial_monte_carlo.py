@@ -24,53 +24,27 @@ except ImportError:
     analyze_code_ast = None
 
 # Mathematical workload executed by the Aperture Worker in an isolated container
-MONTE_CARLO_CODE = '''
-import json
-import math
+MONTE_CARLO_CODE = '''# Agent tool: deterministic batch scenario scoring
 import random
 import statistics
+import json
 
-random.seed(42)
-initial_portfolio = 500_000.0  # USD
-annual_return = 0.08
-annual_vol = 0.18
-time_horizon_days = 21  # 1 trading month
-dt = 1.0 / 252.0
-num_simulations = 25_000
-
-portfolio_outcomes = []
-for _ in range(num_simulations):
-    price = initial_portfolio
-    for _ in range(time_horizon_days):
-        drift = (annual_return - 0.5 * (annual_vol ** 2)) * dt
-        shock = annual_vol * math.sqrt(dt) * random.gauss(0, 1)
-        price *= math.exp(drift + shock)
-    portfolio_outcomes.append(price)
-
-portfolio_outcomes.sort()
-losses = [initial_portfolio - outcome for outcome in portfolio_outcomes]
-losses.sort(reverse=True)
-
-# 95% and 99% Value at Risk (VaR)
-var_95_index = int(0.05 * num_simulations)
-var_99_index = int(0.01 * num_simulations)
-
-var_95 = losses[var_95_index]
-var_99 = losses[var_99_index]
-expected_shortfall_95 = statistics.fmean(losses[:var_95_index])
-
-result = {
-    "status": "SUCCESS",
-    "simulations": num_simulations,
-    "horizon_days": time_horizon_days,
-    "initial_portfolio": initial_portfolio,
-    "var_95": round(var_95, 2),
-    "var_99": round(var_99, 2),
-    "expected_shortfall_95": round(expected_shortfall_95, 2),
-    "prob_positive_return": round(sum(o > initial_portfolio for o in portfolio_outcomes) / num_simulations, 4)
-}
-print(json.dumps(result))
-'''.strip()
+# Synthetic inputs for a reproducible compute example; not financial advice.
+rng = random.Random(42)
+scenarios = 500_000
+portfolios = [("balanced", 0.45, 0.08), ("growth", 0.75, 0.14), ("conservative", 0.20, 0.04)]
+results = []
+print(json.dumps({"stage": "started", "total_scenarios": scenarios * len(portfolios)}), flush=True)
+for name, exposure, volatility in portfolios:
+    losses = [max(0, -(exposure * rng.gauss(0.01, volatility))) for _ in range(scenarios)]
+    ordered = sorted(losses)
+    tail = ordered[int(len(ordered) * 0.95):]
+    result = {"portfolio": name, "loss_p95": round(ordered[int(len(ordered) * 0.95)], 6), "tail_mean": round(statistics.fmean(tail), 6)}
+    results.append(result)
+    print(json.dumps({"stage": "portfolio_completed", "completed_scenarios": scenarios * len(results), **result}), flush=True)
+results.sort(key=lambda item: item["tail_mean"])
+print(json.dumps({"seed": 42, "scenarios_per_portfolio": scenarios, "ranking": results}, sort_keys=True))
+'''
 
 
 def run_demo():
@@ -102,16 +76,17 @@ def run_demo():
     with contextlib.redirect_stdout(buffer):
         exec(MONTE_CARLO_CODE, {"__builtins__": __builtins__})
 
-    output_str = buffer.getvalue().strip()
-    data = json.loads(output_str)
+    output_lines = [l.strip() for l in buffer.getvalue().strip().splitlines() if l.strip()]
+    data = json.loads(output_lines[-1])
 
     print("\n[Step 3] Local Execution Result:")
-    print(f"  * Simulations:             {data['simulations']:,}")
-    print(f"  * Initial Portfolio:       ${data['initial_portfolio']:,.2f}")
-    print(f"  * 95% Value at Risk (VaR): ${data['var_95']:,.2f}")
-    print(f"  * 99% Value at Risk (VaR): ${data['var_99']:,.2f}")
-    print(f"  * 95% Expected Shortfall:  ${data['expected_shortfall_95']:,.2f}")
-    print(f"  * Win Probability:         {data['prob_positive_return'] * 100:.2f}%")
+    print(f"  * Seed:                    {data['seed']}")
+    print(f"  * Scenarios per Portfolio: {data['scenarios_per_portfolio']:,}")
+    print(f"  * Portfolios Evaluated:    {len(data['ranking'])}")
+    for item in data['ranking']:
+        print(f"    - Portfolio [{item['portfolio'].upper()}]:")
+        print(f"        95% Loss (VaR):       {item['loss_p95']:.6f}")
+        print(f"        Tail Mean (CVaR):     {item['tail_mean']:.6f}")
     print("\n✅ Monte Carlo computation completed with verified deterministic bounds.")
 
 
@@ -141,33 +116,48 @@ def run_live(gateway_url: str):
     print(f"  * Generated Owner: {owner_kp.pubkey()}")
     print(f"  * Generated Agent: {agent_kp.pubkey()}")
 
-    print("\n[Step 3] Requesting Signed Quote from Gateway...")
+    print("\n[Step 3] Registering Agent Delegation Passport...")
+    passport = client.passport(
+        owner_kp,
+        action="register",
+        name="Monte Carlo Risk Agent",
+        max_cost_lamports=100_000,
+        max_runtime_seconds=30,
+        total_budget_lamports=1_000_000,
+    )
+    print(f"  * Passport Version: {passport.get('version')}")
+    print(f"  * Metadata Hash:    {str(passport.get('metadata_hash', ''))[:16]}...")
+
+    print("\n[Step 4] Requesting Signed Quote from Gateway...")
     quote = client.quote(MONTE_CARLO_CODE, max_cost_lamports=100_000, max_runtime_seconds=30)
     print(f"  * Quote ID:        {quote['quote_id']}")
     print(f"  * Rate:            {quote['rate_lamports']} lamports/sec")
     print(f"  * Code SHA-256:    {quote['code_sha256'][:16]}...")
     print(f"  * Complexity:      {quote.get('analysis', {}).get('complexity_score')} units")
 
-    print("\n[Step 4] Submitting Workload to Worker Sandbox...")
+    print("\n[Step 5] Submitting Workload to Worker Sandbox...")
     task = client.execute(quote, MONTE_CARLO_CODE)
     print(f"  * Task Admitted:   {task.task_id}")
 
-    print("\n[Step 5] Waiting for Sandbox Execution and Cryptographic Settlement...")
+    print("\n[Step 6] Waiting for Sandbox Execution and Cryptographic Settlement...")
     result = client.wait(task)
     receipt = result["receipt"]
-    output = json.loads(result["output"])
+    raw_output = result.get("output", "")
+    output_lines = [l.strip() for l in raw_output.strip().splitlines() if l.strip()]
+    output = json.loads(output_lines[-1])
 
-    print("\n[Step 6] Cryptographically Verified Sandbox Execution Result:")
+    print("\n[Step 7] Cryptographically Verified Sandbox Execution Result:")
     print(f"  * Worker ID:               {receipt.get('worker_id')}")
     print(f"  * Execution Time:          {receipt.get('execution_time')}s")
     print(f"  * Charged:                 {receipt.get('charged_lamports')} lamports")
     print(f"  * Settlement Type:         {receipt.get('settlement_type')}")
-    print(f"  * Simulations:             {output['simulations']:,}")
-    print(f"  * Initial Portfolio:       ${output['initial_portfolio']:,.2f}")
-    print(f"  * 95% Value at Risk (VaR): ${output['var_95']:,.2f}")
-    print(f"  * 99% Value at Risk (VaR): ${output['var_99']:,.2f}")
-    print(f"  * 95% Expected Shortfall:  ${output['expected_shortfall_95']:,.2f}")
-    print(f"  * Win Probability:         {output['prob_positive_return'] * 100:.2f}%")
+    print(f"  * Seed:                    {output['seed']}")
+    print(f"  * Scenarios per Portfolio: {output['scenarios_per_portfolio']:,}")
+    print(f"  * Portfolios Evaluated:    {len(output['ranking'])}")
+    for item in output['ranking']:
+        print(f"    - Portfolio [{item['portfolio'].upper()}]:")
+        print(f"        95% Loss (VaR):       {item['loss_p95']:.6f}")
+        print(f"        Tail Mean (CVaR):     {item['tail_mean']:.6f}")
     print("\n✅ Live Monte Carlo computation executed and verified by Aperture Gateway.")
 
 
