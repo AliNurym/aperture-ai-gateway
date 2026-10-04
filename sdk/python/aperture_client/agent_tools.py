@@ -47,6 +47,7 @@ class ApertureAgentTools:
         self._started_quotes: OrderedDict[str, str] = OrderedDict()
         self._last_poll: dict[str, float] = {}
         self.workflows = None
+        self.inbox = None
         if workflow_directory is not None:
             from .workflow_tools import WorkflowTools
             ceiling = self._positive_int(max_workflow_cost_lamports or self.max_cost_lamports,
@@ -54,6 +55,8 @@ class ApertureAgentTools:
             if ceiling > 100_000_000_000:
                 raise ValueError("Workflow spending ceiling exceeds 100 billion lamports.")
             self.workflows = WorkflowTools(self, workflow_directory, ceiling)
+            from .assigned_workflows import AssignedWorkflowTools
+            self.inbox = AssignedWorkflowTools(self)
 
     @staticmethod
     def _positive_int(value, name: str) -> int:

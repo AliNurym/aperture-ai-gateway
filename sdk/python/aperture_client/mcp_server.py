@@ -226,6 +226,33 @@ def create_mcp_server(tools: ApertureAgentTools):
         """
         return workflow_tools().prepare(steps, max_cost_lamports)
 
+    @server.tool(name="get_assigned_workflows", title="Get console-approved agent work")
+    def get_assigned_workflows() -> dict:
+        """List owner-approved jobs for this agent without putting dataset bytes in chat.
+
+        Owner signatures and plan/budget hashes are verified locally. Full plans
+        stay in the agent host. Starting applies the existing local execution,
+        cost, runtime and workflow ceilings; console approval cannot expand them.
+        """
+        workflow_tools()
+        return {"workflows": [tools.inbox.summary(value) for value in tools.inbox.list()]}
+
+    @server.tool(name="start_assigned_workflow", title="Run a console-approved workflow")
+    def start_assigned_workflow(workflow_id: str) -> dict:
+        """Start or recover this owner's approved plan on its original agent host.
+
+        Progress, settled charges and results are visible in the console. The
+        owner can stop the whole workflow there. No owner key is needed here.
+        """
+        workflow_tools()
+        return tools.inbox.start(workflow_id)
+
+    @server.tool(name="get_assigned_workflow_progress", title="Get this host's assigned workflow progress")
+    def get_assigned_workflow_progress() -> dict:
+        """Inspect the non-blocking assigned runner; execution must finish before claiming results."""
+        workflow_tools()
+        return tools.inbox.get()
+
     @server.tool(name="start_compute_workflow", title="Start or resume the prepared workflow")
     def start_compute_workflow(workflow_id: str) -> dict:
         """Run in the background. Return promptly; poll get_compute_workflow.

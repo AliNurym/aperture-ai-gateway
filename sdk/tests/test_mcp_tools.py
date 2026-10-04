@@ -163,7 +163,7 @@ class MCPSettingsTests(unittest.TestCase):
 
 
 class MCPServerRegistrationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_server_advertises_only_bounded_compute_tools(self):
+    async def test_server_advertises_python_data_and_workflow_tools(self):
         try:
             from mcp import Client
         except ImportError:
@@ -177,7 +177,10 @@ class MCPServerRegistrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             {tool.name for tool in listed.tools},
             {"quote_python", "start_python_task", "list_python_tasks", "resume_python_task",
-             "get_python_task", "cancel_python_task"},
+             "get_python_task", "cancel_python_task", "upload_compute_input", "quote_compute_job",
+             "start_compute_job", "read_compute_artifact", "get_compute_storage", "release_compute_object",
+             "prepare_compute_workflow", "start_compute_workflow", "get_compute_workflow", "cancel_compute_workflow",
+             "get_assigned_workflows", "start_assigned_workflow", "get_assigned_workflow_progress"},
         )
         self.assertFalse(quote.is_error)
         self.assertIn("quote-1", repr(quote.structured_content) + repr(quote.content))

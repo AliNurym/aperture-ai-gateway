@@ -53,7 +53,8 @@ class WorkflowTools:
                 "gateway_pubkey": client.gateway_pubkey, "network": client.network,
                 "treasury": client.treasury, "gateway_url": client.url,
                 "max_step_cost": self.tools.max_cost_lamports, "max_runtime": self.tools.max_runtime_seconds,
-                "max_rate": self.tools.max_rate_lamports, "max_workflow_cost": self.maximum_cost}
+                "max_rate": self.tools.max_rate_lamports, "max_workflow_cost": self.maximum_cost,
+                **({"assigned_workflow_id": self.assigned_workflow_id} if getattr(self, "assigned_workflow_id", None) else {})}
 
     def prepare(self, steps, max_cost_lamports):
         require(max_cost_lamports <= self.maximum_cost, "Workflow budget exceeds the operator's local ceiling")
@@ -146,13 +147,33 @@ class WorkflowTools:
 
     def _client(self):
         original = self.tools.client
-        return ApertureClient(original.url, owner=original.owner, agent_keypair=original.key,
+        client = ApertureClient(original.url, owner=original.owner, agent_keypair=original.key,
             program_id=original.program_id, gateway_pubkey=original.gateway_pubkey,
             network=original.network, treasury=original.treasury, rpc_url=original.rpc_url)
+        if getattr(self, "assigned_workflow_id", None):
+            client.assigned_workflow_id = self.assigned_workflow_id
+        return client
+
+    def journal_tasks(self, identifier):
+        journal = self._path(identifier, ".sqlite3")
+        if not journal.exists():
+            return []
+        with closing(sqlite3.connect(journal.as_uri() + "?mode=ro", uri=True)) as db:
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='steps'").fetchone() is None:
+                return []
+            result = []
+            for step, data in db.execute("SELECT id,data FROM steps"):
+                task = json.loads(data).get("task")
+                if task:
+                    result.append({"id": step, "task_id": task["task_id"]})
+            return result
 
     def start(self, identifier):
         if not self.tools.execution_enabled:
             raise PermissionError("Workflow execution requires APERTURE_MCP_EXECUTION_ENABLED=true.")
+        if not getattr(self, "assigned_workflow_id", None):
+            inbox = getattr(self.tools, "inbox", None)
+            require(inbox is None or not inbox.busy, "Finish the host's assigned workflow before starting another chain")
         with self.lock:
             plan = self._load(identifier)
             if identifier in self.active and self.active[identifier].is_alive():

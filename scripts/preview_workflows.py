@@ -135,6 +135,11 @@ def main():
     spec.loader.exec_module(pipeline)
     for name, code in (("batch", pipeline.BATCH_SOURCE), ("merge", pipeline.MERGE_SOURCE)):
         (approved / (name + ".py")).write_text(code, encoding="utf-8", newline="")
+    # Retained v1 journals still bind their exact reviewed source hashes.
+    # Only this versioned catalog is carried forward, never arbitrary state files.
+    legacy = json.loads((ROOT / "backend" / "workloads" / "csv_legacy_sources.json").read_text(encoding="utf-8"))
+    for name, code in legacy.items():
+        (approved / ("legacy-" + name + ".py")).write_text(code, encoding="utf-8", newline="")
     worker_secret = secrets.token_urlsafe(40)
     oracle_path = state / "oracle.json"
     if oracle_path.exists():

@@ -102,6 +102,16 @@ def canonical_quote_message(quote):
         version = 3
     else:
         require("workload_sha256" not in quote, "Job digest has no manifest")
+    if "workflow" in quote:
+        binding = quote["workflow"]
+        require(isinstance(binding, dict) and set(binding) == {"workflow_id", "step_id"}
+                and isinstance(binding["workflow_id"], str) and len(binding["workflow_id"]) == 69
+                and binding["workflow_id"].startswith("flow-")
+                and all(c in "0123456789abcdef" for c in binding["workflow_id"][5:])
+                and isinstance(binding["step_id"], str) and 0 < len(binding["step_id"]) <= 64,
+                "Quote has invalid workflow binding")
+        bound["workflow"] = binding
+        version = 4
     return f"Aperture execution authorization v{version}\naudience:aperture-gateway\naction:execute\n" + canonical(bound)
 
 
@@ -180,7 +190,7 @@ def verify_signature(public_key, signature, message):
 
 
 def verify_quote(quote, *, owner, agent, code, max_cost_lamports, max_runtime_seconds,
-                 max_rate_lamports, program_id, gateway_pubkey, network, treasury, now=None, workload=None):
+                 max_rate_lamports, program_id, gateway_pubkey, network, treasury, now=None, workload=None, workflow=None):
     """Reconstruct the signed payload, binding source, environment and caller bounds."""
     now = int(time.time()) if now is None else now
     expected = {
@@ -192,6 +202,7 @@ def verify_quote(quote, *, owner, agent, code, max_cost_lamports, max_runtime_se
     for key, value in expected.items():
         require(quote.get(key) == value, f"Quote changed {key}")
     require(quote.get("workload") == workload, "Quote changed job inputs or parameters")
+    require(quote.get("workflow") == workflow, "Quote changed its assigned workflow step")
     require(type(quote.get("expires_at")) is int and now < quote["expires_at"] <= now + 120, "Quote expired or expiry is implausible")
     require(type(quote.get("rate_lamports")) is int and 0 < quote["rate_lamports"] <= max_rate_lamports, "Quote rate exceeds caller policy")
     require(type(quote.get("passport_version")) is int and quote["passport_version"] >= 0, "Missing delegation version")
@@ -332,7 +343,7 @@ class ApertureClient:
         message = verify_quote(quote, owner=self.owner, agent=self.agent, code=code,
             max_cost_lamports=quote["max_cost_lamports"], max_runtime_seconds=quote["max_runtime_seconds"],
             max_rate_lamports=max_rate_lamports, program_id=self.program_id, gateway_pubkey=self.gateway_pubkey,
-            network=self.network, treasury=self.treasury, workload=spec)
+            network=self.network, treasury=self.treasury, workload=spec, workflow=getattr(self, "workflow_binding", None))
         payload = {"quote_id": quote["quote_id"], "wallet": self.owner, "agent_pubkey": self.agent,
                    "code": code, "message": message, "signature": list(bytes(self.key.sign_message(message.encode("utf-8"))))}
         if spec is not None:
@@ -446,6 +457,37 @@ class ApertureClient:
                 and usage.get("max_object_count") == 512, "Gateway returned inconsistent object capacity")
         return usage
 
+    def assign_inputs(self, inputs, *, owner_keypair):
+        """Owner approves private files for this client agent in one request.
+
+        The caller deliberately supplies the owner key locally. It is used only
+        to sign this exact handoff, never sent to or retained by the gateway.
+        Returned references belong to the agent and work in quote_job/workflows.
+        """
+        require(str(owner_keypair.pubkey()) == self.owner, "Handoff signer must be the configured owner")
+        require(isinstance(inputs, (list, tuple)) and 0 < len(inputs) <= 200,
+                "Assign 1 to 200 owner-uploaded inputs")
+        files = [object_reference(item) for item in inputs]
+        size = sum(item["size_bytes"] for item in files)
+        require(len({item["object_id"] for item in files}) == len(files) and size <= 256 * 1024 * 1024,
+                "Assign unique inputs totaling at most 256 MiB")
+        def assign():
+            issued_at, nonce = int(time.time()), secrets.token_urlsafe(24)
+            fields = {"owner": self.owner, "agent_pubkey": self.agent, "issued_at": issued_at, "nonce": nonce}
+            message = "Aperture owner control v1\naudience:aperture-gateway\n" + canonical({
+                "action": "assign-inputs", **fields, "task_id": sha256(canonical(files)), "limit": size,
+                "cursor": None, "program_id": self.program_id, "gateway_pubkey": self.gateway_pubkey, "network": self.network})
+            return self.request("POST", "/owners/objects/assign-batch", json={**fields, "inputs": files,
+                "signature": list(bytes(owner_keypair.sign_message(message.encode())))}).json()
+        result = retry_throttled(assign)
+        require(isinstance(result, dict) and result.get("owner") == self.owner and result.get("agent_pubkey") == self.agent
+                and isinstance(result.get("inputs"), list) and len(result["inputs"]) == len(files),
+                "Handoff response changed execution identity or input count")
+        references = [object_reference(item) for item in result["inputs"]]
+        require(all(all(item[key] == original[key] for key in ("name", "sha256", "size_bytes"))
+                    for item, original in zip(references, files)), "Assigned input changed its content")
+        return references
+
     def release_object(self, reference):
         """Explicitly remove retained bytes. Active jobs and unused quotes block removal.
 
@@ -475,11 +517,13 @@ class ApertureClient:
             self.verify_protocol_config()
         quote = self.request("POST", "/quotes", json={"code": code, "wallet": self.owner,
             "agent_pubkey": self.agent, "job_version": 1, "inputs": spec["inputs"], "parameters": spec["parameters"],
-            "max_cost_lamports": max_cost_lamports, "max_runtime_seconds": max_runtime_seconds}).json()
+            "max_cost_lamports": max_cost_lamports, "max_runtime_seconds": max_runtime_seconds,
+            **({"workflow": self.workflow_binding} if getattr(self, "workflow_binding", None) else {})}).json()
         verify_quote(quote, owner=self.owner, agent=self.agent, code=code,
             max_cost_lamports=max_cost_lamports, max_runtime_seconds=max_runtime_seconds,
             max_rate_lamports=max_rate_lamports, program_id=self.program_id,
-            gateway_pubkey=self.gateway_pubkey, network=self.network, treasury=self.treasury, workload=spec)
+            gateway_pubkey=self.gateway_pubkey, network=self.network, treasury=self.treasury, workload=spec,
+            workflow=getattr(self, "workflow_binding", None))
         return quote
 
     def execute_job(self, quote, code, *, inputs=(), parameters=None, max_rate_lamports=25_000):

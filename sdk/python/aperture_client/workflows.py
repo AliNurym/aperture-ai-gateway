@@ -152,6 +152,8 @@ class WorkflowRunner:
                    "program_id": self.client.program_id, "gateway_pubkey": self.client.gateway_pubkey,
                    "network": self.client.network, "treasury": self.client.treasury,
                    "gateway_url": self.client.url, "max_rate_lamports": self.max_rate}
+        if getattr(self.client, "assigned_workflow_id", None):
+            context["assigned_workflow_id"] = self.client.assigned_workflow_id
         fingerprint = sha256(canonical(context))
         owns_handle = _journal_handle is None
         handle, db = (self._lock() if owns_handle else _journal_handle), None
@@ -176,6 +178,8 @@ class WorkflowRunner:
             for step in plan["steps"]:
                 if should_stop and should_stop():
                     raise InterruptedError("Workflow stopped before admitting another step.")
+                if getattr(self.client, "assigned_workflow_id", None):
+                    self.client.workflow_binding = {"workflow_id": self.client.assigned_workflow_id, "step_id": step["id"]}
                 row = db.execute("SELECT state,data FROM steps WHERE id=?", (step["id"],)).fetchone()
                 state, data = (row[0], json.loads(row[1])) if row else ("new", {})
                 if state == "failed":
@@ -256,6 +260,8 @@ class WorkflowRunner:
                 and quote["max_cost_lamports"] == step["max_cost_lamports"]
                 and quote["max_runtime_seconds"] == step["max_runtime_seconds"],
                 "Workflow journal task differs from its approved step")
+        expected = {"workflow_id": self.client.assigned_workflow_id, "step_id": step["id"]} if getattr(self.client, "assigned_workflow_id", None) else None
+        require(quote.get("workflow") == expected, "Workflow journal task belongs to a different owner-approved run")
 
     @staticmethod
     def _progress(callback, step, state, completed, plan, task):
