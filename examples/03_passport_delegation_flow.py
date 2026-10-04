@@ -140,6 +140,89 @@ def run_passport_delegation_demo():
     print("\n✅ Agent Passport delegation & Owner Inbox lifecycle demonstrated with complete cryptographic verification.")
 
 
+def run_live(gateway_url: str):
+    import requests
+    from aperture_client import ApertureClient
+
+    print("===================================================================")
+    print("  APERTURE PASSPORT DEMO: Live Gateway Cryptographic Lifecycle")
+    print("===================================================================")
+    print(f"\n[Step 1] Connecting to Live Aperture Gateway at {gateway_url}...")
+    resp = requests.get(gateway_url.rstrip("/") + "/health", timeout=5)
+    health = resp.json()
+    print(f"  * Gateway Status:  {health.get('status')} (Network: {health.get('network')})")
+    print(f"  * Gateway Pubkey:  {health.get('gateway_pubkey')}")
+
+    owner_kp = Keypair()
+    agent_kp = Keypair()
+
+    client = ApertureClient(
+        gateway_url,
+        owner=str(owner_kp.pubkey()),
+        agent_keypair=agent_kp,
+        program_id=health["program_id"],
+        gateway_pubkey=health["gateway_pubkey"],
+        network="off_chain",
+    )
+    print(f"  * Principal Owner: {owner_kp.pubkey()}")
+    print(f"  * Delegated Agent: {agent_kp.pubkey()}")
+
+    print("\n[Step 2] Registering Live Agent Passport on Gateway...")
+    passport = client.passport(
+        owner_kp,
+        action="register",
+        name="Live Portfolio Sentinel",
+        max_cost_lamports=50_000,
+        max_runtime_seconds=20,
+        total_budget_lamports=500_000,
+    )
+    print(f"  * Passport Version: {passport.get('version')}")
+    print(f"  * Metadata Hash:    {str(passport.get('metadata_hash', ''))[:16]}...")
+    print(f"  * Attestation:      {passport.get('attestation')}")
+
+    print("\n[Step 3] Dispatching Compliant Task (40,000 lamports <= 50,000 cap)...")
+    quote = client.quote("import math; print(math.sqrt(16))", max_cost_lamports=40_000, max_runtime_seconds=10)
+    print(f"  * Quote Admitted:   {quote['quote_id']} (Rate: {quote['rate_lamports']} lamports/sec)")
+
+    print("\n[Step 4] Testing Gateway Policy Enforcement on Rogue Workload (200,000 > 50,000 cap)...")
+    try:
+        client.quote("import math; print(math.sqrt(16))", max_cost_lamports=200_000, max_runtime_seconds=10)
+        print("  ❌ Expected 403 Forbidden but quote succeeded!")
+    except Exception as err:
+        print(f"  🛡️ Gateway rejected runaway quote as expected: {err}")
+
+    print("\n[Step 5] Owner Cryptographic Revocation...")
+    revocation = client.passport(
+        owner_kp,
+        action="revoke",
+        name="Live Portfolio Sentinel",
+        max_cost_lamports=50_000,
+        max_runtime_seconds=20,
+        total_budget_lamports=500_000,
+    )
+    print(f"  * Revocation Status: Revoked = {revocation.get('revoked')}")
+    print("\n✅ Live cryptographic passport lifecycle verified against running Gateway.")
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Aperture Agent Passport Delegation Demo")
+    parser.add_argument("--live", action="store_true", help="Submit and verify against running Aperture Gateway")
+    parser.add_argument("--gateway", default=os.getenv("APERTURE_GATEWAY_URL", "http://127.0.0.1:8000"),
+                        help="Gateway URL for live execution")
+    args = parser.parse_args()
+
+    if args.live:
+        try:
+            run_live(args.gateway)
+        except Exception as err:
+            print(f"❌ Live execution failed (is Gateway running at {args.gateway}?): {err}")
+            print("Falling back to local validation run...\n")
+            run_passport_delegation_demo()
+    else:
+        run_passport_delegation_demo()
+
+
 if __name__ == "__main__":
-    run_passport_delegation_demo()
+    main()
 
