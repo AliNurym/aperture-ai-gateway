@@ -1,358 +1,379 @@
-/* Shared Material motion. Tokens live on :root so wallet portals use them too. */
-:root {
-  --motion-standard: cubic-bezier(0.2, 0, 0, 1);
-  --motion-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
-  --motion-fast: 120ms;
-  --motion-medium: 220ms;
-  --motion-enter: 320ms;
-  --motion-state: 180ms;
-}
-.motion-icon-spin { display: inline-grid; place-items: center; flex-shrink: 0; line-height: 0; }
-
-/* Press acknowledgement remains visible when motion is reduced or unavailable. */
-.console-app :is(.console-button, .console-new, .console-nav-item, .console-sample,
-  .console-icon-button, .studio-editor-heading button, .studio-presets button,
-  .studio-file-list button, .storage-filters button) {
-  position: relative;
-  overflow: hidden;
-  isolation: isolate;
-}
-.console-app :is(.console-button, .console-new, .console-nav-item, .console-sample,
-  .console-icon-button, .studio-editor-heading button, .studio-presets button,
-  .studio-file-list button, .storage-filters button)::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(circle at var(--ripple-x, 50%) var(--ripple-y, 50%), currentColor 0%, transparent 72%);
-  transform-origin: var(--ripple-x, 50%) var(--ripple-y, 50%);
-  pointer-events: none;
-  opacity: 0;
-}
-.console-app :is(.console-button, .console-new, .console-nav-item, .console-sample,
-  .console-icon-button, .studio-editor-heading button, .studio-presets button,
-  .studio-file-list button, .storage-filters button):active:not(:disabled):not([aria-disabled="true"])::after { opacity: 0.08; }
-
-/* The indicator owns the selected surface; buttons never move its geometry. */
-.console-sidebar nav {
-  position: relative;
-  isolation: isolate;
-  display: grid;
-  gap: 6px;
-}
-.console-sidebar .console-nav-item {
-  position: relative;
-  z-index: 1;
-  height: 48px;
-  min-height: 48px;
-  margin: 0;
-}
-.console-sidebar .console-nav-item.selected { background: transparent; }
-.console-nav-indicator {
-  position: absolute;
-  inset: 0 auto auto 0;
-  width: 0;
-  height: 0;
-  border-radius: 28px;
-  background: var(--md-sys-color-secondary-container);
-  pointer-events: none;
-  z-index: 0;
-}
-
-/* Never spend animation frames on a mounted, hidden workspace or background tab. */
-.console-app [hidden] *,
-.console-app [hidden] *::before,
-.console-app [hidden] *::after,
-.console-app[data-motion-paused] *,
-.console-app[data-motion-paused] *::before,
-.console-app[data-motion-paused] *::after { animation-play-state: paused !important; }
-
-@media (max-width: 980px) {
-  .console-sidebar nav { width: 56px; }
-  .console-sidebar .console-nav-item { height: 54px; min-height: 54px; }
-  .console-nav-indicator { border-radius: 20px; }
-}
-@media (max-width: 640px) {
-  .console-sidebar nav {
-    display: flex;
-    width: 100%;
-    gap: 0;
-    justify-content: space-between;
-  }
-  .console-sidebar .console-nav-item {
-    flex: 1 1 0;
-    width: auto;
-    min-width: 0;
-    height: 58px;
-    flex-direction: column;
-    gap: 4px;
-    padding: 8px 1px;
-    border-radius: 19px;
-  }
-  .console-nav-item > span { font-size: 11px; letter-spacing: -0.15px; white-space: nowrap; }
-  .console-nav-indicator { border-radius: 19px; }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .console-nav-indicator[data-ready] {
-    transition:
-      transform var(--motion-enter) var(--motion-standard),
-      width var(--motion-medium) var(--motion-standard),
-      height var(--motion-medium) var(--motion-standard);
-  }
-  .console-nav-indicator[data-resizing] { transition: none; }
-
-  /* Each surface enters once, in a short sequence. Editors and active runs stay mounted. */
-  .console-heading-copy,
-  .console-main > .console-hero,
-  .console-metrics,
-  .console-setup-nudge,
-  .console-home-grid > .console-panel,
-  .console-main > .console-tip,
-  .console-guide > section,
-  .agents-page > *,
-  .console-network-banner,
-  .console-network-empty,
-  .console-worker,
-  .console-studio:not([hidden]) > .console-mode-bar,
-  .console-studio:not([hidden]) .studio-status-card,
-  .console-studio:not([hidden]) .studio-grid,
-  .console-studio:not([hidden]) .studio-terminal,
-  .console-studio:not([hidden]) .studio-history,
-  .console-workflows:not([hidden]) .workflows > :is(.workflow-hero, .workflow-principles, .workflow-configuration, .workflow-run, .workflow-how),
-  .console-storage:not([hidden]) .storage > :is(.storage-intro, .storage-capacity, .storage-files) {
-    animation: aperture-enter var(--motion-enter) var(--motion-emphasized) backwards;
-  }
-  .console-breadcrumb strong { animation: aperture-label-in var(--motion-medium) var(--motion-standard); }
-  .console-main > .console-hero,
-  .console-guide > section:first-child,
-  .agents-page > :first-child,
-  .console-network-banner,
-  .console-studio:not([hidden]) .studio-status-card,
-  .console-workflows:not([hidden]) .workflow-hero,
-  .console-storage:not([hidden]) .storage-intro { animation-delay: 30ms; }
-  .console-metrics,
-  .console-guide > section:nth-child(2),
-  .agents-page > :nth-child(2),
-  .console-worker:nth-child(2),
-  .console-studio:not([hidden]) .studio-grid,
-  .console-workflows:not([hidden]) .workflow-configuration,
-  .console-storage:not([hidden]) .storage-capacity { animation-delay: 60ms; }
-  .console-home-grid > .console-panel,
-  .console-guide > section:nth-child(n + 3),
-  .console-worker:nth-child(n + 3),
-  .console-studio:not([hidden]) .studio-terminal,
-  .console-workflows:not([hidden]) .workflow-how,
-  .console-storage:not([hidden]) .storage-files { animation-delay: 90ms; }
-  .workflows.has-run > .workflow-run { animation-delay: 0ms; }
-
-  /* Decorative illustration movement settles quickly; no idle orbit loops. */
-  .console-orbit-core img { animation: aperture-awaken 700ms var(--motion-emphasized) 30ms backwards; }
-  .console-orbit-tile.code { animation: aperture-code-arrive 600ms var(--motion-emphasized) 60ms backwards; }
-  .console-orbit-tile.result { animation: aperture-result-arrive 600ms var(--motion-emphasized) 110ms backwards; }
-  .console-workflows:not([hidden]) .workflow-graph > :is(.workflow-graph-input, .workflow-branches, .workflow-graph-merge, .workflow-graph-output) {
-    animation: aperture-graph-in 420ms var(--motion-emphasized) backwards;
-  }
-  .console-workflows:not([hidden]) .workflow-graph > .workflow-branches { animation-delay: 60ms; }
-  .console-workflows:not([hidden]) .workflow-graph > .workflow-graph-merge { animation-delay: 120ms; }
-  .console-workflows:not([hidden]) .workflow-graph > .workflow-graph-output { animation-delay: 180ms; }
-
-  /* A brief ripple follows the actual pointer position, with centered keyboard feedback. */
-  .console-app :is(.console-button, .console-new, .console-nav-item, .console-sample,
-    .console-icon-button, .studio-editor-heading button, .studio-presets button,
-    .studio-file-list button, .storage-filters button)[data-ripple]::after {
-    animation: var(--ripple-animation, aperture-ripple) 420ms var(--motion-standard);
-  }
-  .console-app [data-ripple='alternate'] { --ripple-animation: aperture-ripple-alternate; }
-
-  .console-app :is(button, .console-button, .console-text-button),
-  .wallet-adapter-button,
-  .wallet-adapter-dropdown-list-item {
-    transition:
-      background-color var(--motion-state) var(--motion-standard),
-      color var(--motion-state) var(--motion-standard),
-      border-color var(--motion-state) var(--motion-standard),
-      box-shadow var(--motion-medium) var(--motion-standard);
-  }
-  .console-app :is(.console-button, .console-new, .console-icon-button,
-    .studio-editor-heading button, .studio-presets button, .studio-file-list button) {
-    transition:
-      transform var(--motion-fast) var(--motion-standard),
-      background-color var(--motion-state) var(--motion-standard),
-      color var(--motion-state) var(--motion-standard),
-      border-color var(--motion-state) var(--motion-standard),
-      box-shadow var(--motion-medium) var(--motion-standard);
-  }
-  .console-app :is(.console-button, .console-new, .console-icon-button,
-    .studio-editor-heading button, .studio-presets button, .studio-file-list button):active:not(:disabled):not([aria-disabled="true"]) { transform: scale(0.98); }
-  .console-brand img { transition: transform var(--motion-enter) var(--motion-standard); }
-  .console-brand:active img { transform: rotate(10deg) scale(0.96); }
-  .console-sample > svg:last-child,
-  .console-text-button > svg:last-child { transition: transform var(--motion-medium) var(--motion-standard); }
-  .console-app :is(input, textarea, select) {
-    transition:
-      border-color var(--motion-fast) var(--motion-standard),
-      background-color var(--motion-fast) var(--motion-standard),
-      box-shadow var(--motion-fast) var(--motion-standard);
-  }
-
-  /* Progress, quotes, results and errors use the same restrained state language. */
-  .studio-steps li,
-  .studio-steps li span,
-  .studio-steps li::before,
-  .studio-status-icon,
-  .workflow-run-state-icon,
-  .workflow-run-step-number,
-  .workflow-run-steps > li {
-    transition:
-      background-color var(--motion-medium) var(--motion-standard),
-      color var(--motion-medium) var(--motion-standard),
-      border-color var(--motion-medium) var(--motion-standard);
-  }
-  .studio-steps li.reached:not(:first-child)::before { background: #c9b2e1; }
-  .studio-status-icon.completed,
-  .workflow-run-state-icon.complete { animation: aperture-complete var(--motion-enter) var(--motion-emphasized); }
-  :is(.studio-status-icon.completed, .workflow-run-state-icon.complete) svg path {
-    stroke-dasharray: 32;
-    animation: aperture-check var(--motion-enter) var(--motion-standard);
-  }
-  .motion-icon-spin { animation: aperture-spin 1200ms linear infinite; }
-  .workflow-upload-icon[data-busy='true'] { position: relative; }
-  .workflow-upload-icon[data-busy='true']::before {
-    content: '';
-    position: absolute;
-    inset: -4px;
-    border: 2px solid transparent;
-    border-top-color: currentColor;
-    border-radius: 50%;
-    animation: aperture-spin 1200ms linear infinite;
-  }
-  .console-running-dot { animation: aperture-working 1600ms ease-in-out infinite; }
-  .studio-receipt,
-  .studio-quote,
-  .studio-notice,
-  .storage-notice,
-  .storage-release-review,
-  .workflow-run-notice,
-  .workflow-run-quote,
-  .workflow-plan-preview,
-  .workflow-run-results,
-  .result-preview,
-  .result-file-loading,
-  .result-file-notice { animation: aperture-feedback-in var(--motion-medium) var(--motion-emphasized); }
-  .studio-log-line { animation: aperture-log-in var(--motion-fast) var(--motion-standard); }
-  .workflow-input-list > li,
-  .studio-file-list > li { animation: aperture-feedback-in var(--motion-state) var(--motion-standard); }
-  .storage-quota progress::-webkit-progress-value,
-  .workflow-run-progress progress::-webkit-progress-value {
-    transition: width var(--motion-enter) var(--motion-standard);
-  }
-  .storage-quota progress::-moz-progress-bar,
-  .workflow-run-progress progress::-moz-progress-bar {
-    transition: width var(--motion-enter) var(--motion-standard);
-  }
-  :is(.console-command-heading, .studio-editor-heading) button[data-copied='true'] > svg { animation: aperture-complete var(--motion-medium) var(--motion-emphasized); }
-
-  @media (hover: hover) and (pointer: fine) {
-    :is(.console-button, .console-new):hover:not(:disabled):not([aria-disabled="true"]) { box-shadow: 0 3px 8px #6950a11a; }
-    .console-brand:is(:hover, :focus-visible) img { transform: rotate(16deg); }
-    .console-sample:hover > svg:last-child,
-    .console-text-button:hover:not(:disabled):not([aria-disabled="true"]) > svg[data-icon='arrow']:last-child { transform: translateX(3px); }
-  }
-
-  /* Native disclosures remain accessible; supported browsers also animate their height. */
-  @supports selector(::details-content) and (interpolate-size: allow-keywords) and (transition-behavior: allow-discrete) {
-    .console-app details::details-content {
-      interpolate-size: allow-keywords;
-      block-size: 0;
-      overflow: clip;
-      transition:
-        block-size var(--motion-medium) var(--motion-standard),
-        content-visibility var(--motion-medium) allow-discrete;
-    }
-    .console-app details[open]::details-content { block-size: auto; overflow-clip-margin: 6px; }
-  }
-}
-
-/* Wallet portals live outside .console-app and have their own mount lifecycle. */
-@media (prefers-reduced-motion: no-preference) {
-  .wallet-adapter-modal-fade-in .wallet-adapter-modal-wrapper {
-    animation: aperture-wallet-enter var(--motion-medium) var(--motion-standard) backwards;
-  }
-  .wallet-adapter-dropdown-list {
-    transition:
-      opacity var(--motion-fast) var(--motion-standard),
-      transform var(--motion-state) var(--motion-standard),
-      visibility var(--motion-state);
-  }
-}
-
-/* Explicit final override includes portal UI and third-party styles. */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation: none !important;
-    transition: none !important;
-    scroll-behavior: auto !important;
-  }
-}
-
-@keyframes aperture-enter {
-  from { opacity: 0.86; transform: translateY(8px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes aperture-label-in {
-  from { opacity: 0.65; transform: translateY(3px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes aperture-feedback-in {
-  from { opacity: 0.8; transform: translateY(4px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes aperture-graph-in {
-  from { opacity: 0.7; transform: translateY(5px) scale(0.98); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes aperture-awaken {
-  from { transform: rotate(-12deg) scale(0.94); }
-  to { transform: rotate(12deg) scale(1); }
-}
-@keyframes aperture-code-arrive {
-  from { transform: translate(-6px, 5px) rotate(-9deg); }
-  to { transform: rotate(-7deg); }
-}
-@keyframes aperture-result-arrive {
-  from { transform: translate(6px, 5px) rotate(9deg); }
-  to { transform: rotate(6deg); }
-}
-@keyframes aperture-ripple {
-  0% { opacity: 0; transform: scale(0.3); }
-  20% { opacity: 0.14; }
-  100% { opacity: 0; transform: scale(2); }
-}
-@keyframes aperture-ripple-alternate {
-  0% { opacity: 0; transform: scale(0.3); }
-  20% { opacity: 0.14; }
-  100% { opacity: 0; transform: scale(2); }
-}
-@keyframes aperture-complete {
-  from { transform: scale(0.9); }
-  70% { transform: scale(1.035); }
-  to { transform: none; }
-}
-@keyframes aperture-check {
-  from { stroke-dashoffset: 32; }
-  to { stroke-dashoffset: 0; }
-}
-@keyframes aperture-working {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-@keyframes aperture-log-in {
-  from { opacity: 0.7; }
-  to { opacity: 1; }
-}
-@keyframes aperture-spin { to { transform: rotate(360deg); } }
-@keyframes aperture-wallet-enter {
-  from { opacity: 0; transform: translateY(8px) scale(0.98); }
-  to { opacity: 1; transform: none; }
-}
+/* Shared Material motion. Tokens live on :root so wallet portals use them too. */
+:root {
+  --motion-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --motion-fast: 120ms;
+  --motion-medium: 220ms;
+  --motion-enter: 320ms;
+  --motion-state: 180ms;
+}
+.motion-icon-spin { display: inline-grid; place-items: center; flex-shrink: 0; line-height: 0; }
+
+/* Press acknowledgement remains visible when motion is reduced or unavailable. */
+.console-app :is(.console-button, .console-new, .console-nav-item, .console-sample,
+  .console-icon-button, .studio-editor-heading button, .studio-presets button,
+  .studio-file-list button, .storage-filters button) {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.console-app :is(.console-button, .console-new, .console-nav-item, .console-sample,
+  .console-icon-button, .studio-editor-heading button, .studio-presets button,
+  .studio-file-list button, .storage-filters button)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle at var(--ripple-x, 50%) var(--ripple-y, 50%), currentColor 0%, transparent 72%);
+  transform-origin: var(--ripple-x, 50%) var(--ripple-y, 50%);
+  pointer-events: none;
+  opacity: 0;
+}
+.console-app :is(.console-button, .console-new, .console-nav-item, .console-sample,
+  .console-icon-button, .studio-editor-heading button, .studio-presets button,
+  .studio-file-list button, .storage-filters button):active:not(:disabled):not([aria-disabled="true"])::after { opacity: 0.08; }
+
+/* The indicator owns the selected surface; buttons never move its geometry. */
+.console-sidebar nav {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  gap: 6px;
+}
+.console-sidebar .console-nav-item {
+  position: relative;
+  z-index: 1;
+  height: 48px;
+  min-height: 48px;
+  margin: 0;
+}
+.console-sidebar .console-nav-item.selected { background: transparent; }
+.console-nav-indicator {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 0;
+  height: 0;
+  border-radius: 28px;
+  background: var(--md-sys-color-secondary-container);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Never spend animation frames on a mounted, hidden workspace or background tab. */
+.console-app [hidden] *,
+.console-app [hidden] *::before,
+.console-app [hidden] *::after,
+.console-app[data-motion-paused] *,
+.console-app[data-motion-paused] *::before,
+.console-app[data-motion-paused] *::after { animation-play-state: paused !important; }
+
+@media (max-width: 980px) {
+  .console-sidebar nav { width: 56px; }
+  .console-sidebar .console-nav-item { height: 54px; min-height: 54px; }
+  .console-nav-indicator { border-radius: 20px; }
+}
+@media (max-width: 640px) {
+  .console-sidebar nav {
+    display: flex;
+    width: 100%;
+    gap: 0;
+    justify-content: space-between;
+  }
+  .console-sidebar .console-nav-item {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    height: 58px;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 1px;
+    border-radius: 19px;
+  }
+  .console-nav-item > span { font-size: 11px; letter-spacing: -0.15px; white-space: nowrap; }
+  .console-nav-indicator { border-radius: 19px; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .console-nav-indicator[data-ready] {
+    transition:
+      transform var(--motion-enter) var(--motion-standard),
+      width var(--motion-medium) var(--motion-standard),
+      height var(--motion-medium) var(--motion-standard);
+  }
+  .console-nav-indicator[data-resizing] { transition: none; }
+
+  /* Each surface enters once, in a short sequence. Editors and active runs stay mounted. */
+  .console-heading-copy,
+  .console-main > .console-hero,
+  .console-metrics,
+  .console-setup-nudge,
+  .console-home-grid > .console-panel,
+  .console-main > .console-tip,
+  .console-guide > section,
+  .agents-page > *,
+  .console-network-banner,
+  .console-network-empty,
+  .console-worker,
+  .console-studio:not([hidden]) > .console-mode-bar,
+  .console-studio:not([hidden]) .studio-status-card,
+  .console-studio:not([hidden]) .studio-grid,
+  .console-studio:not([hidden]) .studio-terminal,
+  .console-studio:not([hidden]) .studio-history,
+  .console-workflows:not([hidden]) .workflows > :is(.workflow-hero, .workflow-principles, .workflow-configuration, .workflow-run, .workflow-how),
+  .console-storage:not([hidden]) .storage > :is(.storage-intro, .storage-capacity, .storage-files) {
+    animation: aperture-enter var(--motion-enter) var(--motion-emphasized) backwards;
+  }
+  .console-breadcrumb strong { animation: aperture-label-in var(--motion-medium) var(--motion-standard); }
+  .console-main > .console-hero,
+  .console-guide > section:first-child,
+  .agents-page > :first-child,
+  .console-network-banner,
+  .console-studio:not([hidden]) .studio-status-card,
+  .console-workflows:not([hidden]) .workflow-hero,
+  .console-storage:not([hidden]) .storage-intro { animation-delay: 30ms; }
+  .console-metrics,
+  .console-guide > section:nth-child(2),
+  .agents-page > :nth-child(2),
+  .console-worker:nth-child(2),
+  .console-studio:not([hidden]) .studio-grid,
+  .console-workflows:not([hidden]) .workflow-configuration,
+  .console-storage:not([hidden]) .storage-capacity { animation-delay: 60ms; }
+  .console-home-grid > .console-panel,
+  .console-guide > section:nth-child(n + 3),
+  .console-worker:nth-child(n + 3),
+  .console-studio:not([hidden]) .studio-terminal,
+  .console-workflows:not([hidden]) .workflow-how,
+  .console-storage:not([hidden]) .storage-files { animation-delay: 90ms; }
+  .workflows.has-run > .workflow-run { animation-delay: 0ms; }
+
+  /* Decorative illustration movement settles quickly; no idle orbit loops. */
+  .console-orbit-core img { animation: aperture-awaken 700ms var(--motion-emphasized) 30ms backwards; }
+  .console-orbit-tile.code { animation: aperture-code-arrive 600ms var(--motion-emphasized) 60ms backwards; }
+  .console-orbit-tile.result { animation: aperture-result-arrive 600ms var(--motion-emphasized) 110ms backwards; }
+  .console-workflows:not([hidden]) .workflow-graph > :is(.workflow-graph-input, .workflow-branches, .workflow-graph-merge, .workflow-graph-output) {
+    animation: aperture-graph-in 420ms var(--motion-emphasized) backwards;
+  }
+  .console-workflows:not([hidden]) .workflow-graph > .workflow-branches { animation-delay: 60ms; }
+  .console-workflows:not([hidden]) .workflow-graph > .workflow-graph-merge { animation-delay: 120ms; }
+  .console-workflows:not([hidden]) .workflow-graph > .workflow-graph-output { animation-delay: 180ms; }
+
+  /* A brief ripple follows the actual pointer position, with centered keyboard feedback. */
+  .console-app :is(.console-button, .console-new, .console-nav-item, .console-sample,
+    .console-icon-button, .studio-editor-heading button, .studio-presets button,
+    .studio-file-list button, .storage-filters button)[data-ripple]::after {
+    animation: var(--ripple-animation, aperture-ripple) 420ms var(--motion-standard);
+  }
+  .console-app [data-ripple='alternate'] { --ripple-animation: aperture-ripple-alternate; }
+
+  .console-app :is(button, .console-button, .console-text-button),
+  .wallet-adapter-button,
+  .wallet-adapter-dropdown-list-item {
+    transition:
+      background-color var(--motion-state) var(--motion-standard),
+      color var(--motion-state) var(--motion-standard),
+      border-color var(--motion-state) var(--motion-standard),
+      box-shadow var(--motion-medium) var(--motion-standard);
+  }
+  .console-app :is(.console-button, .console-new, .console-icon-button,
+    .studio-editor-heading button, .studio-presets button, .studio-file-list button) {
+    transition:
+      transform var(--motion-fast) var(--motion-standard),
+      background-color var(--motion-state) var(--motion-standard),
+      color var(--motion-state) var(--motion-standard),
+      border-color var(--motion-state) var(--motion-standard),
+      box-shadow var(--motion-medium) var(--motion-standard);
+  }
+  .console-app :is(.console-button, .console-new, .console-icon-button,
+    .studio-editor-heading button, .studio-presets button, .studio-file-list button):active:not(:disabled):not([aria-disabled="true"]) { transform: scale(0.98); }
+  .console-brand img { transition: transform var(--motion-enter) var(--motion-standard); }
+  .console-brand:active img { transform: rotate(10deg) scale(0.96); }
+  .console-sample > svg:last-child,
+  .console-text-button > svg:last-child { transition: transform var(--motion-medium) var(--motion-standard); }
+  .console-app :is(input, textarea, select) {
+    transition:
+      border-color var(--motion-fast) var(--motion-standard),
+      background-color var(--motion-fast) var(--motion-standard),
+      box-shadow var(--motion-fast) var(--motion-standard);
+  }
+
+  /* Progress, quotes, results and errors use the same restrained state language. */
+  .studio-steps li,
+  .studio-steps li span,
+  .studio-steps li::before,
+  .studio-status-icon,
+  .workflow-run-state-icon,
+  .workflow-run-step-number,
+  .workflow-run-steps > li {
+    transition:
+      background-color var(--motion-medium) var(--motion-standard),
+      color var(--motion-medium) var(--motion-standard),
+      border-color var(--motion-medium) var(--motion-standard);
+  }
+  .studio-steps li.reached:not(:first-child)::before { background: #c9b2e1; }
+  .studio-status-icon.completed,
+  .workflow-run-state-icon.complete { animation: aperture-complete var(--motion-enter) var(--motion-emphasized); }
+  :is(.studio-status-icon.completed, .workflow-run-state-icon.complete) svg path {
+    stroke-dasharray: 32;
+    animation: aperture-check var(--motion-enter) var(--motion-standard);
+  }
+  .motion-icon-spin { animation: aperture-spin 1200ms linear infinite; }
+  .workflow-upload-icon[data-busy='true'] { position: relative; }
+  .workflow-upload-icon[data-busy='true']::before {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border: 2px solid transparent;
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: aperture-spin 1200ms linear infinite;
+  }
+  .console-running-dot { animation: aperture-working 1600ms ease-in-out infinite; }
+  .studio-receipt,
+  .studio-quote,
+  .studio-notice,
+  .storage-notice,
+  .storage-release-review,
+  .workflow-run-notice,
+  .workflow-run-quote,
+  .workflow-plan-preview,
+  .workflow-run-results,
+  .result-preview,
+  .result-file-loading,
+  .result-file-notice { animation: aperture-feedback-in var(--motion-medium) var(--motion-emphasized); }
+  .studio-log-line { animation: aperture-log-in var(--motion-fast) var(--motion-standard); }
+  .workflow-input-list > li,
+  .studio-file-list > li { animation: aperture-feedback-in var(--motion-state) var(--motion-standard); }
+  .storage-quota progress::-webkit-progress-value,
+  .workflow-run-progress progress::-webkit-progress-value {
+    transition: width var(--motion-enter) var(--motion-standard);
+  }
+  .storage-quota progress::-moz-progress-bar,
+  .workflow-run-progress progress::-moz-progress-bar {
+    transition: width var(--motion-enter) var(--motion-standard);
+  }
+  :is(.console-command-heading, .studio-editor-heading) button[data-copied='true'] > svg { animation: aperture-complete var(--motion-medium) var(--motion-emphasized); }
+
+  @media (hover: hover) and (pointer: fine) {
+    :is(.console-button, .console-new):hover:not(:disabled):not([aria-disabled="true"]) {
+      transform: translate3d(0, -1.5px, 0);
+      box-shadow: 0 6px 16px -2px rgba(105, 80, 161, 0.22), 0 2px 4px -1px rgba(0, 0, 0, 0.05);
+    }
+    :is(.console-button, .console-new):active:not(:disabled):not([aria-disabled="true"]) {
+      transform: translate3d(0, 0.5px, 0) scale(0.985);
+    }
+    .console-brand:is(:hover, :focus-visible) img { transform: rotate(16deg) scale(1.05); }
+    .console-sample:hover > svg:last-child,
+    .console-text-button:hover:not(:disabled):not([aria-disabled="true"]) > svg[data-icon='arrow']:last-child {
+      transform: translate3d(4px, 0, 0);
+    }
+    .console-panel,
+    .workflow-card,
+    .storage-card,
+    .studio-status-card {
+      transition: transform var(--motion-medium) var(--motion-standard), box-shadow var(--motion-medium) var(--motion-standard), border-color var(--motion-medium) var(--motion-standard);
+    }
+    .console-panel:hover,
+    .workflow-card:hover,
+    .storage-card:hover {
+      box-shadow: 0 10px 24px -6px rgba(105, 80, 161, 0.09), 0 2px 6px -1px rgba(0, 0, 0, 0.04);
+      border-color: rgba(105, 80, 161, 0.24);
+    }
+  }
+
+  /* Native disclosures remain accessible; supported browsers also animate their height. */
+  @supports selector(::details-content) and (interpolate-size: allow-keywords) and (transition-behavior: allow-discrete) {
+    .console-app details::details-content {
+      interpolate-size: allow-keywords;
+      block-size: 0;
+      overflow: clip;
+      transition:
+        block-size var(--motion-medium) var(--motion-standard),
+        content-visibility var(--motion-medium) allow-discrete;
+    }
+    .console-app details[open]::details-content { block-size: auto; overflow-clip-margin: 6px; }
+  }
+}
+
+/* Wallet portals live outside .console-app and have their own mount lifecycle. */
+@media (prefers-reduced-motion: no-preference) {
+  .wallet-adapter-modal-fade-in .wallet-adapter-modal-wrapper {
+    animation: aperture-wallet-enter var(--motion-medium) var(--motion-standard) backwards;
+  }
+  .wallet-adapter-dropdown-list {
+    transition:
+      opacity var(--motion-fast) var(--motion-standard),
+      transform var(--motion-state) var(--motion-standard),
+      visibility var(--motion-state);
+  }
+}
+
+/* Explicit final override includes portal UI and third-party styles. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes aperture-enter {
+  from { opacity: 0; transform: translate3d(0, 10px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes aperture-label-in {
+  from { opacity: 0; transform: translate3d(0, 3px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes aperture-feedback-in {
+  from { opacity: 0; transform: translate3d(0, 6px, 0) scale(0.99); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes aperture-graph-in {
+  from { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.98); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes aperture-awaken {
+  from { transform: rotate(-12deg) scale(0.94); }
+  to { transform: rotate(12deg) scale(1); }
+}
+@keyframes aperture-code-arrive {
+  from { transform: translate3d(-6px, 5px, 0) rotate(-9deg); }
+  to { transform: rotate(-7deg); }
+}
+@keyframes aperture-result-arrive {
+  from { transform: translate3d(6px, 5px, 0) rotate(9deg); }
+  to { transform: rotate(6deg); }
+}
+@keyframes aperture-ripple {
+  0% { opacity: 0; transform: scale(0.3); }
+  20% { opacity: 0.14; }
+  100% { opacity: 0; transform: scale(2); }
+}
+@keyframes aperture-ripple-alternate {
+  0% { opacity: 0; transform: scale(0.3); }
+  20% { opacity: 0.14; }
+  100% { opacity: 0; transform: scale(2); }
+}
+@keyframes aperture-complete {
+  0% { transform: scale(0.88); }
+  50% { transform: scale(1.08); }
+  80% { transform: scale(0.98); }
+  100% { transform: scale(1); }
+}
+@keyframes aperture-check {
+  from { stroke-dashoffset: 32; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes aperture-working {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.88); }
+}
+@keyframes aperture-log-in {
+  from { opacity: 0; transform: translate3d(-4px, 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes aperture-spin { to { transform: rotate(360deg); } }
+@keyframes aperture-wallet-enter {
+  from { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.97); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
