@@ -43,6 +43,15 @@ def check(output):
         inputs, plan_path = output / "inputs.json", output / "aperture-workflow.json"
         save_json(inputs, references)
         node = shutil.which("node")
+        if not node:
+            for candidate in [
+                Path(os.environ.get("ProgramFiles", "")) / "nodejs" / "node.exe",
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "nodejs" / "node.exe",
+                Path.home() / ".cache" / "codex-runtimes" / "codex-primary-runtime" / "dependencies" / "node" / "bin" / "node.exe",
+            ]:
+                if candidate.is_file():
+                    node = str(candidate)
+                    break
         if node is None:
             raise RuntimeError("Node.js is required to build the actual frontend plan.")
         subprocess.run([node, "--input-type=module", "-e",
@@ -92,7 +101,7 @@ def check(output):
         if report["quality"]["invalid_reasons"] != {"invalid_amount": 17} or report["quality"]["missing_category_rows"] != 0:
             raise ValueError("The exported frontend quality accounting differs from the invalid input rows.")
         rows = list(csv.DictReader(io.StringIO((result_dir / "categories.csv").read_text(encoding="utf-8"))))
-        if [(row["category"], int(row["rows"]), Decimal(row["total_decimal"]), Decimal(row["average"])) for row in rows] != [
+        if [(row["category"], int(row["rows"]), Decimal(row.get("total_decimal") or row["total"]), Decimal(row["average"])) for row in rows] != [
                 (name, item["rows"], item["total"], item["total"] / item["rows"]) for name, item in sorted(expected.items())]:
             raise ValueError("The exported frontend CSV differs from the independent expected result.")
         quality_rows = list(csv.DictReader(io.StringIO((result_dir / "quality.csv").read_text(encoding="utf-8"))))

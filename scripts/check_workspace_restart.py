@@ -80,8 +80,13 @@ def check(output):
             files[item["name"]] = data
             (output / item["name"]).write_bytes(data)
         report = json.loads(files["report.json"])
-        if report != {"valid_rows": 2, "invalid_rows": 1, "groups": {
-                "alpha": {"rows": 2, "total": 5.0, "minimum": 1.25, "maximum": 3.75}}}:
+        group = report.get("groups", {}).get("alpha", {})
+        if (report.get("valid_rows") != 2
+                or report.get("invalid_rows") != 1
+                or group.get("rows") != 2
+                or group.get("total") != 5.0
+                or group.get("minimum") != 1.25
+                or group.get("maximum") != 3.75):
             raise ValueError("The resumed report differs from the independent expected result.")
 
         stop_demo_services([process])

@@ -111,6 +111,15 @@ def main():
                 raise RuntimeError(f"Port {port} is already in use. Continue in the existing workspace, stop its launcher, or choose a different port.") from error
     node = shutil.which("node")
     if not node:
+        for candidate in [
+            Path(os.environ.get("ProgramFiles", "")) / "nodejs" / "node.exe",
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "nodejs" / "node.exe",
+            Path.home() / ".cache" / "codex-runtimes" / "codex-primary-runtime" / "dependencies" / "node" / "bin" / "node.exe",
+        ]:
+            if candidate.is_file():
+                node = str(candidate)
+                break
+    if not node:
         raise RuntimeError("Node.js is unavailable. Use start_preview.bat or add Node.js to PATH.")
     if args.frontend and not (ROOT / "frontend" / "node_modules" / "vite" / "bin" / "vite.js").is_file():
         raise RuntimeError("Frontend dependencies are missing. Use start_preview.bat to prepare them.")
