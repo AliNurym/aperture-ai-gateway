@@ -11,11 +11,13 @@ import { requestErrorMessage as errorMessage } from './utils/requestError';
 import { saveFile } from './utils/downloadFile';
 import { MAX_INPUT_BYTES, hashBytes, jobManifest, uploadInput, validateObject, verifyJobManifest } from './utils/jobs';
 import { verifyUserSignature, workflowContext, workflowRequest } from './utils/browserWorkflows';
+import { useClipboardFeedback } from './hooks/useClipboardFeedback';
 import './Dashboard.css';
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 const ACTIVE = ['uploading', 'reviewing', 'signing', 'submitting', 'uncertain', 'retryable', 'queued', 'running', 'settlement_pending', 'verifying', 'stopping'];
 const LABELS = { idle: 'Ready when you are', quoted: 'Review your spending limit', reviewing: 'Requesting a quote', signing: 'Waiting for signature', submitting: 'Submitting workload', uncertain: 'Submission status uncertain', retryable: 'Waiting to retry admission', queued: 'Waiting for a worker', running: 'Workload in progress', settlement_pending: 'Result saved · settlement pending', verifying: 'Verifying the saved result', stopping: 'Requesting cancellation', completed: 'Run completed', unverified: 'Receipt unverified', blocked: 'Source policy blocked', failed: 'Run failed', cancelled: 'Run cancelled' };
+const STATUS_ICONS = { completed: 'check', failed: 'shield', blocked: 'shield', unverified: 'shield', uncertain: 'shield', signing: 'wallet', settlement_pending: 'network', retryable: 'refresh' };
 const ACTIVE_STORAGE_KEY = 'aperture-active:' + API_URL;
 const PENDING_ADMISSION_KEY = 'aperture-pending-admission:' + API_URL;
 function readActiveRun() {
@@ -129,7 +131,8 @@ export default function Dashboard({ gatewayHealth, gatewayOnline, workerCount, r
   const gatewayOffChain = gatewayHealth?.demo_mode === true;
   const [receipt, setReceipt] = useState(null);
   const [verificationBusy, setVerificationBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const { status: clipboardStatus, copy: copySource } = useClipboardFeedback(code);
+  const copied = clipboardStatus === 'copied';
   const [runs, setRuns] = useState([]);
   const [walletBalance, setWalletBalance] = useState(null);
   const [channel, setChannel] = useState(null);
@@ -860,8 +863,7 @@ export default function Dashboard({ gatewayHealth, gatewayOnline, workerCount, r
     saveFile(item.name, data, 'application/octet-stream');
   };
   const copyCode = async () => {
-    try { await navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1800); }
-    catch { setNotice('Clipboard unavailable. Select the code and copy it manually.'); }
+    if (await copySource() === 'unavailable') setNotice('Clipboard unavailable. Select the code and copy it manually.');
   };
   const downloadRaw = async () => {
     if (!receipt?.taskId || receipt.mode !== 'gateway') return;
@@ -899,6 +901,9 @@ export default function Dashboard({ gatewayHealth, gatewayOnline, workerCount, r
     onRecord?.({ id: saved.taskId, name: saved.name, mode: saved.mode, status: updated.status, timestamp: saved.timestamp });
   };
 
+  const statusIcon = verificationBusy ? 'refresh' : STATUS_ICONS[status] || (busy ? 'refresh' : 'spark');
+  const statusSpinning = statusIcon === 'refresh' && (verificationBusy || status !== 'retryable');
+
   return <div className="studio">
     {externalBusy && <div className="studio-policy" role="status"><Icon name="network" size={18} /><p>An agent workflow is using the execution slot. New Studio preparations are paused; existing task monitoring and cancellation remain available.</p></div>}
     {reviewedSourcesOnly && <div className="studio-policy" role="status"><Icon name="shield" size={18} /><p>Reviewed samples only. Edited or imported source needs operator approval.</p></div>}
@@ -906,7 +911,7 @@ export default function Dashboard({ gatewayHealth, gatewayOnline, workerCount, r
     <section className="console-panel studio-status-card" aria-busy={busy}>
       <div className="studio-status-heading">
         <div className={'studio-status-icon ' + status} data-busy={busy}>
-          <Icon name={status === 'completed' ? 'check' : ['failed', 'blocked', 'unverified'].includes(status) ? 'shield' : busy ? 'refresh' : 'spark'} size={23} />
+          <Icon name={statusIcon} spinning={statusSpinning} size={23} />
         </div>
         <div>
           <h2 aria-live="polite">{verificationBusy ? LABELS.verifying : status === 'uploading' ? 'Staging your input files' : LABELS[status]}</h2>
@@ -923,7 +928,7 @@ export default function Dashboard({ gatewayHealth, gatewayOnline, workerCount, r
     </section>
     <div className="studio-grid">
       <section className="studio-editor">
-        <div className="studio-editor-heading"><div><span className="studio-file-dot" /><strong>workload.py</strong><span className="studio-language">PYTHON</span></div><div><button onClick={copyCode} title="Copy source" aria-label={copied ? 'Code copied' : 'Copy code'}><Icon name={copied ? 'check' : 'copy'} size={18} /></button><button onClick={() => inputRef.current.click()} disabled={draftLocked} title="Import Python file" aria-label="Import Python file"><Icon name="upload" size={18} /></button></div></div>
+        <div className="studio-editor-heading"><div><span className="studio-file-dot" /><strong>workload.py</strong><span className="studio-language">PYTHON</span></div><div><button onClick={copyCode} title="Copy source" data-copied={copied} aria-label={copied ? 'Code copied' : 'Copy code'}><Icon name={copied ? 'check' : 'copy'} size={18} /></button><button onClick={() => inputRef.current.click()} disabled={draftLocked} title="Import Python file" aria-label="Import Python file"><Icon name="upload" size={18} /></button></div></div>
         <div className="studio-presets"><label htmlFor="workload-preset">Sample</label><select id="workload-preset" value={sampleId} disabled={draftLocked} onChange={event => selectSample(WORKLOADS.find(sample => sample.id === event.target.value))}>{WORKLOADS.map(sample => <option value={sample.id} key={sample.id}>{sample.name}</option>)}{sampleId === 'custom' && <option value="custom">Custom workload</option>}</select><button disabled={draftLocked} onClick={() => selectSample(WORKLOADS.find(sample => sample.id === sampleId) || WORKLOADS[0])} title="Reset sample" aria-label="Reset sample"><Icon name="refresh" size={16} /></button></div>
         <div className="studio-source"><textarea aria-label="Python source code" value={code} spellCheck={false} disabled={draftLocked} onChange={event => { if (otherFlowBusy.current) return; setCode(event.target.value); setSampleId('custom'); setName('Custom workload'); setAnalysis(null); setReceipt(null); setStatus('idle'); }} /></div>
         <div className="studio-editor-meta"><span>UTF-8 · {code.split('\n').length} lines</span><span>{new TextEncoder().encode(code).length.toLocaleString()} / {MAX_SOURCE_BYTES.toLocaleString()} bytes</span></div>
@@ -952,19 +957,19 @@ export default function Dashboard({ gatewayHealth, gatewayOnline, workerCount, r
           {quote && <div className="studio-quote">
             <h3>Your quote</h3>
             <dl>
-              <div><dt>Rate · source heuristic</dt><dd>{quote.rate_lamports / 1e9} SOL/s</dd></div>
+              <div><dt>{quote.analysis?.pricing === 'published_cpu_tariff_v1' ? 'Rate · operator CPU tariff' : 'Rate · source heuristic'}</dt><dd>{quote.rate_lamports / 1e9} SOL/s</dd></div>
               <div><dt>Maximum charge</dt><dd>{quote.max_cost_lamports / 1e9} SOL</dd></div>
               <div><dt>Execution limit</dt><dd>{quote.effective_runtime_seconds}s</dd></div>
               <div><dt>Expires</dt><dd>{new Date(quote.expires_at * 1000).toLocaleTimeString()}</dd></div>
             </dl>
             <p>Signing approves this source, {quote.workload ? 'input files, parameters and ' : ''}budget. Changes require a new quote.</p>
           </div>}
-          <div className="studio-run-control">{busy ? <button className="console-button secondary" disabled={!['queued', 'running', 'settlement_pending'].includes(status)} onClick={stop}><Icon name="stop" size={16} />{status === 'stopping' ? 'Stopping…' : ['queued', 'running', 'settlement_pending'].includes(status) ? 'Stop run' : 'Please wait…'}</button> : <button className="console-button primary" onClick={quote ? start : reviewQuote} disabled={externalBusy || channelBusy || connecting || Boolean(quote && !executionReady)} aria-busy={channelBusy || connecting}><Icon name={channelBusy || connecting ? 'refresh' : !publicKey ? 'wallet' : quote ? 'play' : 'shield'} size={16} />{externalBusy ? 'Agent workflow active' : connecting ? 'Connecting…' : channelBusy ? 'Channel transaction…' : !publicKey ? 'Connect wallet' : quote ? executionReady ? 'Accept quote & sign' : 'Execution unavailable' : 'Review price & limits'}</button>}</div>
+          <div className="studio-run-control">{busy ? <button className="console-button secondary" disabled={!['queued', 'running', 'settlement_pending'].includes(status)} onClick={stop}><Icon name="stop" size={16} />{status === 'stopping' ? 'Stopping…' : ['queued', 'running', 'settlement_pending'].includes(status) ? 'Stop run' : 'Please wait…'}</button> : <button className="console-button primary" onClick={quote ? start : reviewQuote} disabled={externalBusy || channelBusy || connecting || Boolean(quote && !executionReady)} aria-busy={channelBusy || connecting}><Icon name={channelBusy || connecting ? 'refresh' : !publicKey ? 'wallet' : quote ? 'play' : 'shield'} spinning={channelBusy || connecting} size={16} />{externalBusy ? 'Agent workflow active' : connecting ? 'Connecting…' : channelBusy ? 'Channel transaction…' : !publicKey ? 'Connect wallet' : quote ? executionReady ? 'Accept quote & sign' : 'Execution unavailable' : 'Review price & limits'}</button>}</div>
           {quote && !executionReady && <p className="studio-execution-help">{!gatewayOnline ? 'Reconnect the gateway to execute this workload.' : 'Execution needs a configured gateway and an authenticated worker.'}</p>}
           {analysis && <details className="studio-disclosure">
             <summary>Source analysis & pricing</summary>
             <dl><div><dt>Complexity</dt><dd>{analysis.score}</dd></div><div><dt>Quoted rate</dt><dd>{analysis.rateLamports} lamports/s</dd></div></dl>
-            <p>The rate comes from static source analysis, not measured worker performance or a live market price.</p>
+            <p>{quote?.analysis?.pricing === 'published_cpu_tariff_v1' ? 'This versioned CSV profile uses the operator’s published rate. Elapsed execution time determines the charge within your cap; off-chain execution makes no payment.' : 'The rate comes from static source analysis, not measured worker performance or a live market price.'}</p>
             <p>{analysis.description}</p>
           </details>}
         </section>
@@ -991,7 +996,7 @@ export default function Dashboard({ gatewayHealth, gatewayOnline, workerCount, r
               <span>SOL</span>
             </div>
             <button className="console-button secondary studio-channel-action" onClick={handleDeposit} disabled={draftLocked || channelBusy || !sendTransaction || !protocolConfig?.initialized} aria-busy={channelBusy}>
-              <Icon name={channelBusy ? 'refresh' : 'wallet'} size={16} />{channelBusy ? 'Waiting for Devnet…' : channel?.initialized ? 'Add to channel' : 'Open & fund channel'}
+              <Icon name={channelBusy ? 'refresh' : 'wallet'} spinning={channelBusy} size={16} />{channelBusy ? 'Waiting for Devnet…' : channel?.initialized ? 'Add to channel' : 'Open & fund channel'}
             </button>
             {channel?.initialized && <button className="console-text-button studio-channel-close" onClick={handleCloseChannel} disabled={draftLocked || channelBusy || Number(channel.burn_rate_lamports) > 0}>
               Close channel and refund remaining SOL<Icon name="arrow" size={15} />

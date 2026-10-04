@@ -29,11 +29,16 @@ export async function sha256Hex(value) {
 export function canonicalQuoteMessage(quote) {
   if (QUOTE_MESSAGE_KEYS.some(key => !Object.hasOwn(quote, key))) throw new Error('The gateway returned an incomplete authorization quote.');
   const bound = Object.fromEntries(QUOTE_MESSAGE_KEYS.map(key => [key, quote[key]]));
-  const version = Object.hasOwn(quote, 'workload') ? 3 : 2;
+  let version = Object.hasOwn(quote, 'workload') ? 3 : 2;
   if (version === 3) {
     if (!/^[0-9a-f]{64}$/.test(quote.workload_sha256)) throw new Error('Data job has no valid manifest digest.');
     bound.workload_sha256 = quote.workload_sha256;
   } else if (Object.hasOwn(quote, 'workload_sha256')) throw new Error('A job digest requires its manifest.');
+  if (quote.workflow) {
+    if (Object.keys(quote.workflow).sort().join(',') !== 'step_id,workflow_id' || !/^flow-[0-9a-f]{64}$/.test(quote.workflow.workflow_id)
+        || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(quote.workflow.step_id)) throw new Error('Invalid workflow binding.');
+    bound.workflow = quote.workflow; version = 4;
+  }
   return 'Aperture execution authorization v' + version + '\naudience:aperture-gateway\naction:execute\n' + canonicalJson(bound);
 }
 

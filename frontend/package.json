@@ -8,6 +8,8 @@
     "build": "node scripts/vite.mjs build",
     "lint": "eslint .",
     "test:protocol": "node --test tests/protocol.test.mjs",
+    "test:data": "node --test tests/resultPreview.test.mjs tests/workflowPlan.test.mjs tests/csvSchema.test.mjs",
+    "test:motion": "node --test tests/motion.test.mjs",
     "preview": "node scripts/vite.mjs preview"
   },
   "dependencies": {

@@ -1,0 +1,1 @@
+{"valid_rows":11988,"invalid_rows":12,"groups":{"storage":{"rows":3000,"total":14278.560000000003,"minimum":0.0,"maximum":9.7},"network":{"rows":3000,"total":14279.430000000004,"minimum":0.0,"maximum":9.7},"support":{"rows":3000,"total":14280.3,"minimum":0.0,"maximum":9.7},"compute":{"rows":2988,"total":14258.549999999997,"minimum":0.0,"maximum":9.7}}}

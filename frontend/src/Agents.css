@@ -18,7 +18,9 @@
 .agents-form .agents-owner { margin: 10px 0 20px; color: var(--console-muted); font: 12px/1.6 "Roboto Mono", Consolas, monospace; overflow-wrap: anywhere; }
 .agents-form label { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 18px 0; color: var(--console-muted); font-size: 13px; line-height: 1.5; }
 .agents-form input { width: 100%; min-width: 0; min-height: 44px; padding: 11px 12px; background: #fcf9fe; color: #4d3c5d; border: 1px solid #e9e0f1; border-radius: 10px; font: 14px Roboto, "Segoe UI", sans-serif; }
-.agents-form input:hover:not(:disabled) { border-color: var(--md-sys-color-outline); }
+@media (hover: hover) and (pointer: fine) {
+  .agents-form input:hover:not(:disabled) { border-color: var(--md-sys-color-outline); }
+}
 .agents-form input:focus-visible { outline: 3px solid #9d80ca; outline-offset: 2px; }
 .agents-form input:disabled { opacity: .6; }
 .agents-form .agents-field-help { margin: -10px 0 20px; font-size: 12px; }

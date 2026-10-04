@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { canonicalJson, isPortableFilename, sha256Hex } from './protocol';
+import { canonicalJson, isPortableFilename, sha256Hex } from './protocol.js';
 
 export const MAX_INPUT_BYTES = 64 * 1024 * 1024;
 

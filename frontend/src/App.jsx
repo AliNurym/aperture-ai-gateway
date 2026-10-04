@@ -9,6 +9,7 @@ import Storage from "./Storage";
 import Icon from "./components/Icon";
 import CommandBlock from "./components/CommandBlock";
 import { WORKLOADS } from "./utils/workloads";
+import { installNavigationIndicator, installPressFeedback, syncNavigationIndicator } from "./utils/motion";
 import logo from "./assets/aperture-mark-v3.png";
 import "./Console.css";
 import "./Motion.css";
@@ -112,47 +113,34 @@ export default function App() {
   });
   const [refreshing, setRefreshing] = useState(false);
   const refreshController = useRef(null);
+  const appRef = useRef(null);
   const navRef = useRef(null);
+  const previousPage = useRef(page);
+  const focusContent = useRef(false);
   const activePage = PAGES.find((item) => item.id === page);
 
-  const syncNavIndicator = useCallback(() => {
-    const nav = navRef.current;
-    const selected = nav?.querySelector(
-      '.console-nav-item[aria-current="page"]',
-    );
-    const indicator = nav?.querySelector(".console-nav-indicator");
-    if (!nav || !selected || !indicator) return;
-
-    // Layout measurements stay stable while the button plays its press animation.
-    indicator.style.width = `${selected.offsetWidth}px`;
-    indicator.style.height = `${selected.offsetHeight}px`;
-    indicator.style.transform = `translate3d(${selected.offsetLeft}px, ${selected.offsetTop}px, 0)`;
-  }, []);
-
+  useEffect(() => installPressFeedback(appRef.current), []);
   useEffect(() => {
-    const onHash = () => setPage(currentPage());
+    const onHash = () => {
+      const nextPage = currentPage();
+      if (nextPage !== previousPage.current)
+        focusContent.current = !navRef.current?.contains(document.activeElement);
+      setPage(nextPage);
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   useLayoutEffect(() => {
-    const nav = navRef.current;
-    if (!nav) return undefined;
-
-    syncNavIndicator();
-    window.addEventListener("resize", syncNavIndicator);
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(syncNavIndicator);
-    observer?.observe(nav);
-    nav.querySelectorAll(".console-nav-item").forEach((item) => observer?.observe(item));
-
-    return () => {
-      window.removeEventListener("resize", syncNavIndicator);
-      observer?.disconnect();
-    };
-  }, [page, syncNavIndicator]);
+    syncNavigationIndicator(navRef.current);
+    if (previousPage.current !== page && focusContent.current)
+      document.getElementById('main-content')?.focus({ preventScroll: true });
+    previousPage.current = page;
+    focusContent.current = false;
+  }, [page]);
+  useLayoutEffect(() => installNavigationIndicator(navRef.current), []);
   const navigate = (id) => {
+    if (id !== page)
+      focusContent.current = !navRef.current?.contains(document.activeElement);
     window.location.assign("#" + id);
     setPage(id);
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -226,7 +214,7 @@ export default function App() {
         : "Gateway offline";
 
   return (
-    <div className="console-app">
+    <div className="console-app" ref={appRef}>
       <a
         href="#main-content"
         className="console-skip"
@@ -314,7 +302,7 @@ export default function App() {
                 }
               />
               {stateLabel}
-              <Icon name="refresh" size={15} />
+              <Icon name="refresh" spinning={refreshing} size={15} />
             </button>
           </div>
 
@@ -536,9 +524,9 @@ export default function App() {
             />
           </section>
 
-          <section hidden={page !== "workflows"} aria-label="Agent workflows"><Workflows apiUrl={API_URL} gatewayHealth={telemetry.health} gatewayOnline={online} externalBusy={studioBusy} onBusyChange={setWorkflowBusy} onRecord={recordRun} releasedObject={releasedObject} onOpenStudio={openSample} /></section>
+          <section className="console-workflows" hidden={page !== "workflows"} aria-label="Agent workflows"><Workflows apiUrl={API_URL} gatewayHealth={telemetry.health} gatewayOnline={online} externalBusy={studioBusy} onBusyChange={setWorkflowBusy} onRecord={recordRun} releasedObject={releasedObject} onOpenStudio={openSample} /></section>
 
-          <section hidden={page !== "storage"} aria-label="Private file storage"><Storage apiUrl={API_URL} gatewayHealth={telemetry.health} gatewayOnline={online} onOpenStudio={() => navigate('studio')} onObjectReleased={setReleasedObject} /></section>
+          <section className="console-storage" hidden={page !== "storage"} aria-label="Private file storage"><Storage apiUrl={API_URL} gatewayHealth={telemetry.health} gatewayOnline={online} onOpenStudio={() => navigate('studio')} onObjectReleased={setReleasedObject} /></section>
 
 
           {page === "agents" && <Agents />}
@@ -563,7 +551,7 @@ export default function App() {
                   disabled={refreshing}
                   aria-busy={refreshing}
                 >
-                  <Icon name="refresh" size={17} />
+                  <Icon name="refresh" spinning={refreshing} size={17} />
                   Refresh
                 </button>
               </div>}

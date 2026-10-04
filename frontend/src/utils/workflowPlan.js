@@ -1,7 +1,8 @@
-import { validateObject } from './jobs';
-import { WORKLOADS } from './workloads';
+import { validateObject } from './jobs.js';
+import { WORKLOADS } from './workloads.js';
 
-import { MERGE_SOURCE } from './workflowSources';
+import { MERGE_SOURCE } from './workflowSources.js';
+import { validateCsvMapping } from './csvSchema.js';
 
 export function parseStepCost(value) {
   const match = /^(\d+)(?:\.(\d{1,9}))?$/.exec(String(value).trim());
@@ -11,14 +12,15 @@ export function parseStepCost(value) {
   return Number(amount);
 }
 
-export function createBatchPlan(inputs, cost, runtime) {
+export function createBatchPlan(inputs, cost, runtime, mapping = {}) {
+  const csv = validateCsvMapping(mapping);
   if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > 200) throw new Error('Provide 1–200 uploaded CSV batch references.');
   inputs.forEach(item => validateObject(item));
   if (new Set(inputs.map(item => item.object_id)).size !== inputs.length) throw new Error('A batch appears more than once.');
   if (!Number.isSafeInteger(cost) || cost < 1 || cost > 1_000_000_000 || !Number.isSafeInteger(runtime) || runtime < 1 || runtime > 180) throw new Error('Each step needs a positive cap up to 1 SOL and 1–180 seconds.');
   const steps = inputs.map((item, index) => ({
     id: 'batch_' + index, source: WORKLOADS.find(item => item.id === 'dataset').code,
-    inputs: [item], parameters: { input_name: item.name, output_name: 'batch-' + index + '.json', csv_output: false },
+    inputs: [item], parameters: { ...csv, input_name: item.name, output_name: 'batch-' + index + '.json', csv_output: false },
     max_cost_lamports: cost, max_runtime_seconds: runtime,
   }));
   let references = steps.map(step => ({ from_step: step.id, artifact: step.parameters.output_name }));

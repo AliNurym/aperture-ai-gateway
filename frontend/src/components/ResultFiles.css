@@ -8,9 +8,11 @@
 .result-file-actions { display: flex; align-items: center; gap: 12px; }
 .result-file-actions .console-button { min-height: 36px; padding: 8px 14px; margin: 0; font-size: 11px; }
 .result-file-actions .console-text-button { min-height: 36px; font-size: 11px; }
-.result-file-loading { flex-basis: 100%; color: var(--console-primary); font-size: 11px; padding-left: 30px; }
+.result-file-actions button[aria-disabled="true"] { cursor: not-allowed; opacity: .55; }
+.result-file-loading { display: flex; align-items: center; gap: 8px; flex-basis: 100%; color: var(--console-primary); font-size: 11px; padding-left: 30px; }
 .result-file-notice { color: var(--md-sys-color-error); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .result-preview { margin-top: 16px; border: 1px solid var(--console-line); border-radius: 18px; background: var(--console-bg); overflow: hidden; }
+.result-preview:focus-visible { outline: 2px solid var(--console-primary); outline-offset: 4px; }
 .result-preview-heading { padding: 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .result-preview-heading h4 { margin: 8px 0 0; font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
 .result-preview-heading .console-eyebrow { font-size: 9px; }

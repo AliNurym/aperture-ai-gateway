@@ -42,11 +42,7 @@ body,
   height: 40px !important;
   line-height: 40px !important;
   padding: 0 18px !important;
-  transition: background-color 150ms ease, box-shadow 150ms ease;
-}
-.wallet-adapter-button:not([disabled]):hover {
-  background: #5e4496 !important;
-  box-shadow: 0 3px 7px #6950a121;
+  transition: background-color var(--motion-state, 180ms) var(--motion-standard, ease), box-shadow var(--motion-medium, 220ms) var(--motion-standard, ease);
 }
 .wallet-adapter-button:not([disabled]):focus-visible,
 .wallet-adapter-modal-button-close:focus-visible,
@@ -83,10 +79,7 @@ body,
 .wallet-adapter-modal-button-close {
   background: #eee7f6 !important;
   color: #6950a1 !important;
-  transition: background-color 150ms ease;
-}
-.wallet-adapter-modal-button-close:hover {
-  background: #e2d7f1 !important;
+  transition: background-color var(--motion-state, 180ms) var(--motion-standard, ease);
 }
 .wallet-adapter-modal-button-close svg,
 .wallet-adapter-modal-list-more svg {
@@ -101,10 +94,6 @@ body,
   height: 52px !important;
   line-height: 28px !important;
   margin-bottom: 8px;
-}
-.wallet-adapter-modal-list li .wallet-adapter-button:hover {
-  background: #ede5f8 !important;
-  border-color: #d6c5e8 !important;
 }
 .wallet-adapter-modal-list .wallet-adapter-button span {
   opacity: 1 !important;
@@ -142,22 +131,15 @@ body,
   border-radius: 10px !important;
   min-height: 40px;
 }
-.wallet-adapter-dropdown-list-item:not([disabled]):hover {
-  background: #f1eaf8 !important;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .wallet-adapter-modal-fade-in .wallet-adapter-modal-wrapper {
-    animation: aperture-wallet-enter 220ms cubic-bezier(0.2, 0, 0, 1) backwards;
+@media (hover: hover) and (pointer: fine) {
+  .wallet-adapter-button:not([disabled]):hover {
+    background: #5e4496 !important;
+    box-shadow: 0 3px 7px #6950a121;
   }
-}
-@keyframes aperture-wallet-enter {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.98);
+  .wallet-adapter-modal-button-close:hover { background: #e2d7f1 !important; }
+  .wallet-adapter-modal-list li .wallet-adapter-button:not([disabled]):hover {
+    background: #ede5f8 !important;
+    border-color: #d6c5e8 !important;
   }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  .wallet-adapter-dropdown-list-item:not([disabled]):hover { background: #f1eaf8 !important; }
 }

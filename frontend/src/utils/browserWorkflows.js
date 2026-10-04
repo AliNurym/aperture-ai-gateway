@@ -1,8 +1,8 @@
 import { PublicKey } from '@solana/web3.js';
 import { APERTURE_PROGRAM_ID, GATEWAY_PUBKEY_PIN, TREASURY_PUBKEY_PIN, canonicalJson,
-  canonicalQuoteMessage, isPortableFilename, sha256Hex, verifyGatewayReceipt, verifyDevnetSettlement } from './protocol';
-import { MAX_INPUT_BYTES, hashBytes, jobManifest, validateObject, verifyJobManifest } from './jobs';
-import { validateSource } from './workloads';
+  canonicalQuoteMessage, isPortableFilename, sha256Hex, verifyGatewayReceipt, verifyDevnetSettlement } from './protocol.js';
+import { MAX_INPUT_BYTES, hashBytes, jobManifest, validateObject, verifyJobManifest } from './jobs.js';
+import { validateSource } from './workloads.js';
 
 export const WORKFLOW_STORAGE_KEY = 'aperture-browser-workflow:v1';
 export const MAX_WORKFLOW_RATE = 25000;

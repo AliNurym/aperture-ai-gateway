@@ -10,7 +10,6 @@
 .studio-status-icon.completed { background: #e9f2e9; color: #7a9c7f; }
 .studio-status-icon.retryable { background: #faf0df; color: #8b663b; }
 .studio-status-icon.failed, .studio-status-icon.blocked, .studio-status-icon.unverified { background: #faece8; color: #b38073; }
-@keyframes studio-spin { to { transform: rotate(360deg); } }
 .studio-steps { display: flex; justify-content: space-between; gap: 8px; padding: 0; margin: 0; list-style: none; }
 .studio-steps li { display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative; flex: 1; color: #786787; font-size: 11px; line-height: 1.5; }
 .studio-steps li::before { content: ""; position: absolute; height: 1px; width: 100%; top: 13px; right: 50%; background: #e9e0f1; }
@@ -28,7 +27,9 @@
 .studio-file-dot { height: 6px; width: 6px; border-radius: 50%; background: #bfa1df; flex-shrink: 0; }
 .studio-language { font-size: 10px; letter-spacing: .7px; padding: 4px 6px; border-radius: 5px; background: #363040; color: #c4b8d1; }
 .studio-editor-heading button, .studio-presets button { display: grid; place-items: center; min-width: 36px; min-height: 36px; border: 0; border-radius: 8px; padding: 8px; background: transparent; color: #a493b8; flex-shrink: 0; }
-.studio-editor-heading button:hover:not(:disabled), .studio-presets button:hover:not(:disabled) { color: #e8d8fc; background: #352e40; }
+@media (hover: hover) and (pointer: fine) {
+  .studio-editor-heading button:hover:not(:disabled), .studio-presets button:hover:not(:disabled) { color: #e8d8fc; background: #352e40; }
+}
 .studio-presets { display: flex; align-items: center; gap: 10px; padding: 12px 18px; background: #2a2533; color: #a997bb; }
 .studio-presets label { font-size: 12px; }
 .studio-presets select { min-width: 0; flex: 1; background: #352e40; color: #ccbade; border: 1px solid #463b53; border-radius: 8px; font-size: 13px; min-height: 38px; padding: 8px; }

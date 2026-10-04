@@ -4,13 +4,16 @@ import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 import Icon from './components/Icon';
 import CommandBlock from './components/CommandBlock';
 import WorkflowRun from './WorkflowRun';
+import AgentWorkspace from './AgentWorkspace';
 import useBrowserWorkflow from './hooks/useBrowserWorkflow';
 import { createBatchPlan, parseStepCost } from './utils/workflowPlan';
+import { DEFAULT_CSV_MAPPING, inspectCsv, validateCsvMapping } from './utils/csvSchema';
 import { MAX_INPUT_BYTES, uploadInput, validateObject } from './utils/jobs';
 import { canonicalJson, isPortableFilename } from './utils/protocol';
 import { storageContext } from './utils/storage';
 import { requestErrorMessage } from './utils/requestError';
 import { saveFile } from './utils/downloadFile';
+import { revealContent } from './utils/motion';
 import { WORKLOADS } from './utils/workloads';
 import './Workflows.css';
 
@@ -22,6 +25,7 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
   const { connection } = useConnection();
   const { setVisible } = useWalletModal();
   const owner = publicKey?.toBase58() || null;
+  const computeProfile = gatewayHealth?.compute_profiles?.find(item => item.id === 'cpu-csv-v2');
   const scope = canonicalJson({ owner, api_url: apiUrl, gateway_pubkey: gatewayHealth?.gateway_pubkey ?? null,
     program_id: gatewayHealth?.program_id ?? null,
     network: gatewayHealth?.demo_mode === true ? 'off_chain' : gatewayHealth?.demo_mode === false ? 'devnet' : null });
@@ -33,6 +37,10 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
   const [notice, setNotice] = useState('');
   const [importing, setImporting] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [delegating, setDelegating] = useState(false);
+  const [mapping, setMapping] = useState({ ...DEFAULT_CSV_MAPPING });
+  const [columns, setColumns] = useState([]);
+  const [schemas, setSchemas] = useState(new Map());
   const [uploadProgress, setUploadProgress] = useState(null);
   const importSequence = useRef(0);
   const fileInput = useRef(null);
@@ -43,18 +51,19 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
   const handledRelease = useRef(null);
   const recordedTasks = useRef(new Set());
   const controller = useBrowserWorkflow({ apiUrl, gatewayHealth, gatewayOnline, publicKey, signMessage,
-    connection, externalBusy: externalBusy || uploading });
+    connection, externalBusy: externalBusy || uploading || delegating });
   let context = null;
   let contextError = '';
   try { if (gatewayOnline) context = storageContext(apiUrl, gatewayHealth); }
   catch (error) { contextError = error.message; }
-  const editsBlocked = uploading || externalBusy || controller.busy || Boolean(controller.run);
+  const editsBlocked = uploading || delegating || externalBusy || controller.busy || Boolean(controller.run);
   useLayoutEffect(() => {
     currentScope.current = scope;
     importSequence.current += 1;
     uploadController.current?.abort();
     uploadController.current = null;
     setImporting(false); setUploading(false); setUploadProgress(null); setNotice('');
+    setMapping({ ...DEFAULT_CSV_MAPPING }); setColumns([]); setSchemas(new Map());
     setDraft(previous => {
       draftCache.current.set(previous.scope, previous.text);
       while (draftCache.current.size > 16) draftCache.current.delete(draftCache.current.keys().next().value);
@@ -62,7 +71,7 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
     });
     return () => { uploadController.current?.abort(); uploadController.current = null; };
   }, [scope]);
-  useEffect(() => { onBusyChange?.(uploading || controller.busy); }, [uploading, controller.busy, onBusyChange]);
+  useEffect(() => { onBusyChange?.(uploading || delegating || controller.busy); }, [uploading, delegating, controller.busy, onBusyChange]);
   useEffect(() => {
     for (const step of controller.run?.steps || []) {
       if (!['completed', 'failed'].includes(step.state) || !step.receipt || !step.task_id || recordedTasks.current.has(step.task_id)) continue;
@@ -103,7 +112,13 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
       if (new Set(items.map(item => item.object_id)).size === items.length) selectedInputs = items;
     }
   } catch { /* The reference editor retains invalid text for correction. */ }
-  try { plan = createBatchPlan(JSON.parse(references), parseStepCost(cost), Number(runtime)); }
+  try {
+    for (const input of selectedInputs) {
+      const schema = schemas.get(input.object_id);
+      if (schema && [mapping.category_column, mapping.amount_column].some(column => !schema.includes(column))) throw new Error('Selected columns are missing from ' + input.name + '. Choose columns present in every batch.');
+    }
+    plan = createBatchPlan(JSON.parse(references), parseStepCost(cost), Number(runtime), mapping);
+  }
   catch (error) { problem = error.message; }
   const mergeSteps = plan?.steps.filter(step => !step.id.startsWith('batch_')) || [];
   const inputBytes = selectedInputs.reduce((sum, item) => sum + item.size_bytes, 0);
@@ -163,6 +178,17 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
       if (attempt.signal.aborted || currentScope.current !== scope || importSequence.current !== sequence) throw new DOMException('The upload context changed.', 'AbortError');
     };
     try {
+      const headers = await Promise.all(files.map(file => inspectCsv(file, mapping.delimiter)));
+      ensureCurrent();
+      if (!inputs.length && headers.length) {
+        setColumns(headers[0]);
+        const next = { ...mapping };
+        if (!headers[0].includes(next.category_column)) next.category_column = headers[0].find(name => /category|department|region|merchant|group/i.test(name)) || headers[0][0];
+        if (!headers[0].includes(next.amount_column)) next.amount_column = headers[0].find(name => /amount|revenue|total|price|value/i.test(name) && name !== next.category_column) || headers[0].find(name => name !== next.category_column) || '';
+        validateCsvMapping(next);
+        if (headers.some(schema => [next.category_column, next.amount_column].some(column => !schema.includes(column)))) throw new Error('Choose batches with the same grouping and amount columns.');
+        setMapping(next);
+      } else if (headers.some(schema => [mapping.category_column, mapping.amount_column].some(column => !schema.includes(column)))) throw new Error('The new files do not contain the selected grouping and amount columns.');
       for (let index = 0; index < files.length; index++) {
         ensureCurrent();
         setUploadProgress({ current: index + 1, total: files.length, name: files[index].name });
@@ -170,6 +196,7 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
           health: gatewayHealth, signal: attempt.signal, ensureCurrent });
         ensureCurrent();
         if (inputs.some(item => item.object_id === reference.object_id)) throw new Error('This input already appears in the plan.');
+        setSchemas(previous => new Map(previous).set(reference.object_id, headers[index]));
         inputs = [...inputs, reference];
         setReferences(JSON.stringify(inputs, null, 2));
       }
@@ -202,7 +229,11 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
         <h2>Give your agent<br /><span>room to compute.</span></h2>
         <p>Turn a dataset into a chain of useful results. Separate the work into batches, combine their outputs, and continue from the last saved step.</p>
         <div className="workflow-hero-actions">
-          <button className="console-button primary" disabled={editsBlocked} onClick={() => document.getElementById('workflow-builder-heading')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' })}>Build a workflow<Icon name="arrow" size={18} /></button>
+          <button className="console-button primary" disabled={editsBlocked} onClick={() => {
+            const heading = document.getElementById('workflow-builder-heading');
+            heading?.closest('details')?.setAttribute('open', '');
+            revealContent(heading, { focus: true, block: 'start' });
+          }}>Build a workflow<Icon name="arrow" size={18} /></button>
           <button className="console-text-button" onClick={downloadSample}><Icon name="download" size={17} />Sample CSV</button>
         </div>
       </div>
@@ -210,7 +241,7 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
         <div className="workflow-graph-input"><Icon name="upload" size={18} /><span>Dataset<small>Immutable inputs</small></span></div>
         <div className="workflow-branches">{['01', '02', '03'].map(id => <div key={id}><span>{id}</span><Icon name="chip" size={20} /><strong>Batch compute</strong></div>)}</div>
         <div className="workflow-graph-merge"><Icon name="network" size={22} /><span>Combine results<small>Up to 16 inputs per join</small></span></div>
-        <div className="workflow-graph-output"><Icon name="check" size={20} /><span>report.json<small>categories.csv</small></span></div>
+        <div className="workflow-graph-output"><Icon name="check" size={20} /><span>report.json<small>categories.csv · quality.csv</small></span></div>
       </div>
     </section>
     <div className="workflow-principles">{[
@@ -220,12 +251,12 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
     ].map(([icon, title, body]) => <div key={title}><Icon name={icon} size={21} /><div><h3>{title}</h3><p>{body}</p></div></div>)}</div>
     {notice && <div className="studio-notice" role="status"><Icon name="book" size={18} /><p>{notice}</p></div>}
     <details className="workflow-configuration" open={!controller.run}><summary>{controller.run ? 'Saved plan · ' + controller.run.total_steps + ' steps · ' + formatSol(controller.run.plan.max_cost_lamports) + ' SOL maximum' : 'Workflow setup'}</summary><section className="workflow-builder console-panel">
-      <div className="console-section-heading"><div><span className="console-eyebrow">CSV BATCH → REPORT</span><h2 id="workflow-builder-heading">Prepare your workflow</h2></div><span className="console-tag neutral">CSV processing</span></div>
-      <p className="workflow-description">Use CSV files with category and amount columns. Each file becomes one batch; their summaries combine into a JSON report and category totals in CSV.</p>
+      <div className="console-section-heading"><div><span className="console-eyebrow">CSV BATCH → REPORT</span><h2 id="workflow-builder-heading" tabIndex={-1}>Prepare your workflow</h2></div><span className="console-tag neutral">CSV processing</span></div>
+      <p className="workflow-description">Use your own CSV exports. Choose a grouping column and numeric amount; get exact totals, averages, minimums and maximums, plus a report explaining excluded records.</p>
       <div className="workflow-builder-grid">
         <div>
           <div className="workflow-upload" aria-busy={uploading}>
-            <span className="workflow-upload-icon"><Icon name="upload" size={28} /></span>
+            <span className="workflow-upload-icon" data-busy={uploading}><Icon name="upload" size={28} /></span>
             <h3>{uploadProgress ? 'Uploading batch ' + uploadProgress.current + ' of ' + uploadProgress.total : 'Start with your data'}</h3>
             <p>{uploadProgress ? uploadProgress.name : 'Add CSV batches up to 64 MiB each. Your wallet signs each upload; file contents stay on the configured gateway.'}</p>
             <button className={'console-button ' + (selectedInputs.length ? 'secondary' : 'primary')} disabled={editsBlocked || connecting || Boolean(owner && (!signMessage || !context))} onClick={() => owner ? csvInput.current.click() : connectWallet()}><Icon name={owner ? 'upload' : 'wallet'} size={17} />{uploading ? 'Uploading…' : owner ? 'Choose CSV batches' : 'Connect wallet to add CSV'}</button>
@@ -243,6 +274,13 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
           </details>
         </div>
         <aside>
+          <label htmlFor="workflow-delimiter">CSV delimiter<select id="workflow-delimiter" disabled={editsBlocked || selectedInputs.length > 0} value={mapping.delimiter} onChange={event => setMapping({ ...mapping, delimiter: event.target.value })}>{[[',', 'Comma'], [';', 'Semicolon'], ['\t', 'Tab'], ['|', 'Pipe']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label htmlFor="workflow-group-column">Group by column<input id="workflow-group-column" list="workflow-columns" disabled={editsBlocked} value={mapping.category_column} onChange={event => setMapping({ ...mapping, category_column: event.target.value })} /></label>
+          <label htmlFor="workflow-amount-column">Amount column<input id="workflow-amount-column" list="workflow-columns" disabled={editsBlocked} value={mapping.amount_column} onChange={event => setMapping({ ...mapping, amount_column: event.target.value })} /></label>
+          <datalist id="workflow-columns">{columns.map(column => <option key={column} value={column} />)}</datalist>
+          <label htmlFor="workflow-decimal">Decimal separator<select id="workflow-decimal" disabled={editsBlocked} value={mapping.decimal_separator} onChange={event => setMapping({ ...mapping, decimal_separator: event.target.value })}><option value=".">Dot · 1234.56</option><option value=",">Comma · 1234,56</option></select></label>
+          <label htmlFor="workflow-thousands">Thousands separator<select id="workflow-thousands" disabled={editsBlocked} value={mapping.thousands_separator} onChange={event => setMapping({ ...mapping, thousands_separator: event.target.value })}>{[['', 'None'], [',', 'Comma'], ['.', 'Dot'], [' ', 'Space']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label htmlFor="workflow-missing">Missing group<select id="workflow-missing" disabled={editsBlocked} value={mapping.missing_category} onChange={event => setMapping({ ...mapping, missing_category: event.target.value })}><option value="uncategorized">Include as uncategorized</option><option value="reject">Exclude and report</option></select></label>
           <label htmlFor="workflow-step-cap">Maximum cost per step · SOL<input id="workflow-step-cap" disabled={editsBlocked} inputMode="decimal" value={cost} onChange={event => setCost(event.target.value)} /></label>
           <label htmlFor="workflow-step-runtime">Runtime per step · seconds<input id="workflow-step-runtime" disabled={editsBlocked} type="number" min="1" max="180" step="1" value={runtime} onChange={event => setRuntime(event.target.value)} /></label>
           <dl><div><dt>Compute batches</dt><dd>{selectedInputs.length || '—'}</dd></div><div><dt>Combine steps</dt><dd>{plan ? mergeSteps.length : '—'}</dd></div><div><dt>Input data</dt><dd>{selectedInputs.length ? formatBytes(inputBytes) : '—'}</dd></div><div><dt>Total maximum</dt><dd>{plan ? formatSol(plan.max_cost_lamports) + ' SOL' : '—'}</dd></div></dl>
@@ -254,12 +292,15 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
         <div className="workflow-plan-heading"><div><span className="console-eyebrow">YOUR CHAIN</span><h3>{plan.steps.length} steps, one report.</h3></div><span className="console-tag neutral">{controller.run ? 'Plan retained' : 'Ready to prepare'}</span></div>
         <details className="workflow-plan-details"><summary>Inspect planned steps, source and parameters</summary><ol className="workflow-step-list">{plan.steps.map((step, index) => <li key={step.id}>
           <span className="workflow-step-number">{String(index + 1).padStart(2, '0')}</span>
-          <div className="workflow-step-content"><strong>{step.id === 'report' ? 'Final report' : step.id.startsWith('batch_') ? step.inputs[0].name : 'Combine batch results'}</strong><p>{step.inputs.map(item => item.from_step || item.name).join(' + ')} <span aria-hidden="true">→</span> {step.parameters.output_name}{step.id === 'report' ? ' + categories.csv' : ''}</p><details><summary>Inspect source and parameters</summary><pre>{step.source}</pre><pre>{JSON.stringify(step.parameters, null, 2)}</pre></details></div>
+          <div className="workflow-step-content"><strong>{step.id === 'report' ? 'Final report' : step.id.startsWith('batch_') ? step.inputs[0].name : 'Combine batch results'}</strong><p>{step.inputs.map(item => item.from_step || item.name).join(' + ')} <span aria-hidden="true">→</span> {step.parameters.output_name}{step.id === 'report' ? ' + categories.csv + quality.csv' : ''}</p><details><summary>Inspect source and parameters</summary><pre>{step.source}</pre><pre>{JSON.stringify(step.parameters, null, 2)}</pre></details></div>
           <span className="workflow-step-limit">{formatSol(step.max_cost_lamports)} SOL<small>{step.max_runtime_seconds}s maximum</small></span>
         </li>)}</ol></details>
         <p className="workflow-description">These are planned steps. No computation or payment starts when you import or export.</p>
       </div>}
     </section></details>
+    <AgentWorkspace context={context} owner={owner} signMessage={signMessage} plan={plan}
+      disabled={uploading || externalBusy || controller.busy || Boolean(controller.run)} onBusyChange={setDelegating} />
+    {computeProfile && <section className="console-panel workflow-compute-profile"><span className="console-eyebrow">CSV COMPUTE</span><h2>Size the job before you approve it.</h2><p>Start with about 5,000 rows per batch and at most 10,000 groups across the report. More columns and longer values increase work; the quote's affordable runtime can be shorter than your requested limit.</p><p>{formatSol(computeProfile.pricing.rate_lamports_sec)} SOL per execution second · operator tariff · {context?.network === 'off_chain' ? 'no payment in this workspace' : 'settled within your approved cap'}. Each step supports 64 MiB of inputs and at most 180 seconds. Configured Docker workers use 1 CPU and 512 MiB; the local preview runs trusted Python on this host.</p><details><summary>Check your worker's batch size</summary><p>The benchmark runs the same CSV sources and records time and peak process memory. Its result applies to that host and dataset; it does not guarantee Docker or remote-provider performance.</p><CommandBlock label="Measure a CSV profile" command="python scripts/benchmark_csv_profile.py --rows 50000 --groups 4 --output .aperture-runs/cpu-profile.json" /></details></section>}
     <WorkflowRun controller={controller} plan={plan} connected={Boolean(owner && (!controller.run || owner === controller.run.owner))} onConnect={connectWallet}
       gatewayOnline={gatewayOnline} gatewayReady={gatewayOnline && gatewayHealth?.status === 'ready'} externalBusy={externalBusy || uploading} />
     <section className="workflow-how console-panel">

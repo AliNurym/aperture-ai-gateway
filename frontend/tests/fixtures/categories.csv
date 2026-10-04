@@ -1,0 +1,5 @@
+category,rows,total,average,minimum,maximum
+compute,2988,14258.55,4.7719,0.0,9.7
+network,3000,14279.43,4.7598,0.0,9.7
+storage,3000,14278.56,4.7595,0.0,9.7
+support,3000,14280.3,4.7601,0.0,9.7

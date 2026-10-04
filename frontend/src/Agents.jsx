@@ -224,11 +224,11 @@ export default function Agents() {
           <label>Total spending allowance · SOL<input name="totalBudget" type="number" min="0.000000001" max="100" step="0.001" value={form.totalBudget} onChange={updateField} disabled={busy} required /></label>
           <label>Expiration · your local time<input name="expires" type="datetime-local" value={form.expires} onChange={updateField} disabled={busy} required /></label>
           <p className="agents-signing-note">Allows Python CPU execution. In Devnet mode, your wallet also confirms an on-chain policy transaction.</p>
-          <button className="console-button primary" disabled={busy} aria-busy={busy}><Icon name={busy ? 'refresh' : 'shield'} size={17} />{busy ? 'Authorizing…' : editing ? 'Sign policy update' : 'Sign & issue passport'}</button>
+          <button className="console-button primary" disabled={busy} aria-busy={busy}><Icon name={busy ? 'refresh' : 'shield'} spinning={busy} size={17} />{busy ? 'Authorizing…' : editing ? 'Sign policy update' : 'Sign & issue passport'}</button>
           {editing && <button className="console-text-button" type="button" disabled={busy} onClick={() => { setEditing(false); setForm(defaults()); }}>Cancel update</button>}
         </form>
       </section>
-      <section className="console-panel agents-list"><div className="console-section-heading"><h2>Your agents{agents.length > 0 && <span className="agents-count">{agents.length}</span>}</h2><button className="console-text-button" onClick={refresh} disabled={loading || busy || !signMessage} aria-busy={loading}><Icon name="refresh" size={17} />{loaded ? 'Sign & refresh' : 'Sign to view'}</button></div>
+      <section className="console-panel agents-list"><div className="console-section-heading"><h2>Your agents{agents.length > 0 && <span className="agents-count">{agents.length}</span>}</h2><button className="console-text-button" onClick={refresh} disabled={loading || busy || !signMessage} aria-busy={loading}><Icon name="refresh" spinning={loading} size={17} />{loaded ? 'Sign & refresh' : 'Sign to view'}</button></div>
         {!agents.length ? <div className="console-empty agents-empty"><Icon name="shield" size={28} /><h3>{loading ? 'Loading passports…' : loaded ? 'No passports yet' : 'Passports are private'}</h3><p>{loading ? 'Waiting for the owner wallet…' : loaded ? 'Your agents will appear here once you issue a passport.' : 'Sign with the connected owner wallet to view passports and allowance usage.'}</p></div> : agents.map(agent => {
           const expired = agent.expires_at * 1000 <= now;
           return <article key={agent.agent_pubkey} className="agent-passport">

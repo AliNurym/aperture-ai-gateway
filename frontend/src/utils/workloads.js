@@ -1,40 +1,11 @@
+import csvSources from '../../../backend/workloads/csv_sources.json' with { type: 'json' };
+
 export const WORKLOADS = [
   {
     id: 'dataset', name: 'Dataset → category report', category: 'Agent data jobs', icon: 'network', dataJob: true,
     description: 'Process your CSV dataset and return a reusable JSON summary and CSV report.',
     parameters: { input_name: 'dataset.csv' },
-    code: `from aperture import read_csv, parameters, write_json, write_csv
-import math
-
-cfg = parameters()
-groups = {}
-valid = 0
-invalid = 0
-for row in read_csv(cfg["input_name"]):
-    category = (row.get("category") or "").strip() or "uncategorized"
-    try:
-        amount = float(row["amount"])
-    except (ValueError, KeyError, TypeError):
-        invalid += 1
-        continue
-    if not math.isfinite(amount) or len(category) > 200:
-        invalid += 1
-        continue
-    if category not in groups:
-        if len(groups) >= 10000:
-            raise ValueError("Dataset exceeds the bounded category count")
-        groups[category] = {"rows": 0, "total": 0}
-    groups[category]["rows"] += 1
-    groups[category]["total"] += amount
-    if not math.isfinite(groups[category]["total"]):
-        raise ValueError("Category total exceeds the supported numeric range")
-    valid += 1
-rows = [{"category": key, "rows": data["rows"], "total": round(data["total"], 4)} for key, data in sorted(groups.items())]
-write_json(cfg.get("output_name", "report.json"), {"valid_rows": valid, "invalid_rows": invalid, "groups": groups})
-if cfg.get("csv_output", True):
-    write_csv("categories.csv", rows, ["category", "rows", "total"])
-print("Processed", valid + invalid, "records across", len(groups), "categories")
-`,
+    code: csvSources.batch,
   },
   {
     id: "risk",

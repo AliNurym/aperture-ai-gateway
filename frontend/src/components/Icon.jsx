@@ -22,8 +22,8 @@ const paths = {
   external: "M14 3h7v7m0-7L10 14M10 3H3v18h18v-7",
 };
 
-export default function Icon({ name, size = 20, ...props }) {
-  return (
+export default function Icon({ name, size = 20, spinning = false, ...props }) {
+  const icon = (
     <svg
       width={size}
       height={size}
@@ -34,9 +34,11 @@ export default function Icon({ name, size = 20, ...props }) {
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
+      data-icon={name}
       {...props}
     >
       <path d={paths[name] || paths.spark} />
     </svg>
   );
+  return spinning ? <span className="motion-icon-spin" aria-hidden="true">{icon}</span> : icon;
 }

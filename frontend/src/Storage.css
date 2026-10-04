@@ -53,7 +53,8 @@
 .storage-file-details dd { margin: 4px 0 0; overflow-wrap: anywhere; }
 .storage-release-review { border-color: #dac8ea; background: #fcf9ff; }
 .storage-release-review h2 { overflow-wrap: anywhere; margin-top: 8px; }
-.storage-release-review h2:focus { outline: none; }
+.storage-release-review h2 { scroll-margin-top: 24px; }
+.storage-release-review h2:focus-visible { outline: 3px solid var(--console-primary); outline-offset: 6px; border-radius: 4px; }
 .storage-release-review > p { color: var(--console-muted); font-size: 13px; line-height: 1.7; max-width: 760px; }
 .storage-release-review dl { margin: 22px 0; padding: 16px 20px; background: var(--console-tonal); border-radius: 14px; font-size: 11px; }
 .storage-release-review dl > div { display: grid; grid-template-columns: 74px 1fr; gap: 14px; margin: 8px 0; }
