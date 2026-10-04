@@ -46,6 +46,10 @@ class StateStore:
           CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, wallet TEXT NOT NULL, state TEXT NOT NULL, data TEXT NOT NULL, agent_pubkey TEXT);
           CREATE TABLE IF NOT EXISTS agent_spend (agent_pubkey TEXT PRIMARY KEY, charged_lamports INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS store_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS assigned_workflows (
+            id TEXT PRIMARY KEY, owner TEXT NOT NULL, agent TEXT NOT NULL, data TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS assigned_workflow_identity ON assigned_workflows(owner, agent);
           CREATE INDEX IF NOT EXISTS active_jobs_by_state ON jobs(state)
             WHERE state IN {ACTIVE_STATES_SQL};
           CREATE UNIQUE INDEX IF NOT EXISTS active_wallet ON jobs(wallet)
@@ -91,6 +95,36 @@ class StateStore:
         with self.lock:
             row = self.connection.execute("SELECT value FROM store_metadata WHERE key='gateway_statistics_v1'").fetchone()
             return json.loads(row[0])
+
+    def assigned_workflow(self, identifier):
+        with self.lock:
+            row = self.connection.execute("SELECT data FROM assigned_workflows WHERE id=?", (identifier,)).fetchone()
+            return json.loads(row[0]) if row else None
+
+    def assigned_workflows(self, owner, agent):
+        with self.lock:
+            return [json.loads(row[0]) for row in self.connection.execute(
+                "SELECT data FROM assigned_workflows WHERE owner=? AND agent=? ORDER BY rowid DESC LIMIT 64", (owner, agent))]
+
+    def save_assigned_workflow(self, value):
+        with self.transaction() as db:
+            existing = db.execute("SELECT 1 FROM assigned_workflows WHERE id=?", (value["workflow_id"],)).fetchone()
+            if not existing:
+                total = db.execute("SELECT COUNT(*) FROM assigned_workflows").fetchone()[0]
+                owned = db.execute("SELECT COUNT(*) FROM assigned_workflows WHERE owner=? AND agent=?",
+                    (value["owner"], value["agent_pubkey"])).fetchone()[0]
+                if owned >= 64:
+                    archived = next((identifier for identifier, raw in db.execute("SELECT id,data FROM assigned_workflows WHERE owner=? AND agent=? ORDER BY rowid", (value["owner"], value["agent_pubkey"])) if json.loads(raw)["status"] == "archived"), None)
+                    if archived:
+                        db.execute("DELETE FROM assigned_workflows WHERE id=?", (archived,)); owned -= 1; total -= 1
+                if total >= 512:
+                    archived = next((identifier for identifier, raw in db.execute("SELECT id,data FROM assigned_workflows ORDER BY rowid") if json.loads(raw)["status"] == "archived"), None)
+                    if archived:
+                        db.execute("DELETE FROM assigned_workflows WHERE id=?", (archived,)); total -= 1
+                if total >= 512 or owned >= 64:
+                    raise ValueError("Assigned workflow retention is full; archive old completed workflows first.")
+            db.execute("INSERT INTO assigned_workflows VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+                (value["workflow_id"], value["owner"], value["agent_pubkey"], json.dumps(value, sort_keys=True, allow_nan=False)))
 
     def _record_completion_statistics(self, db, job):
         row = db.execute("SELECT value FROM store_metadata WHERE key='gateway_statistics_v1'").fetchone()
@@ -185,7 +219,7 @@ class StateStore:
             expired = type(value.get('expires_at')) is int and value['expires_at'] <= now
             if expired and (table == 'challenges' or not consumed):
                 remove.append((key,))
-            elif table == 'challenges' and consumed and value.get('action') in {'usage', 'agent-task-access'}:
+            elif table == 'challenges' and consumed and value.get('action') in {'usage', 'agent-task-access', 'owner-control'}:
                 # A live read nonce is a replay guard, not an evictable approval.
                 continue
             elif table == 'challenges' or not consumed:
@@ -285,6 +319,17 @@ class StateStore:
             row = db.execute("SELECT consumed FROM quotes WHERE id=?", (quote_id,)).fetchone()
             if not row or row[0]:
                 raise ValueError("quote_consumed")
+            if "workflow" in job:
+                binding = job["workflow"]
+                retained = db.execute("SELECT data FROM assigned_workflows WHERE id=?", (binding["workflow_id"],)).fetchone()
+                flow = json.loads(retained[0]) if retained else None
+                if not flow or flow.get("stop_requested") or flow["status"] in {"completed", "failed", "stopped", "archived"}:
+                    raise ValueError("workflow_stopped")
+                if binding["step_id"] in flow["tasks"]:
+                    raise ValueError("workflow_step_admitted")
+                flow["tasks"][binding["step_id"]] = job["task_id"]
+                flow["updated_at"] = time.time()
+                db.execute("UPDATE assigned_workflows SET data=? WHERE id=?", (json.dumps(flow, sort_keys=True), binding["workflow_id"]))
             db.execute("INSERT INTO jobs(id,wallet,state,data,agent_pubkey,quote_id) VALUES (?,?,?,?,?,?)", (job["task_id"], job["wallet"], job["state"], json.dumps(job, sort_keys=True), job.get("agent_pubkey"), job.get("quote_id")))
             db.execute("UPDATE quotes SET consumed=1 WHERE id=?", (quote_id,))
 
@@ -298,7 +343,7 @@ class StateStore:
 
     def consume_read_nonce(self, nonce, expires_at, scope="usage"):
         """Persist a one-time marker for a signed read request."""
-        if scope not in {"usage", "agent-task-access"}:
+        if scope not in {"usage", "agent-task-access", "owner-control"}:
             raise ValueError("Invalid read nonce scope")
         challenge_id = scope + ":" + nonce
         challenge = {"action": scope, "expires_at": int(expires_at)}
@@ -317,6 +362,17 @@ class StateStore:
             db.execute("INSERT INTO jobs(id,wallet,state,data,agent_pubkey,quote_id) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,data=excluded.data,agent_pubkey=excluded.agent_pubkey,quote_id=excluded.quote_id", (job["task_id"], job["wallet"], job["state"], json.dumps(job, sort_keys=True), job.get("agent_pubkey"), job.get("quote_id")))
             if job.get("state") == "completed" and (not previous or previous[0] != "completed"):
                 self._record_completion_statistics(db, job)
+                if job.get("workflow"):
+                    flow_id = job["workflow"]["workflow_id"]
+                    record = db.execute("SELECT data FROM assigned_workflows WHERE id=?", (flow_id,)).fetchone()
+                    if record:
+                        flow = json.loads(record[0])
+                        receipt = job.get("receipt") or {}
+                        flow["completed_steps"] += int(receipt.get("execution_status") == "completed")
+                        flow["charged_lamports"] += receipt.get("charged_lamports") or 0
+                        flow["estimated_charge_lamports"] += min(job["max_cost_lamports"], math.ceil(receipt.get("execution_time", 0) * job["rate_lamports"]))
+                        flow["updated_at"] = time.time()
+                        db.execute("UPDATE assigned_workflows SET data=? WHERE id=?", (json.dumps(flow, sort_keys=True), flow_id))
                 charged = (job.get("receipt") or {}).get("charged_lamports")
                 if type(charged) is int and charged >= 0:
                     db.execute(
@@ -336,6 +392,15 @@ class StateStore:
             "SELECT id,data FROM jobs WHERE state='completed' ORDER BY rowid DESC LIMIT -1 OFFSET ?",
             (keep,),
         ).fetchall()
+        retained = []
+        for task_id, raw in stale:
+            binding = json.loads(raw).get("workflow")
+            if binding:
+                row = db.execute("SELECT data FROM assigned_workflows WHERE id=?", (binding["workflow_id"],)).fetchone()
+                if row and json.loads(row[0])["status"] not in {"completed", "failed", "stopped", "archived"}:
+                    continue
+            retained.append((task_id, raw))
+        stale = retained
         if not stale:
             return
         task_ids = [row[0] for row in stale]

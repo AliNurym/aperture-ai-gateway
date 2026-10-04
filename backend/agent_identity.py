@@ -41,6 +41,9 @@ def quote_message(quote):
     if "workload" in quote:
         version = 3
         bound["workload_sha256"] = quote["workload_sha256"]
+    if "workflow" in quote:
+        version = 4
+        bound["workflow"] = quote["workflow"]
     return f"Aperture execution authorization v{version}\naudience:aperture-gateway\naction:execute\n" + canonical_json(bound)
 
 def receipt_message(receipt):

@@ -26,6 +26,7 @@ class DockerSandbox:
 
     def __init__(self, image: str, state_root: Path, host_state_root: str | None = None):
         self.image = image
+        self.isolation = dict(type(self).isolation)
         self.state_root = state_root.resolve()
         self.host_state_root = host_state_root
 
@@ -38,14 +39,19 @@ class DockerSandbox:
             if result.returncode != 0 or result.stdout.strip() != "linux":
                 raise RuntimeError("Docker must be running with Linux containers.")
             result = subprocess.run(
-                ["docker", "image", "inspect", self.image],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
+                ["docker", "image", "inspect", "--format", "{{.Id}}", self.image],
+                capture_output=True, text=True, timeout=15,
             )
             if result.returncode != 0:
                 raise RuntimeError(
                     "Sandbox image is missing. Build it with: "
                     "docker build -f backend/Dockerfile.sandbox -t aperture-task:local backend"
                 )
+            image_id = result.stdout.strip()
+            if not image_id.startswith("sha256:") or len(image_id) != 71 or any(char not in "0123456789abcdef" for char in image_id[7:]):
+                raise RuntimeError("Docker did not report a valid immutable task image ID.")
+            self.image = image_id
+            self.isolation["image_id"] = image_id
         except FileNotFoundError as exc:
             raise RuntimeError("Docker CLI is missing. Install Docker with Linux container support.") from exc
 
@@ -106,6 +112,7 @@ class TrustedLocalExecutor:
         self.approved_source_directory = approved_source_directory
         self.approved_hashes = None
         self.isolation = dict(type(self).isolation)
+        self.isolation["python_version"] = sys.version.split()[0]
 
     def preflight(self):
         if self.approved_source_directory is None:
@@ -134,6 +141,8 @@ class TrustedLocalExecutor:
                 raise PermissionError("Source was not approved by this trusted local worker's operator.")
         safe_env = {name: os.environ[name] for name in ("PATH", "SYSTEMROOT", "WINDIR", "COMSPEC") if name in os.environ}
         safe_env["PYTHONIOENCODING"] = "utf-8"
+        safe_env["OPENBLAS_NUM_THREADS"] = "1"
+        safe_env["OMP_NUM_THREADS"] = "1"
         return subprocess.Popen(
             [sys.executable, "-I", "-u", str(task_directory / ("runner.py" if (task_directory / "runner.py").exists() else "payload.py"))],
             cwd=task_directory, env=safe_env, stdout=subprocess.PIPE,

@@ -4,6 +4,7 @@ import hmac
 import os
 import re
 import secrets
+import shutil
 import sqlite3
 import stat
 import tempfile
@@ -54,6 +55,10 @@ class ArtifactStore:
                 id TEXT PRIMARY KEY, owner TEXT NOT NULL, agent TEXT NOT NULL,
                 name TEXT NOT NULL, digest TEXT NOT NULL, size INTEGER NOT NULL, released REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS assignments(
+                source_id TEXT NOT NULL, owner TEXT NOT NULL, agent TEXT NOT NULL,
+                object_id TEXT NOT NULL, PRIMARY KEY(source_id, owner, agent)
+            );
         """)
         self.db.commit()
         # The single gateway process owns this store. Interrupted streams may retry.
@@ -78,6 +83,63 @@ class ArtifactStore:
         if row is None:
             raise ValueError("Object does not exist.")
         return row
+
+    def assign(self, reference, *, owner, agent):
+        """Give an agent its own immutable input, without sending bytes through chat.
+
+        A separate object has independent quota and lifetime. On one filesystem
+        a hard link avoids another physical copy; release never modifies bytes.
+        The durable mapping makes a lost response safe to retry.
+        """
+        reference = validate_descriptor(reference)
+        if agent == owner:
+            self.resolve(reference, owner=owner, agent=owner)
+            return reference
+        with self.lock:
+            source = self.resolve(reference, owner=owner, agent=owner)
+            previous = self.db.execute(
+                "SELECT object_id FROM assignments WHERE source_id=? AND owner=? AND agent=?",
+                (reference["object_id"], owner, agent),
+            ).fetchone()
+            row = None
+            if previous:
+                row = self.db.execute("SELECT * FROM objects WHERE id=?", previous).fetchone()
+                if row and row[7] == "ready":
+                    result = self.descriptor(row)
+                    self.resolve(result, owner=owner, agent=agent)
+                    return result
+                if row and row[7] != "authorized":
+                    raise ValueError("The assigned object is currently changing; retry later.")
+            if row is None:
+                result = self.authorize(owner=owner, agent=agent, name=reference["name"],
+                    digest=reference["sha256"], size=reference["size_bytes"])
+                object_id = result["object_id"]
+                self.db.execute("INSERT OR REPLACE INTO assignments VALUES (?,?,?,?)",
+                    (reference["object_id"], owner, agent, object_id))
+                self.db.commit()
+            else:
+                object_id = row[0]
+            target = self.root / object_id
+            if not target.exists():
+                try:
+                    os.link(source, target)
+                except OSError:
+                    incoming = self.root / (object_id + ".incoming")
+                    with source.open("rb") as reader, incoming.open("wb") as writer:
+                        shutil.copyfileobj(reader, writer, 64 * 1024)
+                        writer.flush()
+                        os.fsync(writer.fileno())
+                    incoming.replace(target)
+            digest = hashlib.sha256()
+            with target.open("rb") as reader:
+                for chunk in iter(lambda: reader.read(64 * 1024), b""):
+                    digest.update(chunk)
+            if target.stat().st_size != reference["size_bytes"] or digest.hexdigest() != reference["sha256"]:
+                target.unlink(missing_ok=True)
+                raise ValueError("The assigned input failed content verification.")
+            self.db.execute("UPDATE objects SET state='ready' WHERE id=?", (object_id,))
+            self.db.commit()
+            return self.descriptor(self.get(object_id))
 
     def authorize(self, *, owner, agent, name, digest, size, task_id=None):
         maximum = MAX_ARTIFACT_BYTES if task_id else MAX_INPUT_BYTES

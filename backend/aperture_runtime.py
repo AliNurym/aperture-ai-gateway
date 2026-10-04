@@ -35,12 +35,20 @@ def read_json(name):
     return json.loads(read_text(name))
 
 
-def read_csv(name):
+def read_csv(name, *, delimiter=",", required_columns=()):
     """Yield dictionaries without loading the whole CSV into Python memory."""
     if name not in _NAMES:
         raise ValueError("Input is not part of this job's authorized manifest.")
+    if delimiter not in {",", ";", "\t", "|"}:
+        raise ValueError("CSV delimiter must be comma, semicolon, tab or pipe.")
     with (_ROOT / "inputs" / name).open(encoding="utf-8-sig", newline="") as source:
-        yield from csv.DictReader(source)
+        reader = csv.DictReader(source, delimiter=delimiter, strict=True)
+        headers = reader.fieldnames
+        if not headers or len(headers) > 200 or any(not field or len(field) > 200 for field in headers) or len(set(headers)) != len(headers):
+            raise ValueError("CSV requires 1–200 unique non-empty column names, up to 200 characters each.")
+        if any(column not in headers for column in required_columns):
+            raise ValueError("Selected columns are missing from this CSV: " + ", ".join(column for column in required_columns if column not in headers))
+        yield from reader
 
 
 def write_bytes(name, data):

@@ -1,11 +1,16 @@
 """Stress and limit boundary tests for APERTURE gateway, AST parser, and state store."""
 import concurrent.futures
+import sys
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
+
+BACKEND_DIR = Path(__file__).resolve().parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient

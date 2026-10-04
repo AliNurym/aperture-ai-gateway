@@ -68,6 +68,12 @@ class SourceRequest(Utf8Request):
         return code
 
 
+class WorkflowBinding(Utf8Request):
+    model_config = {"extra": "forbid"}
+    workflow_id: str = Field(pattern=r"^flow-[0-9a-f]{64}$")
+    step_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+
+
 class QuoteRequest(SourceRequest):
     wallet: str = Field(min_length=32, max_length=44)
     agent_pubkey: Optional[str] = Field(default=None, min_length=32, max_length=44)
@@ -76,6 +82,7 @@ class QuoteRequest(SourceRequest):
     job_version: Optional[Literal[1]] = None
     inputs: list[dict] = Field(default_factory=list, max_length=MAX_JOB_INPUTS)
     parameters: dict = Field(default_factory=dict)
+    workflow: Optional[WorkflowBinding] = None
 
 
 class ExecuteRequest(SourceRequest):
@@ -198,6 +205,8 @@ def effective_runtime_limit(task):
 
 class Gateway:
     def __init__(self, solana, demo_mode, worker_token, store=None, worker_credentials=None):
+        from compute_profiles import csv_rate
+        self.csv_tariff = csv_rate()
         self.solana = solana
         self.demo_mode = demo_mode
         self.worker_token = (worker_token or "").strip()
@@ -350,11 +359,15 @@ class Gateway:
         if audit.get("security") == "DANGEROUS":
             raise HTTPException(403, audit.get("reason", "Source policy rejected workload."))
         complexity = audit.get('cpu', 20) + audit.get('ram', 15)
-        rate = max(1, int(round(calculate_ast_quote_rate(complexity) * 1_000_000_000)))
+        from compute_profiles import source_profile
+        profile = source_profile(req.code)
+        rate = self.csv_tariff if profile else max(1, int(round(calculate_ast_quote_rate(complexity) * 1_000_000_000)))
         analysis = {'security': 'SAFE', 'status': 'success', 'complexity_score': complexity,
-                    'predicted_sec': audit.get('predicted_sec', 3), 'scores': audit,
+                    'predicted_sec': None if profile else audit.get('predicted_sec', 3), 'scores': audit,
                     'calculated_rate_sol_sec': rate / 1e9, 'calculated_rate_lamports_sec': rate,
-                    'sol_market_price': None, 'reason': audit.get('reason'), 'pricing': 'deterministic_ast_lamports_v1'}
+                    'sol_market_price': None, 'reason': audit.get('reason'),
+                    'pricing': 'published_cpu_tariff_v1' if profile else 'deterministic_ast_lamports_v1',
+                    'compute_profile': profile}
         if req.max_cost_lamports < rate:
             raise HTTPException(422, "Budget must cover at least one second at the quoted rate.")
         config = None
@@ -378,6 +391,10 @@ class Gateway:
         if manifest is not None:
             manifest_text = canonical_json(manifest)
             quote.update(workload=manifest, workload_sha256=sha256_text(manifest_text), workload_canonical=manifest_text)
+        if req.workflow is not None:
+            quote["workflow"] = req.workflow.model_dump()
+            from workflow_inbox import validate_bound_step
+            validate_bound_step(self, quote, req.code)
         quote["message"] = quote_message(quote)
         async with self.lock:
             # RPC and passport checks can yield. Recheck retained input bytes while
@@ -407,6 +424,9 @@ class Gateway:
                 self.job_manifest(req)
             if quote['expires_at'] < int(time.time()):
                 raise HTTPException(401, "Quote expired. Request a fresh quote.")
+            if "workflow" in quote:
+                from workflow_inbox import validate_bound_step
+                validate_bound_step(self, quote, req.code)
             passport = await self.passport(req.wallet, agent, quote["max_cost_lamports"], quote["max_runtime_seconds"])
             if (passport["version"] if passport else 0) != quote["passport_version"]:
                 raise HTTPException(403, "Agent policy changed after this quote was issued.")
@@ -432,6 +452,8 @@ class Gateway:
                     raise HTTPException(429, "Gateway active task capacity is full; retry shortly.")
                 if reason == "queue_full":
                     raise HTTPException(429, "Compute queue is full; retry shortly.")
+                if reason in {"workflow_stopped", "workflow_step_admitted"}:
+                    raise HTTPException(409, "Assigned workflow was stopped or this step already has a retained admission.") from None
                 raise HTTPException(503, "Task admission capacity configuration is invalid.") from error
             return self.execution_response(job)
 
@@ -579,7 +601,7 @@ class Gateway:
 
     def authorize_agent_task_read(self, *, owner, agent_pubkey, issued_at,
                                   nonce, signature, action, task_id=None,
-                                  limit=None, cursor=None):
+                                  limit=None, cursor=None, owner_control=False):
         """Authenticate a short-lived, one-use request signed by the task agent."""
         self._valid_keys(owner, agent_pubkey)
         now = int(time.time())
@@ -592,7 +614,8 @@ class Gateway:
                 or any(type(value) is not int or value < 0 or value > 255 for value in signature)):
             raise HTTPException(422, "Agent signature must contain 64 bytes.")
 
-        message = "Aperture agent task access v1\naudience:aperture-gateway\n" + canonical_json({
+        domain = "Aperture owner control v1" if owner_control else "Aperture agent task access v1"
+        message = domain + "\naudience:aperture-gateway\n" + canonical_json({
             "action": action, "owner": owner, "agent_pubkey": agent_pubkey,
             "issued_at": issued_at, "nonce": nonce, "task_id": task_id,
             "limit": limit, "program_id": str(self.solana.program_id),
@@ -600,11 +623,11 @@ class Gateway:
             "network": "off_chain" if self.demo_mode else "devnet",
             "cursor": cursor,
         })
-        if not verify_ed25519(agent_pubkey, signature, message):
+        if not verify_ed25519(owner if owner_control else agent_pubkey, signature, message):
             raise HTTPException(401, "Agent authorization for task access is invalid.")
         try:
             self.store.consume_read_nonce(
-                nonce, issued_at + 61, scope="agent-task-access"
+                nonce, issued_at + 61, scope="owner-control" if owner_control else "agent-task-access"
             )
         except ValueError as error:
             if str(error) == "challenge_capacity":
@@ -632,6 +655,10 @@ class Gateway:
 
     def _mount(self):
         router = self.router
+        from owner_workspace import mount_owner_workspace
+        mount_owner_workspace(self)
+        from workflow_inbox import mount_workflow_inbox
+        mount_workflow_inbox(self)
 
         @router.post("/quotes")
         @router.post("/execute/challenge")
@@ -785,6 +812,8 @@ class Gateway:
                 quote.update(workload=job["workload"], workload_sha256=job["workload_sha256"])
                 if "workload_canonical" in job:
                     quote["workload_canonical"] = job["workload_canonical"]
+            if "workflow" in job:
+                quote["workflow"] = job["workflow"]
             return {
                 **self.recovery_task_summary(job),
                 "task_access_token": job["access_token"],
@@ -1087,6 +1116,11 @@ class Gateway:
                         for item in quote.get("workload", {}).get("inputs", []))
                         for quote in self.store.list_unused_quotes()):
                         raise HTTPException(409, "Object is bound to an unexpired unused quote.")
+                    from workflow_inbox import workflow_summary
+                    if any(workflow_summary(self, flow)["status"] not in {"completed", "failed", "stopped", "archived"}
+                        and any(item.get("object_id") == req.object_id for step in flow["plan"]["steps"] for item in step["inputs"])
+                        for flow in self.store.assigned_workflows(req.owner, req.agent_pubkey)):
+                        raise HTTPException(409, "Object is still required by an approved agent workflow; stop it first.")
                     return self.objects.release(reference, owner=req.owner, agent=req.agent_pubkey)
                 except PermissionError:
                     raise HTTPException(403, "Object belongs to another execution identity.") from None

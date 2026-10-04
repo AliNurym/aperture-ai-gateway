@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import Field
 from ai_engine import analyze_code_ast, get_sol_price_from_pyth
+from compute_profiles import csv_profile
 from solana_client import KEYPAIR_PATH, SolanaClient
 from gateway import Gateway, SourceRequest, Utf8Request
 from security_config import load_worker_credentials
@@ -252,7 +253,8 @@ async def health():
             "program_id": str(solana_client.program_id), "data_job_version": 1,
             "active_worker_count": len(active_workers), "configuration_issues": issues,
             "protocol_version": 2, "durable_state": gateway.store.durable_state,
-            "kya": "owner-issued delegation; not legal KYC", "execution_scope": "bounded Python CPU"}
+            "kya": "owner-issued delegation; not legal KYC", "execution_scope": "bounded Python CPU",
+            "compute_profiles": [csv_profile(gateway.csv_tariff)]}
 
 @app.get("/health/worker-auth")
 def worker_auth_health():
