@@ -71,7 +71,10 @@
   font-weight: 700;
 }
 
-.studio-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); gap: 24px; align-items: start; }
+.studio-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); grid-template-rows: min-content 1fr; gap: 24px; align-items: start; }
+.studio-grid > .studio-editor { grid-column: 1; grid-row: 1; }
+.studio-grid > .studio-inspector { grid-column: 2; grid-row: 1 / span 2; }
+.studio-grid > .studio-terminal { grid-column: 1; grid-row: 2; margin-top: 0; }
 .studio-editor {
   display: flex;
   flex-direction: column;
@@ -80,7 +83,7 @@
   border: 1px solid rgba(190, 160, 230, 0.16);
   border-radius: 20px;
   overflow: hidden;
-  box-shadow: 0 16px 40px -12px rgba(15, 10, 25, 0.45);
+  box-shadow: 0 10px 28px -12px rgba(15, 10, 25, 0.3);
 }
 .studio-editor-heading, .studio-editor-heading > div { display: flex; align-items: center; }
 .studio-editor-heading { justify-content: space-between; gap: 12px; padding: 12px 18px; border-bottom: 1px solid #37313f; }
@@ -328,7 +331,9 @@
 }
 @media (max-width: 980px) {
   .studio-status-card { grid-template-columns: 1fr; gap: 18px; }
-  .studio-grid { grid-template-columns: 1fr; }
+  .studio-grid { grid-template-columns: 1fr; grid-template-rows: auto; }
+  .studio-grid > .studio-inspector { grid-column: 1; grid-row: 2; }
+  .studio-grid > .studio-terminal { grid-column: 1; grid-row: 3; }
   .studio-inspector { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 20px; }
   .studio-source textarea { height: 360px; }
 }
@@ -392,4 +397,22 @@
   .studio-terminal-live-dot {
     animation: none;
   }
+}
+
+[data-theme="dark"] .studio-file-list button:hover:not(:disabled),
+:root.dark-theme .studio-file-list button:hover:not(:disabled) {
+  background: #362458;
+}
+
+[data-theme="dark"] .studio-parameters textarea,
+:root.dark-theme .studio-parameters textarea {
+  background: #171126;
+  color: #ede5f7;
+  border-color: #2e2148;
+}
+
+[data-theme="dark"] .studio-parameters textarea:focus-visible,
+:root.dark-theme .studio-parameters textarea:focus-visible {
+  border-color: #aa81fc;
+  box-shadow: 0 0 0 3px rgba(170, 129, 252, 0.25);
 }

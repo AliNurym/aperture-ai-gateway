@@ -42,11 +42,11 @@ RESET = "\033[0m"
 
 def check_mark(status: bool | None) -> str:
     if status is True:
-        return f"{GREEN}[✓]{RESET}"
+        return f"{GREEN}[OK]{RESET}"
     elif status is False:
-        return f"{RED}[✗]{RESET}"
+        return f"{RED}[FAIL]{RESET}"
     else:
-        return f"{YELLOW}[!]{RESET}"
+        return f"{YELLOW}[WARN]{RESET}"
 
 
 class ApertureDoctor:

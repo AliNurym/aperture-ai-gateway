@@ -93,9 +93,10 @@ gateway.object_rate_limiter = enforce_rate_limit
 
 class RequestBodyLimitMiddleware:
     """Reject oversized JSON bodies before FastAPI/Pydantic buffers and parses them."""
-    def __init__(self, app, max_body_bytes):
+    def __init__(self, app, max_body_bytes, max_result_body_bytes=None):
         self.app = app
         self.max_body_bytes = max_body_bytes
+        self.max_result_body_bytes = max_result_body_bytes or max_body_bytes
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope.get("method") not in {"POST", "PUT", "PATCH"}:
@@ -103,6 +104,18 @@ class RequestBodyLimitMiddleware:
             return
 
         path = scope.get("path")
+        body_limit = self.max_result_body_bytes if path == "/submit_result" else self.max_body_bytes
+        if path == "/submit_result":
+            # Reject unauthenticated uploads before buffering their larger result-body allowance.
+            headers = {name.lower(): value for name, value in scope.get("headers", [])}
+            try:
+                gateway.require_worker(
+                    headers.get(b"x-aperture-worker-token", b"").decode("latin-1"),
+                    headers.get(b"x-aperture-worker-id", b"").decode("latin-1"),
+                )
+            except HTTPException as error:
+                await self._reject(send, status=error.status_code, detail=error.detail, extra_headers=error.headers)
+                return
         # Immutable blob uploads authorize their exact size and hash before reading.
         # Preserve streaming instead of buffering up to 64 MiB in this JSON guard.
         if scope.get("method") == "PUT" and path.startswith("/objects/"):
@@ -130,7 +143,7 @@ class RequestBodyLimitMiddleware:
                 if declared_size < 0:
                     await self._reject(send, status=400, detail="Invalid Content-Length header.")
                     return
-                if declared_size > self.max_body_bytes:
+                if declared_size > body_limit:
                     await self._reject(send)
                     return
             except ValueError:
@@ -145,7 +158,7 @@ class RequestBodyLimitMiddleware:
             if message.get("type") != "http.request":
                 continue
             body.extend(message.get("body", b""))
-            if len(body) > self.max_body_bytes:
+            if len(body) > body_limit:
                 await self._reject(send)
                 return
             if not message.get("more_body", False):
@@ -187,7 +200,13 @@ async def lifespan(app):
     await solana_client.close()
 
 app = FastAPI(title="Aperture Compute Gateway", version="2.0.0", lifespan=lifespan)
-app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=max(1024, int(os.getenv("APERTURE_MAX_REQUEST_BYTES", "2500000"))))
+app.add_middleware(
+    RequestBodyLimitMiddleware,
+    max_body_bytes=max(1024, int(os.getenv("APERTURE_MAX_REQUEST_BYTES", "2500000"))),
+    # The 1 MiB worker log is repeated in two fields and can expand when JSON escapes control bytes.
+    # Keep that bounded allowance scoped to worker submissions; auth is checked before buffering.
+    max_result_body_bytes=max(1024, int(os.getenv("APERTURE_MAX_RESULT_REQUEST_BYTES", "16000000"))),
+)
 app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
 
 @app.middleware("http")
@@ -339,8 +358,8 @@ for i in range(N):
         C[i][j] = total
 
 duration = time.perf_counter() - start
-print(f"✅ [SUCCESS] Computed the {N}x{N} matrix product in {duration:.3f}s")
-print("📊 [INFO] This script ran as a Python workload; billing is managed by the gateway.")
+print(f"[SUCCESS] Computed the {N}x{N} matrix product in {duration:.3f}s")
+print("[INFO] This script ran as a Python workload; billing is managed by the gateway.")
 """
         },
         {
@@ -365,8 +384,8 @@ for i in range(total_points):
 pi_estimate = 4.0 * inside_circle / total_points
 elapsed = time.perf_counter() - start
 
-print(f"✅ [RESULT] Estimated Pi: {pi_estimate:.6f} (Error: {abs(pi_estimate - 3.14159265):.6f})")
-print(f"⏱️ [PERF] Executed 500,000 iterations in {elapsed:.3f}s on Aperture Node")
+print(f"[RESULT] Estimated Pi: {pi_estimate:.6f} (Error: {abs(pi_estimate - 3.14159265):.6f})")
+print(f"[PERF] Executed 500,000 iterations in {elapsed:.3f}s on Aperture Node")
 """
         },
         {
@@ -391,8 +410,8 @@ for p in range(2, int(LIMIT**0.5) + 1):
 count = sum(primes)
 elapsed = time.perf_counter() - start
 
-print(f"✅ [RESULT] Found {count:,} prime numbers below {LIMIT:,}")
-print(f"⏱️ [PERF] Computed in {elapsed:.3f}s. Memory footprint verified.")
+print(f"[RESULT] Found {count:,} prime numbers below {LIMIT:,}")
+print(f"[PERF] Computed in {elapsed:.3f}s. Memory footprint verified.")
 """
         },
         {
@@ -414,8 +433,8 @@ while True:
     h = hashlib.sha256(data).hexdigest()
     if h.startswith(target_prefix):
         elapsed = time.perf_counter() - start
-        print(f"💎 [FOUND] Nonce: {nonce} | Hash: {h}")
-        print(f"⏱️ [PERF] Rate: {int(nonce / max(elapsed, 0.001)):,} H/s in {elapsed:.3f}s")
+        print(f"[FOUND] Nonce: {nonce} | Hash: {h}")
+        print(f"[PERF] Rate: {int(nonce / max(elapsed, 0.001)):,} H/s in {elapsed:.3f}s")
         break
     nonce += 1
 """
@@ -473,8 +492,8 @@ for sample in X:
 
 elapsed = time.perf_counter() - start
 total_ops = num_samples * (input_dim * hidden_dim * 2 + hidden_dim * output_dim * 2)
-print(f"✅ [RESULT] Completed {num_samples} inferences ({total_ops:,} FLOPs) in {elapsed:.3f}s")
-print(f"🧠 [METRICS] Throughput: {num_samples / max(elapsed, 0.001):.1f} samples/sec in Python")
+print(f"[RESULT] Completed {num_samples} inferences ({total_ops:,} FLOPs) in {elapsed:.3f}s")
+print(f"[METRICS] Throughput: {num_samples / max(elapsed, 0.001):.1f} samples/sec in Python")
 """
         },
         {

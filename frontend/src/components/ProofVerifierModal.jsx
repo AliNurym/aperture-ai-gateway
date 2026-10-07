@@ -1,161 +1,183 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Icon from './Icon';
 import './ProofVerifierModal.css';
 
-export default function ProofVerifierModal({ isOpen, onClose, proofData }) {
+function signatureLabel(value) {
+  if (Array.isArray(value)) return value.length + ' bytes';
+  return typeof value === 'string' && value.length ? 'Present' : 'Unavailable';
+}
+
+function chargeLabel(value) {
+  return Number.isSafeInteger(value) ? value.toLocaleString() + ' lamports' : 'Unavailable';
+}
+
+export default function ProofVerifierModal({ isOpen, onClose, receipt, taskId, chainReceiptAddress, verified, verificationNote }) {
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState('certificate');
+  const dialogRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const previousFocus = document.activeElement;
+    closeButtonRef.current?.focus({ preventScroll: true });
+
+    const handleDialogKeyDown = event => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        onCloseRef.current?.();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const dialog = dialogRef.current;
+      const focusable = dialog?.querySelectorAll(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+      );
+      const elements = Array.from(focusable || []).filter(element => !element.hasAttribute('hidden'));
+      if (!elements.length) {
+        event.preventDefault();
+        dialog?.focus();
+        return;
+      }
+
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !dialog?.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !dialog?.contains(active))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleDialogKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleDialogKeyDown);
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const defaultProof = {
-    taskId: 'task_mc_' + Math.random().toString(36).substring(2, 10),
-    oracleKey: '9QmewM34XoBtMrG5C2SPH56WTSPw3cakYud84vJ92KRU',
-    programId: 'A5HfdyRWy77i5DxhTMBa1ZinxVGZbVZnb35EvXUvkNzQ',
-    artifactHash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-    astSecurityScore: 0,
-    sandboxIsolation: 'Docker cgroups / unprivileged / network disabled',
-    tariffRateLamportsSec: 1000,
-    settlementCapLamports: 50000,
-    actualSpendLamports: 35000,
-    runtimeSeconds: 0.284,
-    status: 'VERIFIED_SAFE',
-    timestamp: new Date().toISOString(),
-    ...proofData,
-  };
+  const hasReceipt = Boolean(receipt && typeof receipt === 'object');
+  const receiptJson = hasReceipt ? JSON.stringify(receipt, null, 2) : '';
+  const actualTaskId = taskId || receipt?.task_id || 'Unavailable';
+  const statusLabel = verified === true ? receipt?.settlement_type === 'DEVNET'
+    ? 'Receipt, raw output and Devnet settlement verified'
+    : receipt?.settlement_type === 'OFF_CHAIN'
+      ? 'Receipt and raw output verified · off-chain'
+      : 'Receipt and raw output verified'
+    : verified === false ? 'Verification failed'
+      : 'Not verified in this session';
+  const statusClass = verified === true ? 'is-verified' : verified === false ? 'is-failed' : 'is-unverified';
+  const statusPill = verified === true ? 'Verified' : verified === false ? 'Failed' : 'Unverified';
+  const fields = hasReceipt ? [
+    ['Task ID', actualTaskId],
+    ['Gateway signer', receipt.gateway_pubkey],
+    ['Worker signer', receipt.worker_receipt?.worker_pubkey || receipt.worker_pubkey],
+    ['Execution status', receipt.execution_status],
+    ['Execution boundary', receipt.execution_backend],
+    ['Settlement type', receipt.settlement_type],
+    ['Actual charge', chargeLabel(receipt.charged_lamports)],
+    ['Runtime', typeof receipt.execution_time === 'number' ? receipt.execution_time + ' seconds' : 'Unavailable'],
+    ['Source SHA-256', receipt.code_sha256],
+    ['Output SHA-256', receipt.output_sha256],
+    ['Receipt SHA-256', receipt.receipt_sha256],
+    ['Gateway signature', signatureLabel(receipt.gateway_signature)],
+    ['Worker signature', signatureLabel(receipt.worker_signature)],
+    ['Settlement signature', receipt.settlement_signature],
+    ['On-chain task receipt', chainReceiptAddress || receipt.task_receipt_pda || receipt.settlement_evidence?.receipt_pda],
+  ].filter(([, value]) => value !== undefined && value !== null && value !== '') : [];
 
-  const proofJson = JSON.stringify({
-    schema_version: '2.2.0',
-    type: 'aperture_verifiable_attestation',
-    task_id: defaultProof.taskId,
-    verification: {
-      oracle_ed25519_key: defaultProof.oracleKey,
-      signature_valid: true,
-      solana_program_id: defaultProof.programId,
-      artifact_sha256: defaultProof.artifactHash,
-      ast_security_score: defaultProof.astSecurityScore,
-      sandbox_profile: defaultProof.sandboxIsolation,
-      status: defaultProof.status,
-    },
-    economics: {
-      tariff_rate_lamports_sec: defaultProof.tariffRateLamportsSec,
-      spend_cap_lamports: defaultProof.settlementCapLamports,
-      actual_cost_lamports: defaultProof.actualSpendLamports,
-      runtime_seconds: defaultProof.runtimeSeconds,
-    },
-    attested_at: defaultProof.timestamp,
-  }, null, 2);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(proofJson);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(receiptJson);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
   };
 
   const handleDownload = () => {
-    const blob = new Blob([proofJson], { type: 'application/json' });
+    if (!hasReceipt) return;
+    const blob = new Blob([receiptJson], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `aperture-attestation-${defaultProof.taskId}.json`;
+    link.download = 'aperture-receipt-' + actualTaskId + '.json';
     link.click();
     URL.revokeObjectURL(url);
   };
 
   return (
     <div className="proof-modal-backdrop" onClick={onClose}>
-      <div className="proof-modal" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="proof-modal-title">
+      <div
+        ref={dialogRef}
+        className="proof-modal"
+        onClick={event => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="proof-modal-title"
+        aria-describedby="proof-modal-description"
+        tabIndex={-1}
+      >
         <header className="proof-modal-header">
           <div className="proof-modal-title-wrap">
-            <span className="proof-shield-badge">
-              <Icon name="shield" size={18} />
-            </span>
+            <span className="proof-shield-badge"><Icon name="shield" size={18} /></span>
             <div>
-              <h2 id="proof-modal-title">Cryptographic Attestation Verifier</h2>
-              <p>Independent mathematical proof of isolated sandbox execution & artifact integrity</p>
+              <h2 id="proof-modal-title">Receipt evidence</h2>
+              <p id="proof-modal-description">{hasReceipt ? 'The signed receipt returned for this Studio task.' : 'How Aperture checks a real task receipt.'}</p>
             </div>
           </div>
-          <button className="proof-modal-close" onClick={onClose} aria-label="Close modal">
-            <Icon name="close" size={18} />
-          </button>
+          <button ref={closeButtonRef} className="proof-modal-close" onClick={onClose} aria-label="Close modal"><Icon name="close" size={18} /></button>
         </header>
 
-        <div className="proof-modal-tabs">
-          <button
-            className={`proof-tab-btn ${activeTab === 'certificate' ? 'active' : ''}`}
-            onClick={() => setActiveTab('certificate')}
-          >
-            <Icon name="check" size={15} />
-            Visual Certificate
-          </button>
-          <button
-            className={`proof-tab-btn ${activeTab === 'json' ? 'active' : ''}`}
-            onClick={() => setActiveTab('json')}
-          >
-            <Icon name="code" size={15} />
-            Raw Signed JSON
-          </button>
-        </div>
-
-        <div className="proof-modal-body">
-          {activeTab === 'certificate' ? (
-            <div className="proof-cert-grid">
-              <div className="proof-status-banner">
+        {hasReceipt ? (
+          <>
+            <div className="proof-modal-body">
+              <div className={'proof-status-banner ' + statusClass} role="status">
                 <span className="proof-status-indicator" />
-                <strong>ED25519 ORACLE ATTESTATION: VERIFIED</strong>
-                <span className="proof-pill-valid">Valid Signature</span>
+                <strong>{statusLabel}</strong>
+                <span className="proof-pill-valid">{statusPill}</span>
               </div>
-
-              <div className="proof-field-row">
-                <span className="proof-field-label">Task Identifier</span>
-                <span className="proof-field-val mono">{defaultProof.taskId}</span>
+              {verificationNote && <p className="proof-verification-note">{verificationNote}</p>}
+              <div className="proof-cert-grid">
+                {fields.map(([label, value]) => (
+                  <div className="proof-field-row" key={label}>
+                    <span className="proof-field-label">{label}</span>
+                    <span className={'proof-field-val ' + (label.includes('SHA-256') || label.includes('signer') || label === 'Task ID' ? 'mono' : '')}>{String(value)}</span>
+                  </div>
+                ))}
               </div>
-
-              <div className="proof-field-row">
-                <span className="proof-field-label">Oracle Ed25519 Signer</span>
-                <span className="proof-field-val mono">{defaultProof.oracleKey}</span>
-              </div>
-
-              <div className="proof-field-row">
-                <span className="proof-field-label">Solana DePIN Program</span>
-                <span className="proof-field-val mono">{defaultProof.programId}</span>
-              </div>
-
-              <div className="proof-field-row">
-                <span className="proof-field-label">Artifact SHA-256 Digest</span>
-                <span className="proof-field-val mono hash-highlight">{defaultProof.artifactHash}</span>
-              </div>
-
-              <div className="proof-field-row">
-                <span className="proof-field-label">Sandbox Security Profile</span>
-                <span className="proof-field-val">Score: 0 / SAFE (cgroups, read-only root, net disabled)</span>
-              </div>
-
-              <div className="proof-field-row">
-                <span className="proof-field-label">Bounded Economic Tariff</span>
-                <span className="proof-field-val">
-                  {defaultProof.actualSpendLamports.toLocaleString()} lamports ({defaultProof.runtimeSeconds}s @ {defaultProof.tariffRateLamportsSec.toLocaleString()} l/s)
-                </span>
-              </div>
+              <p className="proof-limits-note">A valid signature binds this receipt to its approved task and output. It does not independently prove faithful computation or the worker's execution environment.</p>
+              <details className="proof-json-details">
+                <summary>View the complete signed receipt JSON</summary>
+                <div className="proof-json-wrap"><pre><code>{receiptJson}</code></pre></div>
+              </details>
             </div>
-          ) : (
-            <div className="proof-json-wrap">
-              <pre><code>{proofJson}</code></pre>
-            </div>
-          )}
-        </div>
+          </>
+        ) : (
+          <div className="proof-modal-body proof-empty-state">
+            <h3>How receipt verification works</h3>
+            <p>The browser checks the gateway signature against the approved quote, downloads the raw output and compares its SHA-256 hash, then verifies the worker signature when a worker receipt is present.</p>
+            <p>For Devnet tasks it also checks the confirmed Solana task receipt and settlement against the approved owner, source, and spending limit. Off-chain tasks have no Solana settlement or on-chain task receipt.</p>
+            <p>Signatures bind the reported evidence; they do not prove that a remote worker faithfully computed the result or ran in a particular environment. Open a completed Studio run to inspect its actual receipt.</p>
+          </div>
+        )}
 
         <footer className="proof-modal-footer">
-          <div className="proof-footer-actions">
-            <button className="console-button secondary" onClick={handleCopy}>
-              <Icon name="copy" size={16} />
-              {copied ? 'Copied to Clipboard!' : 'Copy JSON Payload'}
-            </button>
-            <button className="console-button primary" onClick={handleDownload}>
-              <Icon name="download" size={16} />
-              Download Attestation Certificate
-            </button>
-          </div>
+          {hasReceipt && <div className="proof-footer-actions">
+            <button className="console-button secondary" onClick={handleCopy}><Icon name="copy" size={16} />{copied ? 'Copied receipt JSON' : 'Copy receipt JSON'}</button>
+            <button className="console-button primary" onClick={handleDownload}><Icon name="download" size={16} />Download receipt</button>
+          </div>}
           <button className="console-text-button" onClick={onClose}>Close</button>
         </footer>
       </div>

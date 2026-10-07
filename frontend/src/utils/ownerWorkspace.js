@@ -97,7 +97,7 @@ export async function readAgentArtifact(context, view, task, file, connection, s
   const verification = await verifyGatewayReceipt(task.receipt, quote, task.task_id, task.full_log);
   if (!verification.verified) throw new Error(verification.reason);
   if (task.receipt.settlement_type === 'DEVNET') {
-    if (!connection || await connection.getGenesisHash() !== 'GH7ome3EiwEr7tu9JuTh2dpYWBJK3z69Xm1ZE3MEE6JC') throw new Error('Independent Solana Devnet verification is unavailable.');
+    if (!connection || await connection.getGenesisHash() !== 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG') throw new Error('Independent Solana Devnet verification is unavailable.');
     await verifyDevnetSettlement(connection, task.receipt, quote, task.task_id);
   }
   if (!task.receipt.artifacts?.some(value => canonicalJson(value) === canonicalJson(item))) throw new Error('The file is absent from the verified receipt.');

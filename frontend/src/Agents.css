@@ -17,6 +17,10 @@
 .agents-form p { color: var(--console-muted); font-size: 12px; line-height: 1.7; margin: 12px 0; }
 .agents-form .agents-owner { margin: 10px 0 20px; color: var(--console-muted); font: 12px/1.6 "Roboto Mono", Consolas, monospace; overflow-wrap: anywhere; }
 .agents-form label { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 18px 0; color: var(--console-muted); font-size: 13px; line-height: 1.5; }
+.agents-key-wrapper { margin: 18px 0; }
+.agents-label-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.agents-label-row label { margin: 0; }
+.agents-gen-key { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--console-primary); padding: 0; height: auto; min-height: 0; }
 .agents-form input { width: 100%; min-width: 0; min-height: 44px; padding: 11px 12px; background: #fcf9fe; color: #4d3c5d; border: 1px solid #e9e0f1; border-radius: 10px; font: 14px Roboto, "Segoe UI", sans-serif; }
 @media (hover: hover) and (pointer: fine) {
   .agents-form input:hover:not(:disabled) { border-color: var(--md-sys-color-outline); }
@@ -70,4 +74,16 @@
   .agents-fields label { grid-template-rows: auto 44px; }
   .agents-form form > .console-button { width: 100%; }
   .agents-form form > .console-text-button { margin: 8px 0 0; }
+}
+
+[data-theme="dark"] .agents-form input,
+:root.dark-theme .agents-form input {
+  background: #171126;
+  color: #ede5f7;
+  border-color: #2e2148;
+}
+
+[data-theme="dark"] .agents-form input:focus-visible,
+:root.dark-theme .agents-form input:focus-visible {
+  outline-color: #aa81fc;
 }

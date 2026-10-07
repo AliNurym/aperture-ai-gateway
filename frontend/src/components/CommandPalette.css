@@ -186,3 +186,96 @@
   letter-spacing: 0.3px;
   color: #8c7f9c;
 }
+
+/* ==========================================================================
+   Dark Theme for CommandPalette
+   ========================================================================== */
+[data-theme="dark"] .palette-dialog,
+:root.dark-theme .palette-dialog {
+  background: #161026;
+  border-color: #352554;
+  box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(170, 129, 252, 0.15);
+}
+
+[data-theme="dark"] .palette-input-wrap,
+:root.dark-theme .palette-input-wrap {
+  background: #140e22;
+  border-bottom-color: #2a1d42;
+}
+
+[data-theme="dark"] .palette-search-icon,
+:root.dark-theme .palette-search-icon {
+  color: #c49eff;
+}
+
+[data-theme="dark"] .palette-input,
+:root.dark-theme .palette-input {
+  color: #f7f4fd;
+}
+
+[data-theme="dark"] .palette-input::placeholder,
+:root.dark-theme .palette-input::placeholder {
+  color: #8c7d9e;
+}
+
+[data-theme="dark"] .palette-esc-badge,
+:root.dark-theme .palette-esc-badge {
+  background: #221738;
+  color: #cfb1ff;
+  border-color: #342454;
+}
+
+[data-theme="dark"] .palette-item:hover,
+[data-theme="dark"] .palette-item.selected,
+:root.dark-theme .palette-item:hover,
+:root.dark-theme .palette-item.selected {
+  background: #201736;
+}
+
+[data-theme="dark"] .palette-item.selected,
+:root.dark-theme .palette-item.selected {
+  box-shadow: inset 0 0 0 1px rgba(170, 129, 252, 0.35);
+}
+
+[data-theme="dark"] .palette-item-icon,
+:root.dark-theme .palette-item-icon {
+  background: #221738;
+  color: #cfb1ff;
+}
+
+[data-theme="dark"] .palette-item.selected .palette-item-icon,
+:root.dark-theme .palette-item.selected .palette-item-icon {
+  background: #7c4dff;
+  color: #ffffff;
+}
+
+[data-theme="dark"] .palette-item-title,
+:root.dark-theme .palette-item-title {
+  color: #f7f4fd;
+}
+
+[data-theme="dark"] .palette-item-sub,
+:root.dark-theme .palette-item-sub {
+  color: #9d8eb1;
+}
+
+[data-theme="dark"] .palette-item-shortcut,
+:root.dark-theme .palette-item-shortcut {
+  background: #221738;
+  color: #cfb1ff;
+  border-color: #342454;
+}
+
+[data-theme="dark"] .palette-footer,
+:root.dark-theme .palette-footer {
+  background: #120d20;
+  border-top-color: #26193d;
+  color: #8c7d9e;
+}
+
+[data-theme="dark"] .palette-hints kbd,
+:root.dark-theme .palette-hints kbd {
+  background: #221738;
+  color: #cfb1ff;
+  border-color: #342454;
+}

@@ -121,3 +121,7 @@ ehthumbs.db
 Thumbs.db
 desktop.ini
 .aperture-runs/
+
+# --- Local Backups & Large Archives ---
+backups/
+

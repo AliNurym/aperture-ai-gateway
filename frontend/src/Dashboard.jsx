@@ -951,7 +951,7 @@ export default function Dashboard({ gatewayHealth, gatewayOnline, workerCount, r
               }
             }}
           /></div>
-        <div className="studio-editor-meta"><span>UTF-8 · {code.split('\n').length} lines</span><span><kbd style={{fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: 'rgba(105, 80, 161, 0.1)', color: 'var(--console-primary)'}}>Ctrl + ↵</kbd> to run</span><span>{new TextEncoder().encode(code).length.toLocaleString()} / {MAX_SOURCE_BYTES.toLocaleString()} bytes</span></div>
+        <div className="studio-editor-meta"><span>UTF-8 · {code.split('\n').length} lines</span><span><kbd style={{fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: 'rgba(105, 80, 161, 0.1)', color: 'inherit'}}>Ctrl + ↵</kbd> to run</span><span>{new TextEncoder().encode(code).length.toLocaleString()} / {MAX_SOURCE_BYTES.toLocaleString()} bytes</span></div>
         <input ref={inputRef} type="file" accept=".py,text/plain" hidden onChange={importFile} />
       </section>
       <aside className="studio-inspector" aria-label="Run settings">
@@ -1028,8 +1028,8 @@ export default function Dashboard({ gatewayHealth, gatewayOnline, workerCount, r
           </>}
         </section>
       </aside>
+      <section className="studio-terminal"><div className="studio-terminal-heading"><h2><Icon name="code" size={18} />Run output<span className="studio-terminal-count">{logs.length} events</span>{busy && <span className="studio-terminal-live" aria-label="Streaming workload output"><span className="studio-terminal-live-dot" />LIVE</span>}</h2><button className="console-text-button" disabled={!logs.length} onClick={() => saveFile('aperture-output.txt', logs.map(entry => '[' + entry.time + '] ' + entry.message).join('\n'))}><Icon name="download" size={16} />Save log</button></div><div className="studio-log" ref={logRef} onScroll={event => { const element = event.currentTarget; followLogs.current = element.scrollHeight - element.scrollTop - element.clientHeight < 32; }} role="log" aria-label="Run output" aria-live="polite" aria-atomic="false">{logs.length ? logs.map((entry, index) => <div className={'studio-log-line ' + entry.kind} key={index}><time>{entry.time}</time><span>{entry.message}</span></div>) : <div className="studio-terminal-empty"><span>›</span> Your run output will appear here.</div>}</div></section>
     </div>
-    <section className="studio-terminal"><div className="studio-terminal-heading"><h2><Icon name="code" size={18} />Run output<span className="studio-terminal-count">{logs.length} events</span>{busy && <span className="studio-terminal-live" aria-label="Streaming workload output"><span className="studio-terminal-live-dot" />LIVE</span>}</h2><button className="console-text-button" disabled={!logs.length} onClick={() => saveFile('aperture-output.txt', logs.map(entry => '[' + entry.time + '] ' + entry.message).join('\n'))}><Icon name="download" size={16} />Save log</button></div><div className="studio-log" ref={logRef} onScroll={event => { const element = event.currentTarget; followLogs.current = element.scrollHeight - element.scrollTop - element.clientHeight < 32; }} role="log" aria-label="Run output" aria-live="polite" aria-atomic="false">{logs.length ? logs.map((entry, index) => <div className={'studio-log-line ' + entry.kind} key={index}><time>{entry.time}</time><span>{entry.message}</span></div>) : <div className="studio-terminal-empty"><span>›</span> Your run output will appear here.</div>}</div></section>
     {receipt && (
       <section className="console-panel studio-receipt">
         <div className="console-section-heading">
@@ -1065,7 +1065,7 @@ export default function Dashboard({ gatewayHealth, gatewayOnline, workerCount, r
         <div className="studio-receipt-actions">
           <button className="console-button primary" onClick={() => setShowReceiptProof(true)}>
             <Icon name="shield" size={16} />
-            Inspect Cryptographic Attestation
+            Inspect receipt evidence
           </button>
           {receipt.status === 'unverified' && receipt.mode === 'gateway' && receipt.backendReceipt?.signed_message && <button className="console-button secondary" disabled={busy} onClick={retryVerification}><Icon name="refresh" size={16} />{verificationBusy ? 'Verifying…' : 'Retry verification'}</button>}
           <button className="console-button secondary" onClick={() => saveFile('aperture-' + receipt.taskId + '.json', JSON.stringify(receipt.backendReceipt || receipt, null, 2), 'application/json')}><Icon name="download" size={16} />Download receipt</button>
@@ -1078,14 +1078,11 @@ export default function Dashboard({ gatewayHealth, gatewayOnline, workerCount, r
     <ProofVerifierModal
       isOpen={showReceiptProof}
       onClose={() => setShowReceiptProof(false)}
-      proofData={{
-        taskId: receipt?.taskId,
-        oracleKey: receipt?.backendReceipt?.agent_pubkey,
-        artifactHash: receipt?.backendReceipt?.output_sha256,
-        actualSpendLamports: receipt?.costSol ? Math.round(receipt.costSol * 1e9) : 35000,
-        runtimeSeconds: receipt?.durationSeconds || 0.28,
-        status: receipt?.status === 'completed' ? 'VERIFIED_SAFE' : receipt?.status,
-      }}
+      receipt={receipt?.backendReceipt}
+      taskId={receipt?.taskId}
+      chainReceiptAddress={receipt?.chainReceiptAddress}
+      verified={receipt?.receiptVerified}
+      verificationNote={receipt?.verificationNote}
     />
   </div>;
 }

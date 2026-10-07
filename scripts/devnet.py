@@ -119,11 +119,15 @@ def initialize():
 
 def status():
     public, _, _, client = context()
+    program = client.rpc('getAccountInfo', [public['program_id'], {'encoding': 'base64', 'commitment': 'confirmed'}])['value']
+    program_deployed = bool(program and program['executable'])
+    protocol_config = client.verify_protocol_config() if program_deployed else None
     balances = {name: client.rpc('getBalance', [public[field], {'commitment': 'confirmed'}])['value']
                 for name, field in [('gateway', 'gateway_pubkey'), ('owner', 'owner_pubkey'), ('treasury', 'treasury')]}
-    program = client.rpc('getAccountInfo', [public['program_id'], {'encoding': 'base64', 'commitment': 'confirmed'}])['value']
     print(json.dumps({'network': 'devnet', 'rpc_url': RPC, 'program_id': public['program_id'],
-                      'program_deployed': bool(program and program['executable']),
+                      'program_deployed': program_deployed,
+                      'protocol_config_verified': protocol_config is not None,
+                      'protocol_config': protocol_config,
                       'balances_lamports': balances}, indent=2))
 
 

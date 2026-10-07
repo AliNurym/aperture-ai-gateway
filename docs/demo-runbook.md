@@ -2,13 +2,16 @@
 
 Compute Studio has one execution path: signed source and limits, authenticated gateway dispatch, real Python on a worker, and signed result evidence. It does not generate simulated progress or computation results.
 
+`start_demo.bat` is only a presentation launcher: it checks `/health` and opens the console. The overview simulator uses illustrative values and sends no task. Use `start_preview.bat` and the steps below when you need actual local CPU execution and a signed receipt.
+
 ## Before the presentation
 
 1. Start the configured gateway and one authenticated worker. Build the Docker task image first for isolated execution.
 2. Open `http://127.0.0.1:3000`. Execution readiness must show a connected gateway and an active worker.
 3. For Devnet settlement, deploy the compatible v2 program, initialize its protocol config, and set the frontend gateway and treasury public-key pins. A reachable HTTP server alone is insufficient.
-4. Connect a Solana wallet. Confirm the actual network and settlement mode shown by the gateway.
-5. Keep the worker and gateway running throughout the presentation.
+4. For the retained Devnet setup, run `backend/venv/Scripts/python.exe scripts/devnet.py status`. Confirm `program_deployed: true`, `protocol_config_verified: true` and the intended program ID; this command only reads RPC state and submits no transaction.
+5. Connect a Solana wallet. Confirm the actual network and settlement mode shown by the gateway.
+6. Keep the worker and gateway running throughout the presentation.
 
 ## Three-minute live walkthrough
 
@@ -154,6 +157,8 @@ The SDK verified gateway and worker signatures, exact source/output hashes, the 
 - Local receipt, raw output and verification record: `.aperture/demo/devnet/evidence/task-183cd90e80584f2f933afe53349fa7b1.*`.
 
 This is a record of an observed execution. Current worker readiness must still be checked before each presentation. The worker used trusted host execution of three reviewed sources, without Docker isolation.
+
+On 2026-10-05, the official `https://api.devnet.solana.com` endpoint and QuickNode's public Devnet documentation endpoint both returned `EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG`; both resolved the settlement as finalized at slot 504877196. The [Solana `getGenesisHash` reference](https://solana.com/docs/rpc/http/getgenesishash) still shows the different static example `GH7ome3EiwEr7tu9JuTh2dpYWBJK3z69Xm1ZE3MEE6JC`. The clients pin the matching live hash. Recheck the endpoint before recording if Solana restarts or resets Devnet.
 
 ## Settlement and execution boundaries
 

@@ -7,8 +7,9 @@ export default function CommandPalette({
   onClose,
   onNavigate,
   onOpenSample,
-  onOpenAttestation,
+  onOpenReceiptGuide,
   onRefresh,
+  onToggleTheme,
 }) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -19,19 +20,10 @@ export default function CommandPalette({
       id: 'nav-overview',
       category: 'Navigation',
       title: 'Go to Workspace Overview',
-      subtitle: 'Telemetry grid, live demo simulator, zero-leak pipeline',
+      subtitle: 'Worker status, illustrative workflow preview, bounded data workflow',
       icon: 'grid',
-      shortcut: '1',
+      shortcut: 'Alt+1',
       action: () => { onNavigate('overview'); onClose(); },
-    },
-    {
-      id: 'nav-studio',
-      category: 'Navigation',
-      title: 'Open Compute Studio',
-      subtitle: 'Python editor, live streaming log terminal, tariffs',
-      icon: 'code',
-      shortcut: '2',
-      action: () => { onNavigate('studio'); onClose(); },
     },
     {
       id: 'nav-workflows',
@@ -39,16 +31,25 @@ export default function CommandPalette({
       title: 'View Agent Workflows',
       subtitle: 'DAG batch execution, CSV partitioning, spend limits',
       icon: 'network',
-      shortcut: '3',
+      shortcut: 'Alt+2',
       action: () => { onNavigate('workflows'); onClose(); },
+    },
+    {
+      id: 'nav-studio',
+      category: 'Navigation',
+      title: 'Open Compute Studio',
+      subtitle: 'Python editor, live streaming log terminal, tariffs',
+      icon: 'code',
+      shortcut: 'Alt+3',
+      action: () => { onNavigate('studio'); onClose(); },
     },
     {
       id: 'nav-storage',
       category: 'Navigation',
       title: 'Browse Private Storage',
-      subtitle: 'Encrypted inputs, signed file release, quota tracking',
-      icon: 'book',
-      shortcut: '4',
+      subtitle: 'Owner-authorized inputs, signed file release, quota tracking',
+      icon: 'download',
+      shortcut: 'Alt+4',
       action: () => { onNavigate('storage'); onClose(); },
     },
     {
@@ -57,40 +58,83 @@ export default function CommandPalette({
       title: 'Manage Agent Passports',
       subtitle: 'Delegated capabilities, budget caps, owner inbox',
       icon: 'shield',
-      shortcut: '5',
+      shortcut: 'Alt+5',
       action: () => { onNavigate('agents'); onClose(); },
     },
     {
+      id: 'nav-network',
+      category: 'Navigation',
+      title: 'Inspect Worker Network',
+      subtitle: 'The available capacity and node states behind your workloads',
+      icon: 'network',
+      shortcut: 'Alt+6',
+      action: () => { onNavigate('network'); onClose(); },
+    },
+    {
+      id: 'nav-guide',
+      category: 'Navigation',
+      title: 'Getting Started Guide',
+      subtitle: 'Connect execution and prepare your first workload',
+      icon: 'book',
+      shortcut: 'Alt+7',
+      action: () => { onNavigate('guide'); onClose(); },
+    },
+    {
+      id: 'sample-17k',
+      category: 'Workload Samples',
+      title: 'Load 17k Resilient CSV Pipeline',
+      subtitle: 'Open the 17,280 record partitioned batch benchmark with auto-resume',
+      icon: 'network',
+      action: () => { onNavigate('workflows'); onClose(); },
+    },
+    {
       id: 'sample-risk',
-      category: 'Live Simulations',
-      title: 'Run Monte Carlo Risk Simulation',
-      subtitle: '10,000 portfolio scenarios, Value at Risk (VaR 95%)',
+      category: 'Workload Samples',
+      title: 'Load Monte Carlo Risk Sample',
+      subtitle: 'Open the reviewed workload in Compute Studio',
       icon: 'spark',
       action: () => { onOpenSample('risk'); onClose(); },
     },
     {
       id: 'sample-dataset',
-      category: 'Live Simulations',
-      title: 'Process Confidential Dataset',
-      subtitle: 'CSV category aggregation with 0 token context leakage',
+      category: 'Workload Samples',
+      title: 'Load Dataset Aggregation Sample',
+      subtitle: 'Open the reviewed CSV workflow in Compute Studio',
       icon: 'spark',
       action: () => { onOpenSample('dataset'); onClose(); },
     },
     {
       id: 'sample-policy',
-      category: 'Live Simulations',
-      title: 'Test Sandbox Policy Rejection',
-      subtitle: 'Demonstrate AST security intercept and 403 guardrails',
+      category: 'Workload Samples',
+      title: 'Load Policy Rejection Sample',
+      subtitle: 'Open the source that the gateway policy should reject',
       icon: 'shield',
       action: () => { onOpenSample('policy'); onClose(); },
     },
     {
       id: 'proof-verify',
       category: 'Cryptographic Security',
-      title: 'Inspect Cryptographic Attestation',
-      subtitle: 'Ed25519 oracle signature, program ID, and artifact SHA-256',
+      title: 'Open Receipt Verification Guide',
+      subtitle: 'What gateway and worker signatures prove, and what they do not',
       icon: 'shield',
-      action: () => { onOpenAttestation(); onClose(); },
+      action: () => { onOpenReceiptGuide(); onClose(); },
+    },
+    {
+      id: 'doc-presentation',
+      category: 'Documentation',
+      title: 'Open Interactive Pitch Deck',
+      subtitle: 'Launch the full Aperture architecture presentation slide deck',
+      icon: 'book',
+      action: () => { window.open('/presentation.html', '_blank'); onClose(); },
+    },
+    {
+      id: 'theme-toggle',
+      category: 'Preferences',
+      title: 'Toggle Color Theme',
+      subtitle: 'Switch between dark cyber and clean light appearance',
+      icon: 'sun',
+      shortcut: 'Alt+T',
+      action: () => { onToggleTheme?.(); onClose(); },
     },
     {
       id: 'system-refresh',
@@ -133,6 +177,20 @@ export default function CommandPalette({
       e.preventDefault();
       if (filtered[selectedIndex]) {
         filtered[selectedIndex].action();
+      }
+    } else if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      let shortcut = null;
+      if (/^(?:Digit|Numpad)[1-5]$/.test(e.code)) {
+        shortcut = 'Alt+' + e.code.slice(-1);
+      } else if (e.code === 'KeyT' || e.key.toLowerCase() === 't') {
+        shortcut = 'Alt+T';
+      }
+      if (shortcut) {
+        const command = COMMANDS.find(item => item.shortcut === shortcut);
+        if (command) {
+          e.preventDefault();
+          command.action();
+        }
       }
     } else if (e.key === 'Escape') {
       onClose();

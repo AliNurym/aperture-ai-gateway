@@ -77,3 +77,28 @@
 .workflow-run-journal-id { font: 10px/1.8 Consolas, monospace; overflow-wrap: anywhere; }
 @media (max-width: 900px) { .workflow-run-quote-bounds { grid-template-columns: repeat(2, 1fr); } .workflow-run-start { flex-wrap: wrap; } .workflow-run-start > button { margin-left: 78px; } }
 @media (max-width: 680px) { .workflow-run { padding: 22px; } .workflow-run-heading { flex-direction: column; gap: 16px; } .workflow-run-heading h2 { font-size: 23px; } .workflow-run-state { align-items: flex-start; flex-direction: column; gap: 14px; } .workflow-run-owner { margin-left: 64px; } .workflow-run-start { align-items: flex-start; } .workflow-run-start > div:nth-child(2) { flex-basis: calc(100% - 78px); } .workflow-run-start > button { margin-left: 0; } .workflow-run-quote { padding: 18px; } .workflow-run-step { gap: 12px; } .workflow-run-step-title { align-items: flex-start; flex-direction: column; gap: 8px; } }
+
+/* Dark theme for WorkflowRun */
+[data-theme="dark"] .workflow-run-quote,
+:root.dark-theme .workflow-run-quote {
+  background: #171128;
+  border-color: #352654;
+}
+
+[data-theme="dark"] .workflow-run-quote pre,
+:root.dark-theme .workflow-run-quote pre {
+  background: #120d20;
+  color: #c9b9de;
+}
+
+[data-theme="dark"] .workflow-run-step-number,
+:root.dark-theme .workflow-run-step-number {
+  border-color: #382758;
+  color: #cfb1ff;
+  background: #19122c;
+}
+
+[data-theme="dark"] .workflow-run-quote details,
+:root.dark-theme .workflow-run-quote details {
+  border-color: #2f214c;
+}

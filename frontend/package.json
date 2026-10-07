@@ -7,13 +7,13 @@
     "dev": "node scripts/vite.mjs",
     "build": "node scripts/vite.mjs build",
     "lint": "eslint .",
+    "test": "node --test tests/protocol.test.mjs tests/resultPreview.test.mjs tests/workflowPlan.test.mjs tests/csvSchema.test.mjs tests/motion.test.mjs",
     "test:protocol": "node --test tests/protocol.test.mjs",
     "test:data": "node --test tests/resultPreview.test.mjs tests/workflowPlan.test.mjs tests/csvSchema.test.mjs",
     "test:motion": "node --test tests/motion.test.mjs",
     "preview": "node scripts/vite.mjs preview"
   },
   "dependencies": {
-    "@project-serum/anchor": "^0.26.0",
     "@solana/wallet-adapter-base": "^0.9.27",
     "@solana/wallet-adapter-phantom": "^0.9.29",
     "@solana/wallet-adapter-react": "^0.15.39",
@@ -26,14 +26,11 @@
     "process": "^0.11.10",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-router-dom": "^7.14.0",
     "stream-browserify": "^3.0.0",
     "util": "^0.12.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.4",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",

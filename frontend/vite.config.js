@@ -26,15 +26,12 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          'solana-core': ['@solana/web3.js', '@project-serum/anchor'],
-          'wallet-adapters': [
-            '@solana/wallet-adapter-base',
-            '@solana/wallet-adapter-phantom',
-            '@solana/wallet-adapter-react',
-            '@solana/wallet-adapter-react-ui',
-            '@solana/wallet-adapter-solflare',
-          ],
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('@solana')) {
+              return 'solana-vendor';
+            }
+          }
         },
       },
     },

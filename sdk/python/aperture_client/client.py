@@ -38,7 +38,7 @@ RECEIPT_WRAPPER_KEYS = {
     "explorer_url", "status",
 }
 SYSTEM = "11111111111111111111111111111111"
-DEVNET_GENESIS_HASH = "GH7ome3EiwEr7tu9JuTh2dpYWBJK3z69Xm1ZE3MEE6JC"
+DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"
 MAX_SOURCE_BYTES = 32_000
 
 def validate_devnet_rpc_url(value):
@@ -722,7 +722,15 @@ class ApertureClient:
             raise RuntimeError(f"RPC {method} failed: {body['error'].get('message', 'unknown error')}")
         result = body["result"]
         if self.network == "devnet" and method == "getGenesisHash":
-            require(result == DEVNET_GENESIS_HASH, "Configured RPC endpoint is not the canonical Solana Devnet cluster")
+            observed = (
+                result
+                if isinstance(result, str) and len(result) <= 64 and result.isascii() and result.isalnum()
+                else "<invalid response>"
+            )
+            require(
+                result == DEVNET_GENESIS_HASH,
+                f"Configured RPC returned genesis hash {observed}; expected canonical Solana Devnet hash {DEVNET_GENESIS_HASH}",
+            )
             self._devnet_cluster_verified = True
         return result
 

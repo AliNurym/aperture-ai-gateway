@@ -71,3 +71,10 @@
 .storage-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 @media (max-width: 900px) { .storage-intro { align-items: flex-start; } .storage-capacity-grid { grid-template-columns: 1fr; gap: 22px; } .storage-object-quota { border-left: 0; border-top: 1px solid var(--console-line); padding: 22px 0 0; } }
 @media (max-width: 680px) { .storage-intro { flex-direction: column; gap: 22px; } .storage-identity { width: 100%; box-sizing: border-box; } .storage-capacity .console-section-heading, .storage-files .console-section-heading { flex-direction: column; align-items: flex-start; gap: 18px; } .storage-filters { flex-wrap: wrap; } .storage-files table { min-width: 510px; } .storage-quota > div { flex-wrap: wrap; gap: 12px; } .storage-release-review dl > div { grid-template-columns: 1fr; gap: 4px; } }
+
+/* Dark theme for Storage */
+[data-theme="dark"] .storage-release-review,
+:root.dark-theme .storage-release-review {
+  border-color: #352654;
+  background: #171128;
+}

@@ -2,18 +2,20 @@
 
 **Version:** 2.2 (Autonomous Agent & DePIN Grid Architecture Specification)  
 **Authors:** Aperture Protocol Core Contributors  
-**Classification:** Technical Whitepaper & Cryptographic Specification  
+**Classification:** Implementation & Architecture Notes
 **Solana Program ID:** `A5HfdyRWy77i5DxhTMBa1ZinxVGZbVZnb35EvXUvkNzQ`
 
 ---
+
+> **Implementation scope (2026-10-05):** This paper mixes shipped behavior with architecture targets. The current MVP is a CPU gateway/worker, frontend, Python SDK/MCP server and Solana Devnet settlement protocol. The local preview runs OFF_CHAIN trusted-local Python without container isolation; Docker isolation is available only when configured. Signatures bind reported identities and result hashes, but do not prove faithful computation. Hardware confidentiality, decentralized workers and GPU execution remain roadmap items. See the README and `docs/mvp-evidence.md` for current scope.
 
 ## 1. Abstract
 
 As artificial intelligence transitions from conversational assistants to goal-directed autonomous agents, a fundamental infrastructure bottleneck emerges: **The Compute Sovereignty Dilemma**. Large Language Models (LLMs) are probabilistic token generators that lack deterministic execution capabilities. When tasked with real-world problems—such as financial modeling, algorithmic verification, data processing, and smart contract orchestration—agents require deterministic, sandboxed execution cycles.
 
-Existing Web2 compute clouds (AWS, GCP, Modal) require centralized human identities, credit card billing, and API tokens that expose host systems to catastrophic risk when delegated to autonomous agents. Conversely, decentralized compute networks (Akash, Render) are architected for long-running batch containers or multi-hour model training, lacking sub-second micro-escrow, source-bound policy enforcement, and cryptographic delegation.
+General-purpose cloud providers offer flexible compute but expect operators to manage credentials, budgets and execution policies. Decentralized providers offer different provisioning and trust models. Aperture focuses on a narrower workflow: owner-issued agent identity, source-policy checks, explicit task/runtime limits, resumable CPU work and signed result metadata.
 
-**APERTURE** introduces an off-chain bounded compute oracle coupled with an on-chain Solana micro-settlement substrate. Through **Agent Passports**, human principals delegate bounded cryptographic identities to software agents with revocable, per-run, and total spending allowances. Workloads undergo **deterministic Abstract Syntax Tree (AST) policy analysis** that bounds resource consumption before compute initiation. Micro-billing occurs via **Solana Payment Channels** that charge only upon authenticated worker task admission and conclude with cryptographically signed execution receipts.
+**APERTURE** combines an off-chain CPU gateway/worker with an optional Solana Devnet settlement protocol. Agent Passports and owner-signed quotes bind agent identity, task spend caps and runtime limits. AST checks reject selected source patterns and inform deterministic quotes; configured worker limits enforce runtime and resource ceilings. Devnet tasks settle through payment channels and persistent TaskReceipt accounts, while OFF_CHAIN tasks have no Solana settlement. Gateway and worker signatures bind the reported result and its hashes but do not prove faithful computation.
 
 ---
 
@@ -25,22 +27,22 @@ Existing Web2 compute clouds (AWS, GCP, Modal) require centralized human identit
 ├──────────────────────────────────┬─────────────────────────────────────┤
 │      UNBOUNDED LOCAL COMPUTE     │        CENTRALIZED CLOUD COMPUTE    │
 ├──────────────────────────────────┼─────────────────────────────────────┤
-│ ❌ Shell injection & key theft   │ ❌ Requires human KYC & credit card │
-│ ❌ Host crash via fork bombs     │ ❌ High latency & cold-start costs  │
-│ ❌ No verifiable resource bounds │ ❌ Catastrophic liability on prompt │
-│ ❌ Lack of agent micro-billing   │    injection or runaway agent loops │
-└──────────────────────────────────┴─────────────────────────────────────┘
+│ [-] Shell injection & key theft   │ [-] Broad operator keys & billing │
+│ [-] Host crash via fork bombs     │ [-] High latency & cold-start costs  │
+│ [-] No verifiable resource bounds │ [-] Catastrophic liability on prompt │
+│ [-] Lack of agent micro-billing   │     injection or runaway agent loops │
+└──────────────────────────────────┴──────────────────────────────────────┘
                                    │
                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                    APERTURE: BOUNDED & VERIFIABLE                      │
-├────────────────────────────────────────────────────────────────────────┤
-│ ✔ Cryptographic Agent Passports with spending caps                     │
-│ ✔ Deterministic AST static pre-check (pre-flight quote)                │
-│ ✔ Hardened Docker sandboxes (--net=none, unprivileged, cgroups)        │
-│ ✔ Real-time sub-second payment-channel escrow on Solana               │
-│ ✔ Verifiable Ed25519 Task Receipts for on-chain settlement            │
-└────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    APERTURE: BOUNDED & VERIFIABLE                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│ [+] Cryptographic Agent Passports with spending caps                    │
+│ [+] Deterministic AST static pre-check (pre-flight quote)               │
+│ [+] Hardened Docker sandboxes (--net=none, unprivileged, cgroups)       │
+│ [+] Real-time sub-second payment-channel escrow on Solana              │
+│ [+] Verifiable Ed25519 Task Receipts for on-chain settlement           │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 When an autonomous AI agent needs to evaluate an algorithm:
@@ -112,7 +114,9 @@ Principals retain master wallet security while delegating autonomous operational
 
 The gateway checks allowance reservations in real time against the on-chain passport account or durable ledger, rejecting tasks before admission if allowances are exhausted.
 
-### 3.2 Layer 2: Deterministic AST Policy & Dynamic Pricing Oracle
+### 3.2 Layer 2: Source Policy & Quote Inputs
+
+AST checks reject selected source patterns and estimate complexity; they do not enforce CPU or memory limits. The configured worker enforces runtime/resource limits. In the current quote path, the heuristic uses the default hardware factor and zero telemetry delta; published workload profiles can instead use the operator-configured tariff.
 Before any container is provisioned or container socket contacted, the submitted source code undergoes deterministic AST inspection (`backend/ai_engine.py`):
 1. **Size Boundary:** Payload is capped at 32,000 bytes of UTF-8 source.
 2. **Syntax Validation:** Non-compiling Python is rejected immediately without quote generation.
@@ -132,12 +136,12 @@ $$\text{APS} = 1.0 + 2.0 \cdot \sigma(\Delta_{\text{telemetry}})$$
 
 ### 3.3 Layer 3: Hardened Sandboxed Execution Runtime
 Workers (`backend/worker.py`) implement defence-in-depth:
-* **Network Isolation:** Docker container launched with `--net=none`. The network stack is physically unallocated in the Linux kernel namespace, making egress impossible.
+* **Network Isolation (Docker mode):** The task container is launched with networking disabled. The host, container runtime and gateway remain trusted; this does not prove that every host-level route or side channel is absent.
 * **Privilege Demotion:** Code executes under an unprivileged UID (`nobody` / `appuser`).
 * **Resource Quotas (Cgroups):**
   * `mem_limit`: 256 MiB to 512 MiB hard limit (OOM killer triggers immediately on memory bombs).
   * `cpu_quota` / `cpu_period`: Bounded CPU allocation preventing host starvation.
-  * `pids_limit`: Maximum processes capped to 64, rendering fork bombs ineffective.
+  * `pids_limit`: Docker caps task creation at the configured limit; this helps bound process exhaustion but does not make hostile code safe by itself.
 * **Read-Only Storage:** Code and inputs are mounted read-only via ephemeral memory mounts (`tmpfs`).
 * **Worker Leases:** Tasks are assigned via lease tokens with lease expirations and heartbeats. If a worker goes offline mid-execution, the gateway detects the expired lease and recovers state safely.
 
@@ -171,10 +175,10 @@ Aperture provides an Anthropic-compliant **Model Context Protocol (MCP)** stdio 
    * `get_assigned_workflow_progress`: Inspects live progress and admitted task IDs.
    * `stop_assigned_workflow`: Gracefully terminates an assigned workflow run.
 
-**Security Innovation:** The MCP server stores authorization secrets, bearer tokens, and private keypairs in a process-private **In-Memory Capability Store**. Cryptographic credentials never appear in LLM completion prompts or context windows, entirely eliminating prompt injection leakage.
+**Credential handling:** The MCP server keeps authorization secrets, bearer tokens and private keypairs in a process-private in-memory capability store rather than ordinary tool descriptions or responses. This reduces direct credential exposure; it does not prevent prompt injection from invoking authorized tools or stop sensitive data from appearing in tool output.
 
-### 3.5 Layer 5: Zero-Leak Private Data & Artifact Substrate
-Aperture enforces strict data hygiene for data-intensive agent tasks:
+### 3.5 Layer 5: Owner-Scoped Data & Artifact Storage
+The current object store scopes files to owner/agent identities, verifies hashes and enforces quotas and release locks. Stored bytes are not encrypted by this object store; access to the host and authorized worker remains a trust boundary.
 * **Quota Enforcement:** Each owner/agent pair is constrained to a 256 MiB storage quota and a maximum of 512 concurrent objects (`backend/artifact_store.py`).
 * **Content Addressing:** Files are referenced strictly by their SHA-256 hash and unique `obj-<hex>` identifiers.
 * **Lease Locking:** Files cannot be deleted while bound to active quotes or in-progress DAG stages.
@@ -228,7 +232,9 @@ sequenceDiagram
 
 ---
 
-## 5. Comparative Analysis: Aperture vs. Industry Alternatives
+## 5. Positioning Hypotheses (Not a Benchmark)
+
+The following matrix is a product-positioning hypothesis, not a current feature-by-feature benchmark or provider audit. Verify each provider claim against current primary documentation before external use.
 
 | Feature / Dimension | **APERTURE** | **AWS Lambda** | **Akash Network** | **Phala Network (TEE)** |
 | :--- | :--- | :--- | :--- | :--- |
@@ -236,7 +242,7 @@ sequenceDiagram
 | **Identity & Auth** | Solana Keypairs & Passports | AWS IAM & Credit Cards | Keplr / Cosmos Wallet | SGX Enclaves / Certs |
 | **Billing Granularity** | Sub-second lamport streaming | 1ms billing to Credit Card | Hourly / Daily Leases | Token Gas Billing |
 | **Pre-Flight Pricing** | Deterministic AST Quote | Unpredictable (Post-billing) | Bid/Ask Market | Gas Limit Estimate |
-| **Network Isolation** | `--net=none` (Zero Egress) | Configurable VPC | Open Network | Open / Enclave proxy |
+| **Network Isolation** | Disabled networking in configured Docker mode | Configurable VPC | Provider-specific | Enclave / proxy dependent |
 | **Agent Protocol Support** | Native MCP + Python SDK | REST / SDK | CLI / Akash Deploy | RPC / Polkadot SDK |
 | **Settlement Evidence** | Signed `TaskReceipt` PDA | CloudWatch Logs | On-chain Escrow Close | Remote Attestation Proof |
 
@@ -246,9 +252,9 @@ sequenceDiagram
 
 ### 6.1 Attack Vectors & Mitigations
 * **Threat 1: Malicious Code Execution (Host Escape)**
-  * *Mitigation:* Dual boundary. Layer 1 AST inspector rejects dangerous imports and reflection. Layer 2 executes in unprivileged Docker with zero network, drop-all Linux capabilities, read-only rootfs, and cgroups limits.
+  * *Mitigation:* Source-policy checks reject selected unsafe constructs; they are not a sandbox. Configured Docker workers add an unprivileged container, disabled container networking, a read-only root and resource limits. The trusted-local preview has no container boundary.
 * **Threat 2: Exhaustion DoS & Fork Bombs**
-  * *Mitigation:* Kernel `pids_limit` prevents thread creation. Hard execution timer forcibly kills containers upon `deadline_unix`. Gateway rejects concurrent requests above `APERTURE_MAX_ACTIVE_TASKS`.
+  * *Mitigation:* Docker `pids_limit` caps task creation, and the container runtime enforces configured memory, CPU and time limits. These controls depend on a correctly configured host and do not protect trusted-local execution. Gateway rejects concurrent requests above `APERTURE_MAX_ACTIVE_TASKS`.
 * **Threat 3: Double-Claiming & Financial Replay**
   * *Mitigation:* On-chain `TaskReceipt` PDA initialization fails if `task_hash` exists. State store enforces unique active wallet constraints in SQLite ACID transactions.
 * **Threat 4: Worker Result Tampering**
@@ -267,4 +273,4 @@ sequenceDiagram
 
 ## 8. Conclusion
 
-APERTURE bridges the divide between non-deterministic probabilistic intelligence and deterministic decentralized finance. By providing AI agents with a secure, bounded computational organ governed by cryptographic passports and Solana micro-settlement, APERTURE establishes the fundamental computing substrate for the autonomous agentic economy.
+Aperture is an early CPU compute product for developers who need owner-approved agent workloads, bounded spending, durable recovery and verifiable result files. Its current Solana integration settles tasks on Devnet; it does not prove that a worker computed the result faithfully. The product hypothesis is that this control-and-recovery path is useful enough to repeat. Independent pilots must test that need before making a market claim.

@@ -41,7 +41,7 @@ def run_passport_delegation_demo():
     print("\n[Step 1] Keypair Generation:")
     print(f"  * Principal Owner Wallet: {owner_pubkey_str}")
     print(f"  * Delegated Agent Key:    {agent_pubkey_str}")
-    print("  🔒 Separation of Concerns: The Agent NEVER possesses the Owner's private key.")
+    print("  [SECURITY] Separation of Concerns: The Agent NEVER possesses the Owner's private key.")
 
     # 2. Define the Agent Passport Delegation Policy
     validity_duration_seconds = 86_400  # 24 Hours
@@ -85,7 +85,7 @@ def run_passport_delegation_demo():
         verify_key.verify(canonical_policy_bytes, owner_sig_bytes)
         print("  -> Cryptographic verification PASSED: Signature strictly matches Owner public key.")
     except Exception as e:
-        print(f"  ❌ Signature verification failed: {e}")
+        print(f"  [FAIL] Signature verification failed: {e}")
         sys.exit(1)
 
     # 5. Autonomous Agent Invocation (Compliant with Passport)
@@ -112,7 +112,7 @@ def run_passport_delegation_demo():
     if violates_limits:
         print("  -> Gateway Admission Decision: REJECTED WITH HTTP 403")
         print(f"     Reason: Requested budget {rogue_task_budget} exceeds delegated passport cap {passport_policy['max_cost_lamports']}.")
-        print("  🛡️ Principal treasury successfully protected from runaway compute consumption.")
+        print("  [PROTECTED] Principal treasury successfully protected from runaway compute consumption.")
 
     # 7. Owner Inbox Workflow Delegation & Emergency Stop
     print("\n[Step 6] Owner Workflow Inbox Delegation & Emergency Control:")
@@ -137,7 +137,7 @@ def run_passport_delegation_demo():
     verify_key.verify(stop_message.encode("utf-8"), bytes(owner_stop_sig))
     print("  -> Owner Emergency Stop Signature VERIFIED: Immediate halt without leaking agent state.")
 
-    print("\n✅ Agent Passport delegation & Owner Inbox lifecycle demonstrated with complete cryptographic verification.")
+    print("\n[SUCCESS] Agent Passport delegation & Owner Inbox lifecycle demonstrated with complete cryptographic verification.")
 
 
 def run_live(gateway_url: str):
@@ -187,9 +187,9 @@ def run_live(gateway_url: str):
     print("\n[Step 4] Testing Gateway Policy Enforcement on Rogue Workload (200,000 > 50,000 cap)...")
     try:
         client.quote("import math; print(math.sqrt(16))", max_cost_lamports=200_000, max_runtime_seconds=10)
-        print("  ❌ Expected 403 Forbidden but quote succeeded!")
+        print("  [FAIL] Expected 403 Forbidden but quote succeeded!")
     except Exception as err:
-        print(f"  🛡️ Gateway rejected runaway quote as expected: {err}")
+        print(f"  [PROTECTED] Gateway rejected runaway quote as expected: {err}")
 
     print("\n[Step 5] Owner Cryptographic Revocation...")
     revocation = client.passport(
@@ -201,7 +201,7 @@ def run_live(gateway_url: str):
         total_budget_lamports=500_000,
     )
     print(f"  * Revocation Status: Revoked = {revocation.get('revoked')}")
-    print("\n✅ Live cryptographic passport lifecycle verified against running Gateway.")
+    print("\n[SUCCESS] Live cryptographic passport lifecycle verified against running Gateway.")
 
 
 def main():
@@ -216,7 +216,7 @@ def main():
         try:
             run_live(args.gateway)
         except Exception as err:
-            print(f"❌ Live execution failed (is Gateway running at {args.gateway}?): {err}")
+            print(f"[FAIL] Live execution failed (is Gateway running at {args.gateway}?): {err}")
             print("Falling back to local validation run...\n")
             run_passport_delegation_demo()
     else:

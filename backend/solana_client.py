@@ -29,7 +29,7 @@ load_dotenv()
 
 DEFAULT_PROGRAM_ID = "A5HfdyRWy77i5DxhTMBa1ZinxVGZbVZnb35EvXUvkNzQ"
 DEVNET_RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.devnet.solana.com")
-DEVNET_GENESIS_HASH = "GH7ome3EiwEr7tu9JuTh2dpYWBJK3z69Xm1ZE3MEE6JC"
+DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"
 KEYPAIR_PATH = Path(__file__).parent / "oracle_keypair.json"
 SYSTEM_PROGRAM_ID = Pubkey.from_string("11111111111111111111111111111111")
 
@@ -77,8 +77,8 @@ class SolanaClient:
             
         # 2. AI Oracle Keypair (Signer)
         self.ai_signer = self._load_or_create_keypair()
-        print(f"🟢 [SOLANA] AI ORACLE SIGNER ONLINE: {self.ai_signer.pubkey()}")
-        print(f"🔗 [SOLANA] PROGRAM ID: {self.program_id}")
+        print(f"[SOLANA] AI ORACLE SIGNER ONLINE: {self.ai_signer.pubkey()}")
+        print(f"[SOLANA] PROGRAM ID: {self.program_id}")
 
     def _load_or_create_keypair(self) -> Keypair:
         """Load the configured signer; explicit off-chain mode may use an ephemeral key."""
@@ -134,8 +134,12 @@ class SolanaClient:
             response = await self.client.get_genesis_hash()
         except Exception as error:
             raise RuntimeError("Could not verify the configured RPC cluster genesis hash.") from error
-        if str(response.value) != DEVNET_GENESIS_HASH:
-            raise ValueError("SOLANA_RPC_URL does not point to the canonical Solana Devnet cluster.")
+        observed_genesis_hash = str(response.value)
+        if observed_genesis_hash != DEVNET_GENESIS_HASH:
+            raise ValueError(
+                "SOLANA_RPC_URL returned genesis hash "
+                f"{observed_genesis_hash}; expected canonical Solana Devnet hash {DEVNET_GENESIS_HASH}."
+            )
         self._devnet_cluster_verified = True
 
     async def get_protocol_config(self) -> dict | None:
@@ -202,7 +206,7 @@ class SolanaClient:
                 raise RuntimeError("Protocol config initialization was confirmed but the config account did not match.")
             return signature
         except Exception as e:
-            print(f"🔴 [SOLANA] protocol config initialization error: {e}")
+            print(f"[SOLANA] protocol config initialization error: {e}")
             raise
 
     async def get_channel_state(self, user_pubkey_str: str) -> dict | None:
@@ -431,10 +435,10 @@ class SolanaClient:
             await self.verify_devnet_cluster()
             target = Pubkey.from_string(pubkey_str)
             resp = await self.client.request_airdrop(target, lamports)
-            print(f"💧 [AIRDROP] Sent {lamports / 1e9} SOL to {pubkey_str}: {resp.value}")
+            print(f"[AIRDROP] Sent {lamports / 1e9} SOL to {pubkey_str}: {resp.value}")
             return True
         except Exception as e:
-            print(f"⚠️ [AIRDROP FAILED]: {e}")
+            print(f"[AIRDROP FAILED]: {e}")
             return False
 
     async def close(self):

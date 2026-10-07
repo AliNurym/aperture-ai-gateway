@@ -63,7 +63,7 @@ def run_demo():
         print(f"  * Estimated RAM:   {analysis.get('ram')} MiB")
 
         if analysis.get("security") != "SAFE":
-            print(f"❌ Workload blocked by source policy: {analysis.get('reason')}")
+            print(f"[BLOCKED] Workload blocked by source policy: {analysis.get('reason')}")
             sys.exit(1)
         print("  -> Workload statically approved for execution.")
 
@@ -87,7 +87,7 @@ def run_demo():
         print(f"    - Portfolio [{item['portfolio'].upper()}]:")
         print(f"        95% Loss (VaR):       {item['loss_p95']:.6f}")
         print(f"        Tail Mean (CVaR):     {item['tail_mean']:.6f}")
-    print("\n✅ Monte Carlo computation completed with verified deterministic bounds.")
+    print("\n[SUCCESS] Monte Carlo computation completed with verified deterministic bounds.")
 
 
 def run_live(gateway_url: str):
@@ -158,7 +158,7 @@ def run_live(gateway_url: str):
         print(f"    - Portfolio [{item['portfolio'].upper()}]:")
         print(f"        95% Loss (VaR):       {item['loss_p95']:.6f}")
         print(f"        Tail Mean (CVaR):     {item['tail_mean']:.6f}")
-    print("\n✅ Live Monte Carlo computation executed and verified by Aperture Gateway.")
+    print("\n[SUCCESS] Live Monte Carlo computation executed and verified by Aperture Gateway.")
 
 
 def main():
@@ -173,7 +173,7 @@ def main():
         try:
             run_live(args.gateway)
         except Exception as err:
-            print(f"❌ Live execution failed (is Gateway running at {args.gateway}?): {err}")
+            print(f"[FAIL] Live execution failed (is Gateway running at {args.gateway}?): {err}")
             print("Falling back to local validation run...\n")
             run_demo()
     else:

@@ -13,7 +13,8 @@ function Find-Node {
     $candidates = @(
         "$env:ProgramFiles\nodejs\node.exe",
         "$env:LOCALAPPDATA\Programs\nodejs\node.exe",
-        "$env:USERPROFILE\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
+        "$env:USERPROFILE\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe",
+        "$env:USERPROFILE\Documents\GitHub\medsklad1\temp_node\node-v20.12.2-win-x64\node.exe"
     )
     foreach ($candidate in $candidates) { if (Test-Path -LiteralPath $candidate) { return $candidate } }
     throw 'Node.js is missing. Install Node.js LTS and reopen your terminal.'

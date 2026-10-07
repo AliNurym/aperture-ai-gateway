@@ -143,3 +143,68 @@ body,
   }
   .wallet-adapter-dropdown-list-item:not([disabled]):hover { background: #f1eaf8 !important; }
 }
+
+/* Dark theme for Solana wallet adapter modal & dropdowns */
+[data-theme="dark"] .wallet-adapter-modal-wrapper,
+:root.dark-theme .wallet-adapter-modal-wrapper {
+  background: #161026 !important;
+  border-color: #352554 !important;
+  color: #f7f4fd !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.75) !important;
+}
+
+[data-theme="dark"] .wallet-adapter-modal-title,
+:root.dark-theme .wallet-adapter-modal-title {
+  color: #f7f4fd !important;
+}
+
+[data-theme="dark"] .wallet-adapter-modal-button-close,
+:root.dark-theme .wallet-adapter-modal-button-close {
+  background: #221738 !important;
+  color: #cfb1ff !important;
+}
+
+[data-theme="dark"] .wallet-adapter-modal-list li .wallet-adapter-button,
+:root.dark-theme .wallet-adapter-modal-list li .wallet-adapter-button {
+  background: #1b132e !important;
+  border-color: #2f214c !important;
+  color: #f7f4fd !important;
+}
+
+[data-theme="dark"] .wallet-adapter-modal-list li .wallet-adapter-button:not([disabled]):hover,
+:root.dark-theme .wallet-adapter-modal-list li .wallet-adapter-button:not([disabled]):hover {
+  background: #251a3d !important;
+  border-color: #aa81fc !important;
+}
+
+[data-theme="dark"] .wallet-adapter-dropdown-list,
+:root.dark-theme .wallet-adapter-dropdown-list {
+  background: #161026 !important;
+  border-color: #352554 !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6) !important;
+}
+
+[data-theme="dark"] .wallet-adapter-dropdown-list-item,
+:root.dark-theme .wallet-adapter-dropdown-list-item {
+  color: #f7f4fd !important;
+}
+
+[data-theme="dark"] .wallet-adapter-dropdown-list-item:not([disabled]):hover,
+:root.dark-theme .wallet-adapter-dropdown-list-item:not([disabled]):hover {
+  background: #221738 !important;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb,
+:root.dark-theme ::-webkit-scrollbar-thumb {
+  background: #392858;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover,
+:root.dark-theme ::-webkit-scrollbar-thumb:hover {
+  background: #543b82;
+}
+
+[data-theme="dark"] .wallet-adapter-modal-list-more,
+:root.dark-theme .wallet-adapter-modal-list-more {
+  color: #cfb1ff !important;
+}

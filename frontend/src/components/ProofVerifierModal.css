@@ -1,4 +1,4 @@
-/* Cryptographic Attestation Verifier Modal */
+/* Receipt evidence panel */
 .proof-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -95,35 +95,6 @@
   color: var(--console-primary, #6950a1);
 }
 
-.proof-modal-tabs {
-  display: flex;
-  gap: 8px;
-  padding: 12px 28px 0;
-  background: #faf8fd;
-  border-bottom: 1px solid var(--console-line, #ede7f3);
-}
-
-.proof-tab-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--console-muted, #6e6577);
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
-}
-
-.proof-tab-btn.active {
-  color: var(--console-primary, #6950a1);
-  border-bottom-color: var(--console-primary, #6950a1);
-  font-weight: 600;
-}
-
 .proof-modal-body {
   padding: 24px 28px;
   overflow-y: auto;
@@ -139,6 +110,42 @@
   background: linear-gradient(135deg, rgba(88, 153, 121, 0.12) 0%, rgba(105, 80, 161, 0.08) 100%);
   border: 1px solid rgba(88, 153, 121, 0.28);
   margin-bottom: 20px;
+}
+
+.proof-status-banner.is-unverified {
+  background: #fff8e8;
+  border-color: #ead5a3;
+}
+
+.proof-status-banner.is-unverified .proof-status-indicator {
+  background: #bd8320;
+  box-shadow: 0 0 10px rgba(189, 131, 32, 0.35);
+}
+
+.proof-status-banner.is-unverified strong {
+  color: #78561a;
+}
+
+.proof-status-banner.is-unverified .proof-pill-valid {
+  background: #a66a00;
+}
+
+.proof-status-banner.is-failed {
+  background: #fff0f0;
+  border-color: #e5b4b4;
+}
+
+.proof-status-banner.is-failed .proof-status-indicator {
+  background: #b3261e;
+  box-shadow: 0 0 10px rgba(179, 38, 30, 0.3);
+}
+
+.proof-status-banner.is-failed strong {
+  color: #8c1d18;
+}
+
+.proof-status-banner.is-failed .proof-pill-valid {
+  background: #b3261e;
 }
 
 .proof-status-indicator {
@@ -225,6 +232,43 @@
   word-break: break-all;
 }
 
+.proof-verification-note,
+.proof-limits-note,
+.proof-empty-state p {
+  color: var(--console-muted, #6e6577);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.proof-verification-note {
+  margin: -8px 0 18px;
+}
+
+.proof-limits-note {
+  margin: 18px 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f7f4fa;
+}
+
+.proof-empty-state h3 {
+  margin: 0 0 10px;
+  color: var(--console-ink, #251b34);
+  font-size: 16px;
+}
+
+.proof-empty-state p + p {
+  margin-top: 10px;
+}
+
+.proof-json-details summary {
+  margin-bottom: 10px;
+  color: var(--console-primary, #6950a1);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .proof-modal-footer {
   display: flex;
   align-items: center;
@@ -257,4 +301,107 @@
   .proof-field-val {
     text-align: left;
   }
+}
+
+/* ==========================================================================
+   Dark Theme for ProofVerifierModal
+   ========================================================================== */
+[data-theme="dark"] .proof-modal,
+:root.dark-theme .proof-modal {
+  background: #161026;
+  border-color: #322250;
+  box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(170, 129, 252, 0.15);
+}
+
+[data-theme="dark"] .proof-modal-header,
+:root.dark-theme .proof-modal-header {
+  border-bottom-color: #2b1f41;
+}
+
+[data-theme="dark"] .proof-modal-title-wrap h2,
+:root.dark-theme .proof-modal-title-wrap h2 {
+  color: #f7f4fd;
+}
+
+[data-theme="dark"] .proof-modal-title-wrap p,
+:root.dark-theme .proof-modal-title-wrap p {
+  color: #a797be;
+}
+
+[data-theme="dark"] .proof-modal-close,
+:root.dark-theme .proof-modal-close {
+  color: #a797be;
+}
+
+[data-theme="dark"] .proof-modal-close:hover,
+:root.dark-theme .proof-modal-close:hover {
+  background: #251b3a;
+  color: #cfb1ff;
+}
+
+[data-theme="dark"] .proof-card,
+:root.dark-theme .proof-card {
+  background: #1a122e;
+  border-color: #2f214a;
+}
+
+[data-theme="dark"] .proof-card-header,
+:root.dark-theme .proof-card-header {
+  border-bottom-color: #261a3d;
+}
+
+[data-theme="dark"] .proof-card-title,
+:root.dark-theme .proof-card-title {
+  color: #ede5f7;
+}
+
+[data-theme="dark"] .proof-field-row,
+:root.dark-theme .proof-field-row {
+  border-bottom-color: #24193a;
+}
+
+[data-theme="dark"] .proof-field-key,
+:root.dark-theme .proof-field-key {
+  color: #a797be;
+}
+
+[data-theme="dark"] .proof-field-val,
+:root.dark-theme .proof-field-val {
+  color: #f7f4fd;
+}
+
+[data-theme="dark"] .proof-field-val.code,
+:root.dark-theme .proof-field-val.code {
+  background: #120d20;
+  color: #cfb1ff;
+  border: 1px solid #2b1d47;
+}
+
+[data-theme="dark"] .proof-limits-note,
+:root.dark-theme .proof-limits-note {
+  background: #1c1430;
+  color: #c4b6d6;
+}
+
+[data-theme="dark"] .proof-empty-state h3,
+:root.dark-theme .proof-empty-state h3 {
+  color: #f7f4fd;
+}
+
+[data-theme="dark"] .proof-empty-state p,
+:root.dark-theme .proof-empty-state p {
+  color: #a797be;
+}
+
+[data-theme="dark"] .proof-json-pre,
+:root.dark-theme .proof-json-pre {
+  background: #120d20;
+  color: #d8cde6;
+  border-color: #2b1f41;
+}
+
+[data-theme="dark"] .proof-modal-footer,
+:root.dark-theme .proof-modal-footer {
+  background: #120d20;
+  border-top-color: #2b1f41;
 }

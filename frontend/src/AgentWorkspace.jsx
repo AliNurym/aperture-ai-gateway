@@ -118,6 +118,10 @@ export default function AgentWorkspace({ context, owner, signMessage, plan, disa
       <label htmlFor="workflow-agent">Agent public key<input id="workflow-agent" list="workflow-agent-options" value={agent} disabled={busy || disabled} onChange={event => setAgent(event.target.value.trim())} placeholder="Choose an owner-issued agent" autoComplete="off" /></label>
       <datalist id="workflow-agent-options">{passports.map(item => <option value={item.agent_pubkey} key={item.agent_pubkey}>{item.name}</option>)}</datalist>
       <button className="console-button secondary" onClick={loadAgents} disabled={!canOperate}><Icon name="shield" size={16} />Load my agents</button>
+      <button className="console-text-button" type="button" onClick={() => {
+        setAgent('7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU');
+        setNotice('Demo agent key loaded (autonomous financial worker). Assign inputs or start host observation.');
+      }}><Icon name="spark" size={15} />Demo agent</button>
     </div>
     <div className="workflow-hero-actions">
       <button className={'console-button ' + (currentAssigned ? 'secondary' : 'primary')} onClick={handoff} disabled={!canOperate || !agent || agent === owner || !plan || Boolean(currentAssigned)}><Icon name="upload" size={16} />{currentAssigned ? 'Files assigned' : busy ? 'Authorizing…' : 'Assign selected files'}</button>

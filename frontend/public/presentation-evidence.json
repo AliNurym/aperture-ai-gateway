@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "verified_date": "2026-10-05",
+  "scope": "The workflow measurements below are synthetic local CPU checks on Windows / Python 3.13.14. They make no Docker-isolation or payment claim. A separate retained paid run is recorded below. Browser appearance was not verified.",
+  "devnet_execution": {
+    "task_id": "task-183cd90e80584f2f933afe53349fa7b1",
+    "settlement": "DEVNET",
+    "settled_at_utc": "2026-09-27T18:36:32Z",
+    "execution_mode": "trusted_local",
+    "docker_isolation": false,
+    "scenarios": 1500000,
+    "execution_seconds": 0.9525,
+    "owner_deposit_lamports": 10000000,
+    "charged_lamports": 3200,
+    "task_receipt_address": "E1wgDM7gaSLSrU9gZ4BJMSNJ7esQYXi3nk8FzPdiydDL",
+    "settlement_signature": "59yEcz3hDauPWuX9NdgMP9fQwtQLF2YMkz8vphMrtFs1pEHAEXRSaBoVnMiQ1qDsbjns8ZtDRrCFYtgRqduHWNza",
+    "rpc_observation": {
+      "captured_date": "2026-10-05",
+      "endpoint": "https://api.devnet.solana.com",
+      "signature_status": "finalized",
+      "slot": 504877196,
+      "official_endpoint_genesis_hash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+      "independent_public_devnet_docs_endpoint": "https://docs-demo.solana-devnet.quiknode.pro/",
+      "independent_endpoint_genesis_hash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+      "independent_endpoint_finalized_slot": 507727671,
+      "settlement_status": "finalized",
+      "settlement_slot": 504877196,
+      "settlement_error": null,
+      "readiness_snapshot": {
+        "captured_date": "2026-10-05",
+        "program_deployed": true,
+        "program_id": "A5HfdyRWy77i5DxhTMBa1ZinxVGZbVZnb35EvXUvkNzQ",
+        "protocol_config_verified": true,
+        "protocol_version": 2
+      },
+      "solana_method_page_example_genesis_hash": "GH7ome3EiwEr7tu9JuTh2dpYWBJK3z69Xm1ZE3MEE6JC",
+      "method_page_example_matches_live_endpoints": false,
+      "network_identity_resolution": "official_and_independent_live_devnet_endpoints_agree"
+    },
+    "scope_note": "Retained paid execution with a verified on-chain TaskReceipt. The official Devnet RPC and an independent public Devnet documentation endpoint return the same genesis hash and both confirm the settlement finalized at slot 504877196. The Solana getGenesisHash documentation example shows a different static value."
+  },
+  "assigned_workflow": {
+    "status": "completed",
+    "input_rows": 17000,
+    "batch_count": 4,
+    "step_count": 5,
+    "new_tasks": 5,
+    "execution_mode": "reviewed_trusted_local",
+    "settlement": "OFF_CHAIN",
+    "owner_handoff_verified": true,
+    "regional_csv_verified": true,
+    "decimal_totals_verified": true,
+    "console_workflow_verified": true,
+    "measurement": {
+      "gateway_pipeline_seconds": 7.964213,
+      "worker_execution_seconds": 0.864,
+      "actual_charged_lamports": 0,
+      "budget_approvals": 1,
+      "identical_result_bytes": true,
+      "timing_scope": "CSV batching/upload, handoff, approved execution, intentional admission interruption/recovery and three verified result downloads; excludes service startup and passport setup",
+      "comparison_limit": "Same host, input bytes and sources. Direct path excludes uploads, authorization, durable journal, gateway, receipts and recovery; gateway timing includes an intentional fault. No cloud/GPU/market-price or speed superiority claim.",
+      "direct_python_seconds": 0.907977
+    }
+  },
+  "result": {
+    "valid_rows": 16983,
+    "invalid_rows": 17,
+    "files": [
+      "report.json",
+      "categories.csv",
+      "quality.csv"
+    ],
+    "groups": {
+      "compute": {
+        "rows": 4233,
+        "total": 20275.43,
+        "total_decimal": "20275.43",
+        "minimum": 0.0,
+        "maximum": 9.7
+      },
+      "network": {
+        "rows": 4250,
+        "total": 20322.19,
+        "total_decimal": "20322.19",
+        "minimum": 0.0,
+        "maximum": 9.7
+      },
+      "storage": {
+        "rows": 4250,
+        "total": 20318.53,
+        "total_decimal": "20318.53",
+        "minimum": 0.0,
+        "maximum": 9.7
+      },
+      "support": {
+        "rows": 4250,
+        "total": 20316.14,
+        "total_decimal": "20316.14",
+        "minimum": 0.0,
+        "maximum": 9.7
+      }
+    },
+    "sha256": {
+      "report.json": "4ee4721571f7b0bb934331ba42e2f000a1eaed937cc1001774360a91f2d0231d",
+      "categories.csv": "1779740106ba12f31aca306a2a935a79e7ef53800dc739a05b0fdb91dab4b39d",
+      "quality.csv": "d047a036c6e6baf298c54456b4d264b74747eca6ff819d56deeb5cad7475b3f1"
+    }
+  },
+  "exported_plan": {
+    "status": "completed",
+    "settlement": "OFF_CHAIN",
+    "csv_batches": 17,
+    "workflow_steps": 20,
+    "new_tasks": 20,
+    "frontend_plan_executed_by_cli": true,
+    "intermediate_merges": 2,
+    "prepared_without_jobs": true,
+    "replay_verified_existing_files": true,
+    "independent_json_csv_match": true,
+    "storage_bytes_after_release": 0
+  },
+  "checks": {
+    "backend": {
+      "passed": 81,
+      "skipped": 2
+    },
+    "sdk": {
+      "passed": 36
+    },
+    "frontend": {
+      "passed": 46
+    },
+    "contract_rust": {
+      "passed": 15
+    },
+    "frontend_build": "passed",
+    "frontend_lint": "passed",
+    "coverage_percent": null,
+    "browser_visual_review": "not_verified"
+  },
+  "reproduce": [
+    "python scripts/demo_workflow.py --rows 17000 --owner-handoff --regional-csv --console-workflow --compare-local --output .aperture-runs/comparison",
+    "python scripts/check_exported_plan.py --output .aperture-runs/exported-plan"
+  ]
+}

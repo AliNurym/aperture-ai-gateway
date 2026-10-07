@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
-import { PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
+import { Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
 import Icon from './components/Icon';
 import { APERTURE_PROGRAM_ID, agentInstructionData, canonicalJson, sha256Hex, verifyAgentPassport } from './utils/protocol';
 import { requestErrorMessage as errorText } from './utils/requestError';
@@ -217,7 +217,32 @@ export default function Agents() {
       <section className="console-panel agents-form"><div className="console-section-heading"><h2>{editing ? 'Update passport' : 'Issue a passport'}</h2><Icon name="shield" /></div>
         <form onSubmit={event => { event.preventDefault(); authorize(editing ? 'update' : 'register'); }}>
           <p className="agents-owner" title={owner}>Owner · {owner.slice(0, 8)}…{owner.slice(-8)}</p>
-          <label>Agent public key<input name="agent_pubkey" value={form.agent_pubkey} onChange={updateField} disabled={busy || editing} placeholder="Solana / Ed25519 public key" required autoComplete="off" aria-describedby="agent-key-help" /></label>
+          <div className="agents-key-wrapper">
+            <div className="agents-label-row">
+              <label htmlFor="agent-pubkey-input">Agent public key</label>
+              {!editing && (
+                <button
+                  type="button"
+                  className="console-text-button agents-gen-key"
+                  disabled={busy}
+                  onClick={() => setForm(prev => ({ ...prev, agent_pubkey: Keypair.generate().publicKey.toBase58() }))}
+                >
+                  <Icon name="spark" size={13} /> Demo key
+                </button>
+              )}
+            </div>
+            <input
+              id="agent-pubkey-input"
+              name="agent_pubkey"
+              value={form.agent_pubkey}
+              onChange={updateField}
+              disabled={busy || editing}
+              placeholder="Solana / Ed25519 public key"
+              required
+              autoComplete="off"
+              aria-describedby="agent-key-help"
+            />
+          </div>
           <p id="agent-key-help" className="agents-field-help">Keep the private key in your SDK environment.</p>
           <label>Name<input name="name" value={form.name} onChange={updateField} disabled={busy} maxLength={80} required /></label>
           <div className="agents-fields"><label>Max cost per task · SOL<input name="maxCost" type="number" min="0.000000001" max="1" step="0.000001" value={form.maxCost} onChange={updateField} disabled={busy} required /></label><label>Max runtime · seconds<input name="maxRuntime" type="number" min="1" max="180" step="1" value={form.maxRuntime} onChange={updateField} disabled={busy} required /></label></div>

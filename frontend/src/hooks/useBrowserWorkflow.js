@@ -112,7 +112,7 @@ export default function useBrowserWorkflow({ apiUrl, gatewayHealth, gatewayOnlin
         && config.oracle === current.context.gateway_pubkey && config.treasury === current.context.treasury, 'The Devnet protocol configuration differs from the pinned deployment.');
       check(channel.wallet === current.context.owner && channel.initialized && Number.isSafeInteger(channel.lamports)
         && channel.lamports >= (maximumCost || 0) && channel.burn_rate_lamports === 0, 'Fund an idle compatible channel before approving this step.');
-      check(live.current.connection && await live.current.connection.getGenesisHash() === 'GH7ome3EiwEr7tu9JuTh2dpYWBJK3z69Xm1ZE3MEE6JC', 'The independent RPC is not Solana Devnet.');
+      check(live.current.connection && await live.current.connection.getGenesisHash() === 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG', 'The independent RPC is not Solana Devnet.');
     }
     ensureCurrent(current.id);
   }

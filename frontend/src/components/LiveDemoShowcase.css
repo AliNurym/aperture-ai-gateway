@@ -46,6 +46,9 @@
 }
 
 .demo-scenario-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 14px;
   border: 0;
   border-radius: 10px;
@@ -124,15 +127,29 @@
   justify-content: space-between;
   margin: 24px 0 20px;
   position: relative;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.demo-step-wrapper {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.demo-step-wrapper:last-child {
+  flex: 0 0 auto;
 }
 
 .demo-progress-step {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   position: relative;
   z-index: 1;
+  flex-shrink: 0;
 }
 
 .demo-progress-step .step-circle {
@@ -158,20 +175,27 @@
 }
 
 .demo-progress-step.done .step-circle {
-  background: #4caf50;
+  background: #50785a;
   color: #ffffff;
-  box-shadow: 0 0 10px rgba(76, 175, 80, 0.3);
+  box-shadow: 0 0 10px rgba(80, 120, 90, 0.3);
 }
 
-.demo-progress-step span {
+.demo-step-title {
   font-size: 12px;
   font-weight: 500;
   color: var(--console-muted, #6e6577);
   text-align: center;
 }
 
-.demo-progress-step.active span,
-.demo-progress-step.done span {
+.demo-step-sub {
+  font-size: 10.5px;
+  color: #8c7f9c;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.demo-progress-step.active .demo-step-title,
+.demo-progress-step.done .demo-step-title {
   color: var(--console-ink, #251b34);
   font-weight: 600;
 }
@@ -180,7 +204,12 @@
   flex: 1;
   height: 2px;
   background: #ede8f5;
-  margin: 0 8px 24px;
+  margin: 0 12px 26px;
+  transition: background 0.3s ease;
+}
+
+.demo-progress-line.filled {
+  background: var(--console-primary, #6950a1);
 }
 
 /* Running banner */
@@ -250,18 +279,18 @@
   margin-bottom: 16px;
 }
 
-.demo-verified-tag {
+.demo-preview-tag {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #2e6648;
+  color: #51416c;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.5px;
-  background: rgba(88, 153, 121, 0.12);
+  background: rgba(105, 80, 161, 0.08);
   padding: 4px 12px;
   border-radius: 999px;
-  border: 1px solid rgba(88, 153, 121, 0.25);
+  border: 1px solid rgba(105, 80, 161, 0.2);
 }
 
 .demo-settle-tag {
@@ -369,4 +398,163 @@
   .demo-progress-step {
     flex-direction: row;
   }
+}
+
+/* ==========================================================================
+   Dark Theme for LiveDemoShowcase
+   ========================================================================== */
+[data-theme="dark"] .live-demo-showcase,
+:root.dark-theme .live-demo-showcase {
+  background: linear-gradient(180deg, #171128 0%, #120d20 100%);
+  border-color: #31214e;
+  box-shadow: 0 16px 44px -8px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="dark"] .demo-header-copy h2,
+:root.dark-theme .demo-header-copy h2 {
+  color: #f7f4fd;
+}
+
+[data-theme="dark"] .demo-header-copy p,
+:root.dark-theme .demo-header-copy p {
+  color: #a797be;
+}
+
+[data-theme="dark"] .demo-scenario-tabs,
+:root.dark-theme .demo-scenario-tabs {
+  background: #201736;
+}
+
+[data-theme="dark"] .demo-scenario-tab,
+:root.dark-theme .demo-scenario-tab {
+  color: #a797be;
+}
+
+[data-theme="dark"] .demo-scenario-tab:hover:not(:disabled),
+:root.dark-theme .demo-scenario-tab:hover:not(:disabled) {
+  color: #d8c2ff;
+}
+
+[data-theme="dark"] .demo-scenario-tab.active,
+:root.dark-theme .demo-scenario-tab.active {
+  background: #2e204c;
+  color: #d8c2ff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="dark"] .demo-stage-box,
+:root.dark-theme .demo-stage-box {
+  background: #140f24;
+  border-color: #2b1d47;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .demo-badge,
+:root.dark-theme .demo-badge {
+  background: rgba(170, 129, 252, 0.16);
+  color: #c49eff;
+  border: 1px solid rgba(170, 129, 252, 0.25);
+}
+
+[data-theme="dark"] .demo-stage-info h3,
+:root.dark-theme .demo-stage-info h3 {
+  color: #f7f4fd;
+}
+
+[data-theme="dark"] .demo-stage-info p,
+:root.dark-theme .demo-stage-info p {
+  color: #a797be;
+}
+
+[data-theme="dark"] .demo-tariff-chip strong,
+:root.dark-theme .demo-tariff-chip strong {
+  color: #f7f4fd;
+}
+
+[data-theme="dark"] .demo-progress-step .step-circle,
+:root.dark-theme .demo-progress-step .step-circle {
+  background: #201736;
+  color: #9d8db3;
+}
+
+[data-theme="dark"] .demo-progress-step.active .step-circle,
+:root.dark-theme .demo-progress-step.active .step-circle {
+  background: #aa81fc;
+  color: #0d0918;
+  box-shadow: 0 0 16px rgba(170, 129, 252, 0.55);
+}
+
+[data-theme="dark"] .demo-progress-step.done .step-circle,
+:root.dark-theme .demo-progress-step.done .step-circle {
+  background: #10b981;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+}
+
+[data-theme="dark"] .demo-progress-step.active .demo-step-title,
+[data-theme="dark"] .demo-progress-step.done .demo-step-title,
+:root.dark-theme .demo-progress-step.active .demo-step-title,
+:root.dark-theme .demo-progress-step.done .demo-step-title {
+  color: #f7f4fd;
+}
+
+[data-theme="dark"] .demo-step-sub,
+:root.dark-theme .demo-step-sub {
+  color: #8f7fa4;
+}
+
+[data-theme="dark"] .demo-progress-line,
+:root.dark-theme .demo-progress-line {
+  background: #251a3d;
+}
+
+[data-theme="dark"] .demo-progress-line.filled,
+:root.dark-theme .demo-progress-line.filled {
+  background: #aa81fc;
+}
+
+[data-theme="dark"] .demo-running-banner,
+:root.dark-theme .demo-running-banner {
+  background: rgba(170, 129, 252, 0.12);
+  border-color: rgba(170, 129, 252, 0.25);
+  color: #d8c2ff;
+}
+
+[data-theme="dark"] .demo-pulse-orb,
+:root.dark-theme .demo-pulse-orb {
+  background: #aa81fc;
+}
+
+[data-theme="dark"] .demo-results-card,
+:root.dark-theme .demo-results-card {
+  background: #18112b;
+  border-color: #332352;
+}
+
+[data-theme="dark"] .demo-results-header,
+:root.dark-theme .demo-results-header {
+  border-color: #2a1c43;
+}
+
+[data-theme="dark"] .demo-preview-tag,
+:root.dark-theme .demo-preview-tag {
+  background: rgba(170, 129, 252, 0.12);
+  color: #d8c2ff;
+  border-color: rgba(170, 129, 252, 0.25);
+}
+
+[data-theme="dark"] .demo-stat-cell,
+:root.dark-theme .demo-stat-cell {
+  background: #1c1432;
+  border-color: #2e204b;
+}
+
+[data-theme="dark"] .demo-stat-val,
+:root.dark-theme .demo-stat-val {
+  color: #f7f4fd;
+}
+
+[data-theme="dark"] .demo-stat-val.positive,
+:root.dark-theme .demo-stat-val.positive {
+  color: #4ade80;
 }

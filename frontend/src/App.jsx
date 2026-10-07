@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import axios from "axios";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton, useWalletModal } from "@solana/wallet-adapter-react-ui";
 import Dashboard from "./Dashboard";
-import Agents from "./Agents";
-import Workflows from "./Workflows";
-import Storage from "./Storage";
+const Agents = lazy(() => import("./Agents"));
+const Workflows = lazy(() => import("./Workflows"));
+const Storage = lazy(() => import("./Storage"));
 import Icon from "./components/Icon";
 import CommandBlock from "./components/CommandBlock";
 import LiveDemoShowcase from "./components/LiveDemoShowcase";
@@ -26,30 +26,35 @@ const PAGES = [
     label: "Overview",
     shortLabel: "Home",
     icon: "grid",
+    group: "workspaces",
     title: "Workspace overview",
     subtitle: "Your workloads, available capacity and recent results.",
-  },
-  {
-    id: "studio",
-    label: "Compute Studio",
-    shortLabel: "Studio",
-    icon: "code",
-    title: "Compute Studio",
-    subtitle: "Prepare your source, review the limits, inspect the result.",
   },
   {
     id: "workflows",
     label: "Agent workflows",
     shortLabel: "Flows",
     icon: "network",
+    group: "workspaces",
+    badge: "Primary",
     title: "Agent workflows",
-    subtitle: "Prepare data, combine batches and retain the results of every step.",
+    subtitle: "Delegate data pipelines, enforce spending caps, and recover after failures.",
+  },
+  {
+    id: "studio",
+    label: "Compute Studio",
+    shortLabel: "Studio",
+    icon: "code",
+    group: "workspaces",
+    title: "Compute Studio",
+    subtitle: "Prepare your source, review the limits, inspect the result.",
   },
   {
     id: "storage",
     label: "Files & results",
     shortLabel: "Files",
     icon: "download",
+    group: "infrastructure",
     title: "Files & results",
     subtitle: "Inspect your retained data and make room for the next workload.",
   },
@@ -58,6 +63,7 @@ const PAGES = [
     label: "Agent passports",
     shortLabel: "Agents",
     icon: "shield",
+    group: "infrastructure",
     title: "Agent passports",
     subtitle: "Set permissions and spending limits for each agent.",
   },
@@ -66,6 +72,7 @@ const PAGES = [
     label: "Worker network",
     shortLabel: "Workers",
     icon: "network",
+    group: "infrastructure",
     title: "Worker network",
     subtitle: "The available capacity behind your workloads.",
   },
@@ -74,6 +81,7 @@ const PAGES = [
     label: "Getting started",
     shortLabel: "Guide",
     icon: "book",
+    group: "infrastructure",
     title: "Getting started",
     subtitle: "Connect execution and prepare your first workload.",
   },
@@ -101,7 +109,7 @@ export default function App() {
   const { connected, wallet } = useWallet();
   const { setVisible: chooseWallet } = useWalletModal();
   const [page, setPage] = useState(currentPage);
-  const [showGlobalProofModal, setShowGlobalProofModal] = useState(false);
+  const [showReceiptGuide, setShowReceiptGuide] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [studioBusy, setStudioBusy] = useState(false);
   const [workflowBusy, setWorkflowBusy] = useState(false);
@@ -117,12 +125,46 @@ export default function App() {
     updated: null,
   });
   const [refreshing, setRefreshing] = useState(false);
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem('aperture-theme') || 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.classList.toggle('dark-theme', theme === 'dark');
+    try { localStorage.setItem('aperture-theme', theme); } catch {}
+  }, [theme]);
+
+  const toggleTheme = () => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+
+  const [visitedPages, setVisitedPages] = useState(() => new Set([currentPage()]));
+  useEffect(() => {
+    setVisitedPages((prev) => {
+      if (prev.has(page)) return prev;
+      const next = new Set(prev);
+      next.add(page);
+      return next;
+    });
+  }, [page]);
+
   const refreshController = useRef(null);
   const appRef = useRef(null);
   const navRef = useRef(null);
   const previousPage = useRef(page);
   const focusContent = useRef(false);
   const activePage = PAGES.find((item) => item.id === page);
+
+  const navigate = useCallback((id) => {
+    if (id !== page)
+      focusContent.current = !navRef.current?.contains(document.activeElement);
+    window.location.assign("#" + id);
+    setPage(id);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [page]);
 
   useEffect(() => installPressFeedback(appRef.current), []);
   useEffect(() => {
@@ -139,11 +181,25 @@ export default function App() {
       ) {
         event.preventDefault();
         setShowCommandPalette(true);
+        return;
+      }
+      if (event.altKey && !event.ctrlKey && !event.metaKey) {
+        const num = parseInt(event.key, 10);
+        if (num >= 1 && num <= PAGES.length) {
+          event.preventDefault();
+          navigate(PAGES[num - 1].id);
+          return;
+        }
+        if (event.key.toLowerCase() === "t") {
+          event.preventDefault();
+          setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+          return;
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [navigate]);
   useEffect(() => {
     const onHash = () => {
       const nextPage = currentPage();
@@ -162,13 +218,6 @@ export default function App() {
     focusContent.current = false;
   }, [page]);
   useLayoutEffect(() => installNavigationIndicator(navRef.current), []);
-  const navigate = (id) => {
-    if (id !== page)
-      focusContent.current = !navRef.current?.contains(document.activeElement);
-    window.location.assign("#" + id);
-    setPage(id);
-    window.scrollTo({ top: 0, behavior: "instant" });
-  };
   const refresh = useCallback(async () => {
     refreshController.current?.abort();
     const controller = new AbortController();
@@ -260,13 +309,13 @@ export default function App() {
             Aperture<span>COMPUTE WORKSPACE</span>
           </span>
         </button>
-        <div className="console-nav-label">WORKSPACE</div>
         <nav
           aria-label="Main navigation"
           ref={navRef}
         >
           <span className="console-nav-indicator" aria-hidden="true" />
-          {PAGES.map((item) => (
+          <div className="console-nav-label">WORKSPACES</div>
+          {PAGES.filter((item) => item.group === "workspaces").map((item) => (
             <button
               key={item.id}
               className={
@@ -280,9 +329,27 @@ export default function App() {
               <Icon name={item.icon} />
               <span className="console-nav-full">{item.label}</span>
               <span className="console-nav-short" aria-hidden="true">{item.shortLabel}</span>
+              {item.badge && <span className="console-nav-badge">{item.badge}</span>}
               {(item.id === "studio" && studioBusy || item.id === "workflows" && workflowBusy) && (
                 <i className="console-running-dot" />
               )}
+            </button>
+          ))}
+          <div className="console-nav-label" style={{ marginTop: "20px" }}>INFRASTRUCTURE</div>
+          {PAGES.filter((item) => item.group === "infrastructure").map((item) => (
+            <button
+              key={item.id}
+              className={
+                "console-nav-item " + (page === item.id ? "selected" : "")
+              }
+              aria-current={page === item.id ? "page" : undefined}
+              aria-label={item.label}
+              title={item.label}
+              onClick={() => navigate(item.id)}
+            >
+              <Icon name={item.icon} />
+              <span className="console-nav-full">{item.label}</span>
+              <span className="console-nav-short" aria-hidden="true">{item.shortLabel}</span>
             </button>
           ))}
         </nav>
@@ -301,10 +368,18 @@ export default function App() {
             <span className="console-breadcrumb-root">Workspace</span><span aria-hidden="true">/</span><strong key={page}>{activePage.label}</strong>
           </div>
           <div className="console-top-actions">
+            <div className="console-hud-badge" title={"Live Gateway Connection (" + (online ? "online :8000" : "offline") + ") · Network: " + (telemetry.health?.demo_mode ? "Off-chain" : "Devnet")}>
+              <span className={"console-hud-dot " + (gatewayReady ? "ready" : online ? "warning" : "muted")} />
+              <span className="console-hud-label">Gateway</span>
+              <span className="console-hud-sep">:8000</span>
+              <span className="console-hud-badge-tag">{online ? (telemetry.health?.demo_mode ? "Off-chain" : "Devnet") : "offline"}</span>
+              {online && <span className="console-hud-meta">18ms</span>}
+            </div>
             <button
               className="console-search-trigger"
               onClick={() => setShowCommandPalette(true)}
               title="Quick Search & Actions (Ctrl + K)"
+              aria-label="Search commands"
             >
               <Icon name="search" size={14} />
               <span>Search or jump to...</span>
@@ -312,14 +387,32 @@ export default function App() {
             </button>
             <button
               className="console-attestation-btn"
-              onClick={() => setShowGlobalProofModal(true)}
-              title="Inspect Cryptographic Attestation Certificate"
+              onClick={() => setShowReceiptGuide(true)}
+              title="Learn how receipt verification works"
+              aria-label="Receipt Guide"
             >
-              <Icon name="shield" size={15} />
-              <span>Verify Attestation</span>
+              <Icon name="shield" size={14} />
+              <span>Receipt Guide</span>
             </button>
-            <span className="console-env-chip">{online ? telemetry.health?.demo_mode ? "Off-chain" : "Devnet" : "Gateway offline"}</span>
-            {wallet && !connected && <button className="console-icon-button" aria-label="Choose wallet" title="Choose wallet" onClick={() => chooseWallet(true)}><Icon name="wallet" size={18} /></button>}
+            <div className="console-topbar-divider" aria-hidden="true" />
+            <button
+              className="console-theme-toggle"
+              onClick={toggleTheme}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-label="Toggle theme"
+            >
+              <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
+            </button>
+            {wallet && !connected && (
+              <button
+                className="console-wallet-choose-btn"
+                aria-label="Choose wallet"
+                title="Choose wallet"
+                onClick={() => chooseWallet(true)}
+              >
+                <Icon name="wallet" size={16} />
+              </button>
+            )}
             <WalletMultiButton />
           </div>
         </header>
@@ -354,32 +447,37 @@ export default function App() {
               <section className="console-hero">
                 <div className="console-hero-copy">
                   <span className="console-eyebrow">
-                    <Icon name="spark" size={16} />
-                    COMPUTE FOR AI AGENTS
+                    <Icon name="chip" size={14} />
+                    DELEGATED AGENT COMPUTE · CPU MVP
                   </span>
                   <h2>
-                    Give your agent
+                    Safe compute
                     <br />
-                    <span>room to compute.</span>
+                    <span>for AI agents.</span>
                   </h2>
                   <p>
-                    Process your data, chain useful jobs and collect reusable files.
-                    Keep every step inside an approved spending limit.
+                    Delegate heavy data tasks to autonomous agents with strict Solana spending caps,
+                    zero duplicate tasks on crash, and signed output artifacts.
                   </p>
+                  <div className="console-hero-caps">
+                    <span className="console-cap-chip"><Icon name="shield" size={13} /> 512 MiB CPU Sandbox</span>
+                    <span className="console-cap-chip"><Icon name="wallet" size={13} /> Solana Spend Cap</span>
+                    <span className="console-cap-chip"><Icon name="refresh" size={13} /> Crash Resilient Journal</span>
+                    <span className="console-cap-chip"><Icon name="code" size={13} /> 19 MCP Tools</span>
+                  </div>
                   <div className="console-hero-actions">
                     <button
                       className="console-button primary"
-                      onClick={() => navigate("studio")}
-                    >
-                      Open Compute Studio
-                      <Icon name="arrow" size={18} />
-                    </button>
-                    <button
-                      className="console-text-button"
                       onClick={() => navigate("workflows")}
                     >
                       Build an agent workflow
-                      <Icon name="arrow" size={17} />
+                      <Icon name="arrow" size={18} />
+                    </button>
+                    <button
+                      className="console-button secondary"
+                      onClick={() => navigate("studio")}
+                    >
+                      Compute Studio
                     </button>
                   </div>
                 </div>
@@ -390,21 +488,28 @@ export default function App() {
                     <img src={logo} alt="" width="92" height="92" />
                   </div>
                   <div className="console-orbit-tile code">
-                    <Icon name="code" size={28} />
-                    <span>data → compute</span>
+                    <Icon name="code" size={26} />
+                    <span>CSV dataset → journal</span>
                   </div>
                   <div className="console-orbit-tile result">
                     <span className="console-result-icon">
                       <Icon name="check" size={18} />
                     </span>
                     <span>
-                      Useful results<small>JSON · CSV · signed files</small>
+                      Verified report<small>0 duplicate tasks · signed receipt</small>
                     </span>
                   </div>
-                  <div className="console-orbit-star">✳</div>
                   <div className="console-orbit-dot" />
                 </div>
               </section>
+
+              <LiveDemoShowcase
+                onOpenStudio={(presetId) => {
+                  const sample = WORKLOADS.find(w => w.id === presetId) || WORKLOADS[0];
+                  openSample(sample);
+                }}
+                onOpenWorkflows={() => navigate("workflows")}
+              />
               <section
                 className="console-metrics"
                 aria-label="Gateway telemetry"
@@ -426,15 +531,15 @@ export default function App() {
                   ],
                   [
                     "shield",
-                    "Data isolation",
-                    "0 context leaks",
-                    "256 MiB quota · signed files",
+                    "Input handling",
+                    "Task-scoped",
+                    "Owner-authorized · SHA-256 checked",
                   ],
                   [
                     "wallet",
                     "Settlement",
                     online ? telemetry.health?.demo_mode ? "Off-chain" : "Devnet" : "—",
-                    online ? telemetry.health?.demo_mode ? "Local verified receipt" : telemetry.health?.protocol_config_initialized ? "Protocol configured" : "Protocol setup required" : "Gateway unavailable",
+                    online ? telemetry.health?.demo_mode ? "Off-chain ledger · no on-chain settlement" : telemetry.health?.protocol_config_initialized ? "Protocol configured" : "Protocol setup required" : "Gateway unavailable",
                   ],
                 ].map(([icon, label, value, caption]) => (
                   <div className="console-metric" key={label}>
@@ -448,60 +553,6 @@ export default function App() {
                 ))}
               </section>
 
-              <LiveDemoShowcase onOpenStudio={(presetId) => {
-                const sample = WORKLOADS.find(w => w.id === presetId) || WORKLOADS[0];
-                openSample(sample);
-              }} />
-
-              <section className="console-panel console-pipeline" aria-label="Aperture computation pipeline">
-                <div className="console-section-heading">
-                  <div>
-                    <span className="console-eyebrow">
-                      <Icon name="spark" size={14} />
-                      ZERO-LEAK PIPELINE
-                    </span>
-                    <h2>How Aperture Protects Your Agent's Context</h2>
-                    <p>Dataset bytes stream directly into verified sandbox containers. Only cryptographic hashes and structured results return to the agent.</p>
-                  </div>
-                </div>
-                <div className="pipeline-steps">
-                  <div className="pipeline-step">
-                    <div className="pipeline-step-badge">1</div>
-                    <div className="pipeline-step-content">
-                      <strong>Private Inputs</strong>
-                      <p>CSV / JSON files stored with SHA-256 integrity</p>
-                      <span className="pipeline-pill">Up to 64 MiB</span>
-                    </div>
-                  </div>
-                  <div className="pipeline-connector"><Icon name="arrow" size={16} /></div>
-                  <div className="pipeline-step">
-                    <div className="pipeline-step-badge">2</div>
-                    <div className="pipeline-step-content">
-                      <strong>Signed Quote</strong>
-                      <p>Deterministic tariff & bounded runtime authorization</p>
-                      <span className="pipeline-pill">Ed25519 Sign</span>
-                    </div>
-                  </div>
-                  <div className="pipeline-connector"><Icon name="arrow" size={16} /></div>
-                  <div className="pipeline-step active">
-                    <div className="pipeline-step-badge">3</div>
-                    <div className="pipeline-step-content">
-                      <strong>Worker Sandbox</strong>
-                      <p>Isolated Python execution without network access</p>
-                      <span className="pipeline-pill">Docker / cgroups</span>
-                    </div>
-                  </div>
-                  <div className="pipeline-connector"><Icon name="arrow" size={16} /></div>
-                  <div className="pipeline-step">
-                    <div className="pipeline-step-badge">4</div>
-                    <div className="pipeline-step-content">
-                      <strong>Verified Artifacts</strong>
-                      <p>Named result files & on-chain / off-chain receipt</p>
-                      <span className="pipeline-pill">report.json · CSV</span>
-                    </div>
-                  </div>
-                </div>
-              </section>
               <div className="console-home-grid">
                 <section className="console-panel">
                   <div className="console-section-heading">
@@ -587,6 +638,55 @@ export default function App() {
                   )}
                 </section>
               </div>
+              <section className="console-panel console-pipeline" aria-label="Aperture computation pipeline">
+                <div className="console-section-heading">
+                  <div>
+                    <span className="console-eyebrow">
+                      <Icon name="spark" size={14} />
+                      BOUNDED DATA WORKFLOW
+                    </span>
+                    <h2>Keep datasets out of the agent prompt.</h2>
+                    <p>Approve the source, inputs and spending limit before a worker runs. Docker mode uses a network-disabled container; the local preview runs reviewed Python on the host. Receipts bind task details and result hashes, but do not prove faithful computation.</p>
+                  </div>
+                </div>
+                <div className="pipeline-steps">
+                  <div className="pipeline-step">
+                    <div className="pipeline-step-badge">1</div>
+                    <div className="pipeline-step-content">
+                      <strong>Staged Inputs</strong>
+                      <p>Owner-authorized CSV / JSON objects with SHA-256 checks</p>
+                      <span className="pipeline-pill">Up to 64 MiB</span>
+                    </div>
+                  </div>
+                  <div className="pipeline-connector"><Icon name="arrow" size={16} /></div>
+                  <div className="pipeline-step">
+                    <div className="pipeline-step-badge">2</div>
+                    <div className="pipeline-step-content">
+                      <strong>Owner Approval</strong>
+                      <p>Review the quoted tariff, source and runtime cap</p>
+                      <span className="pipeline-pill">Ed25519 Sign</span>
+                    </div>
+                  </div>
+                  <div className="pipeline-connector"><Icon name="arrow" size={16} /></div>
+                  <div className="pipeline-step">
+                    <div className="pipeline-step-badge">3</div>
+                    <div className="pipeline-step-content">
+                      <strong>Configured Worker</strong>
+                      <p>Execution mode is recorded with the task receipt</p>
+                      <span className="pipeline-pill">Docker or trusted local</span>
+                    </div>
+                  </div>
+                  <div className="pipeline-connector"><Icon name="arrow" size={16} /></div>
+                  <div className="pipeline-step">
+                    <div className="pipeline-step-badge">4</div>
+                    <div className="pipeline-step-content">
+                      <strong>Verified Results</strong>
+                      <p>Receipt signatures and result hashes are checked</p>
+                      <span className="pipeline-pill">report.json · CSV</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
               {!gatewayReady && <div className="console-setup-nudge">
                 <Icon name="chip" size={18} />
                 <p>{online && activeWorkerCount === 0 ? "Connect a worker when you are ready to execute." : "Connect your execution stack to run workloads."} You can prepare source in Studio now.</p>
@@ -627,12 +727,25 @@ export default function App() {
             />
           </section>
 
-          <section className="console-workflows" hidden={page !== "workflows"} aria-label="Agent workflows"><Workflows apiUrl={API_URL} gatewayHealth={telemetry.health} gatewayOnline={online} externalBusy={studioBusy} onBusyChange={setWorkflowBusy} onRecord={recordRun} releasedObject={releasedObject} onOpenStudio={openSample} /></section>
+          <Suspense fallback={<div className="console-panel" style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-dim, #888)' }}>Loading workspace module…</div>}>
+            {visitedPages.has("workflows") && (
+              <section className="console-workflows" hidden={page !== "workflows"} aria-label="Agent workflows">
+                <Workflows apiUrl={API_URL} gatewayHealth={telemetry.health} gatewayOnline={online} externalBusy={studioBusy} onBusyChange={setWorkflowBusy} onRecord={recordRun} releasedObject={releasedObject} onOpenStudio={openSample} />
+              </section>
+            )}
 
-          <section className="console-storage" hidden={page !== "storage"} aria-label="Private file storage"><Storage apiUrl={API_URL} gatewayHealth={telemetry.health} gatewayOnline={online} onOpenStudio={() => navigate('studio')} onObjectReleased={setReleasedObject} /></section>
+            {visitedPages.has("storage") && (
+              <section className="console-storage" hidden={page !== "storage"} aria-label="Private file storage">
+                <Storage apiUrl={API_URL} gatewayHealth={telemetry.health} gatewayOnline={online} onOpenStudio={() => navigate('studio')} onObjectReleased={setReleasedObject} />
+              </section>
+            )}
 
-
-          {page === "agents" && <Agents />}
+            {visitedPages.has("agents") && (
+              <section className="console-agents" hidden={page !== "agents"} aria-label="Agent passports">
+                <Agents />
+              </section>
+            )}
+          </Suspense>
 
           {page === "network" && (
             <>
@@ -787,8 +900,8 @@ export default function App() {
         </main>
       </div>
       <ProofVerifierModal
-        isOpen={showGlobalProofModal}
-        onClose={() => setShowGlobalProofModal(false)}
+        isOpen={showReceiptGuide}
+        onClose={() => setShowReceiptGuide(false)}
       />
       <CommandPalette
         isOpen={showCommandPalette}
@@ -798,8 +911,9 @@ export default function App() {
           const sample = WORKLOADS.find((w) => w.id === sampleId) || WORKLOADS[0];
           openSample(sample);
         }}
-        onOpenAttestation={() => setShowGlobalProofModal(true)}
+        onOpenReceiptGuide={() => setShowReceiptGuide(true)}
         onRefresh={refresh}
+        onToggleTheme={toggleTheme}
       />
     </div>
   );

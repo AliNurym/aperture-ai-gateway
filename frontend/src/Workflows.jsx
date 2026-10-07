@@ -20,6 +20,105 @@ import './Workflows.css';
 const formatSol = value => (value / 1e9).toLocaleString('en-US', { maximumFractionDigits: 9 });
 const formatBytes = value => value < 1024 ? value + ' B' : value < 1024 * 1024 ? (value / 1024).toFixed(1) + ' KiB' : (value / 1024 / 1024).toFixed(1) + ' MiB';
 
+const BLUEPRINTS = [
+  {
+    id: 'csv-resilient',
+    title: 'Resilient CSV Pipeline',
+    subtitle: '3 parallel batches (17,000 rows) + merge aggregator',
+    tag: '17k Rows · Auto-Resume',
+    icon: 'network',
+    advantage: 'Crash-resilient state journal guarantees 0 duplicate charges if a worker drops.',
+    batches: [
+      {
+        name: 'batch-sales-west.csv',
+        object_id: 'obj-00000000000000000000000000000001',
+        sha256: 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90',
+        size_bytes: 215040
+      },
+      {
+        name: 'batch-sales-east.csv',
+        object_id: 'obj-00000000000000000000000000000002',
+        sha256: 'b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1',
+        size_bytes: 240640
+      },
+      {
+        name: 'batch-sales-central.csv',
+        object_id: 'obj-00000000000000000000000000000003',
+        sha256: 'c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2',
+        size_bytes: 198400
+      }
+    ],
+    mapping: {
+      category_column: 'category',
+      amount_column: 'amount',
+      delimiter: ',',
+      decimal_separator: '.',
+      thousands_separator: '',
+      missing_category: 'uncategorized'
+    },
+    cost: '0.0001',
+    runtime: '45'
+  },
+  {
+    id: 'financial-audit',
+    title: 'Financial Spend Cap',
+    subtitle: 'Micro-budget audit with strict 0.00005 SOL barrier',
+    tag: 'Hard Ceiling · Zero Runaway',
+    icon: 'shield',
+    advantage: 'Enforces hard spending limits; rogue AI loops cannot drain wallet funds.',
+    batches: [
+      {
+        name: 'treasury-ledger-2026.csv',
+        object_id: 'obj-10000000000000000000000000000001',
+        sha256: 'd4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3',
+        size_bytes: 491520
+      },
+      {
+        name: 'disbursements-q1.csv',
+        object_id: 'obj-10000000000000000000000000000002',
+        sha256: 'e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4',
+        size_bytes: 317440
+      }
+    ],
+    mapping: {
+      category_column: 'department',
+      amount_column: 'total',
+      delimiter: ',',
+      decimal_separator: '.',
+      thousands_separator: '',
+      missing_category: 'reject'
+    },
+    cost: '0.00005',
+    runtime: '30'
+  },
+  {
+    id: 'mcp-delegation',
+    title: 'MCP Agent Delegation',
+    subtitle: 'Confidential pipeline without prompt context leakage',
+    tag: 'Zero Prompt Leaks · Privacy',
+    icon: 'code',
+    advantage: 'Processes sensitive tables in private sandbox; agent receives only signed artifacts.',
+    batches: [
+      {
+        name: 'confidential-customer-metrics.csv',
+        object_id: 'obj-20000000000000000000000000000001',
+        sha256: 'f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5',
+        size_bytes: 532480
+      }
+    ],
+    mapping: {
+      category_column: 'region',
+      amount_column: 'revenue',
+      delimiter: ',',
+      decimal_separator: '.',
+      thousands_separator: '',
+      missing_category: 'uncategorized'
+    },
+    cost: '0.0001',
+    runtime: '60'
+  }
+];
+
 export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, externalBusy = false, onBusyChange, onRecord, releasedObject, onOpenStudio }) {
   const { publicKey, signMessage, wallet, connect, connecting } = useWallet();
   const { connection } = useConnection();
@@ -222,26 +321,118 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
     catch { setNotice('Repair the input references before removing a batch.'); }
   };
   const downloadSample = () => saveFile('records.csv', 'category,amount\ncompute,12.5\nstorage,8.25\ncompute,7.5\nnetwork,3.75\nstorage,4\nsupport,6.5\n', 'text/csv');
+  const applyBlueprint = bp => {
+    if (editsBlocked) return;
+    setReferences(JSON.stringify(bp.batches, null, 2));
+    setMapping({ ...bp.mapping });
+    setCost(bp.cost);
+    setRuntime(bp.runtime);
+    setColumns([bp.mapping.category_column, bp.mapping.amount_column]);
+    const nextSchemas = new Map();
+    bp.batches.forEach(b => {
+      nextSchemas.set(b.object_id, [bp.mapping.category_column, bp.mapping.amount_column]);
+    });
+    setSchemas(nextSchemas);
+    setNotice('Loaded blueprint: ' + bp.title + '. Plan validated with ' + bp.batches.length + ' batches.');
+    const heading = document.getElementById('workflow-builder-heading');
+    heading?.closest('details')?.setAttribute('open', '');
+    revealContent(heading, { focus: true, block: 'start' });
+  };
   return <div className={'workflows' + (controller.run ? ' has-run' : '')}>
     <section className="workflow-hero">
       <div className="workflow-hero-copy">
         <span className="console-eyebrow"><Icon name="network" size={16} /> AGENT WORKFLOWS</span>
-        <h2>Give your agent<br /><span>room to compute.</span></h2>
-        <p>Turn a dataset into a chain of useful results. Separate the work into batches, combine their outputs, and continue from the last saved step.</p>
+        <h2>Delegate data pipelines<br /><span>without runaway risk.</span></h2>
+        <p>Why Aperture instead of a plain script? Deliver large-scale pipelines to your AI agent with deterministic 512 MiB sandboxes, immutable Solana budget caps, and crash-resilient journal recovery.</p>
+        <div className="workflow-value-chips">
+          <span className="workflow-value-chip"><Icon name="shield" size={13} /> Hard Spend Ceiling</span>
+          <span className="workflow-value-chip"><Icon name="refresh" size={13} /> Crash-Resilient Journal</span>
+          <span className="workflow-value-chip"><Icon name="chip" size={13} /> 512 MiB Sandboxed CPU</span>
+          <span className="workflow-value-chip"><Icon name="code" size={13} /> Zero Prompt Leakage</span>
+        </div>
         <div className="workflow-hero-actions">
           <button className="console-button primary" disabled={editsBlocked} onClick={() => {
             const heading = document.getElementById('workflow-builder-heading');
             heading?.closest('details')?.setAttribute('open', '');
             revealContent(heading, { focus: true, block: 'start' });
           }}>Build a workflow<Icon name="arrow" size={18} /></button>
+          <button className="console-text-button" onClick={() => applyBlueprint(BLUEPRINTS[0])}><Icon name="spark" size={16} />Quick 17k Demo</button>
           <button className="console-text-button" onClick={downloadSample}><Icon name="download" size={17} />Sample CSV</button>
         </div>
       </div>
-      <div className="workflow-graph" role="img" aria-label="CSV batches feed a merge step that produces JSON and CSV; an example of the pipeline structure">
-        <div className="workflow-graph-input"><Icon name="upload" size={18} /><span>Dataset<small>Immutable inputs</small></span></div>
-        <div className="workflow-branches">{['01', '02', '03'].map(id => <div key={id}><span>{id}</span><Icon name="chip" size={20} /><strong>Batch compute</strong></div>)}</div>
-        <div className="workflow-graph-merge"><Icon name="network" size={22} /><span>Combine results<small>Up to 16 inputs per join</small></span></div>
-        <div className="workflow-graph-output"><Icon name="check" size={20} /><span>report.json<small>categories.csv · quality.csv</small></span></div>
+      <div className="workflow-graph" role="img" aria-label="Pipeline DAG topology">
+        <div className="workflow-graph-input">
+          <Icon name="upload" size={18} />
+          <span>
+            {selectedInputs.length ? `${selectedInputs.length} Batches (${formatBytes(inputBytes)})` : 'Dataset'}
+            <small>Immutable cryptographic inputs</small>
+          </span>
+        </div>
+        <div className="workflow-branches">
+          {(selectedInputs.length ? selectedInputs.slice(0, 3) : [{ name: 'batch-01' }, { name: 'batch-02' }, { name: 'batch-03' }]).map((b, i) => (
+            <div key={i} className="workflow-branch-node">
+              <span>0{i + 1}</span>
+              <Icon name="chip" size={20} />
+              <strong>{b.name ? b.name.replace('.csv', '').slice(0, 12) : 'Batch compute'}</strong>
+              <small className="workflow-branch-tag">512 MiB</small>
+            </div>
+          ))}
+          {selectedInputs.length > 3 && (
+            <div className="workflow-branch-node more">
+              <span>+{selectedInputs.length - 3}</span>
+              <small>more</small>
+            </div>
+          )}
+        </div>
+        <div className="workflow-graph-merge">
+          <Icon name="network" size={22} />
+          <span>
+            Combine & Deduplicate
+            <small>Up to 16 inputs per join · Journal tracked</small>
+          </span>
+        </div>
+        <div className="workflow-graph-output">
+          <Icon name="check" size={20} />
+          <span>
+            report.json
+            <small>categories.csv · quality.csv · Signed Receipt</small>
+          </span>
+        </div>
+      </div>
+    </section>
+    <section className="workflow-blueprints console-panel">
+      <div className="console-section-heading">
+        <div>
+          <span className="console-eyebrow">READY-TO-RUN BLUEPRINTS</span>
+          <h2>Load a pre-configured pipeline in 1 click</h2>
+          <p>Explore production-grade agent workflows with deterministic cost caps, journal recovery, and zero prompt leakage.</p>
+        </div>
+      </div>
+      <div className="workflow-blueprints-grid">
+        {BLUEPRINTS.map(bp => (
+          <div key={bp.id} className="workflow-blueprint-card">
+            <div className="blueprint-header">
+              <span className="blueprint-icon"><Icon name={bp.icon} size={20} /></span>
+              <span className="blueprint-badge">{bp.tag}</span>
+            </div>
+            <h3>{bp.title}</h3>
+            <p className="blueprint-sub">{bp.subtitle}</p>
+            <p className="blueprint-adv">{bp.advantage}</p>
+            <div className="blueprint-specs">
+              <span><strong>{bp.batches.length}</strong> batches</span>
+              <span><strong>{bp.cost}</strong> SOL/step</span>
+              <span><strong>{bp.runtime}s</strong> max/step</span>
+            </div>
+            <button
+              className="console-button primary blueprint-btn"
+              disabled={editsBlocked}
+              onClick={() => applyBlueprint(bp)}
+            >
+              <Icon name="play" size={14} />
+              Load blueprint
+            </button>
+          </div>
+        ))}
       </div>
     </section>
     <div className="workflow-principles">{[

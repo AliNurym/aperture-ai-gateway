@@ -67,7 +67,7 @@ def print_header(title: str):
 
 
 def print_tool_catalog():
-    print("\n📦 Aperture Model Context Protocol (MCP) — 19 Standard Tools:")
+    print("\n[MCP TOOLS] Aperture Model Context Protocol (MCP) — 19 Standard Tools:")
     print(f"  {'Tool Name':<26} {'Category':<12} {'Description'}")
     print("  " + "-" * 66)
     for name, cat, desc in MCP_TOOL_CATALOG:
@@ -159,7 +159,7 @@ print(f"Mean: {statistics.fmean(data):.4f}")
         print("\n[Step 2] Agent issues MCP call: 'start_python_task'")
         start_result = tools.start_python_task(quote_result["quote_id"])
         print(f"  <- Task Admitted: {start_result['task_id']} (Status: {start_result['status']})")
-        print("  🔒 Capability Protection: Bearer token is retained in daemon memory, NEVER exposed to LLM.")
+        print("  [SECURITY] Capability Protection: Bearer token is retained in daemon memory, NEVER exposed to LLM.")
 
         print("\n[Step 3] Agent issues MCP call: 'get_python_task'")
         task_result = tools.get_python_task(start_result["task_id"])
@@ -213,7 +213,7 @@ print(f"Mean: {statistics.fmean(data):.4f}")
         print(f"     Max Storage Limit:    {storage.get('max_storage_bytes', 0):,} bytes (256 MiB)")
         print(f"     Tracked Objects:      {storage.get('object_count', 0)} / {storage.get('max_objects', 512)}")
 
-    print_header("✅ MCP Demonstration Complete: 19 Tools Verified")
+    print_header("[SUCCESS] MCP Demonstration Complete: 19 Tools Verified")
 
 
 def run_live(gateway_url: str):

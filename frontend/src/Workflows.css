@@ -12,13 +12,58 @@
 .workflow-hero-copy p { font-size: 15px; line-height: 1.7; color: var(--console-muted); max-width: 430px; margin: 0 0 24px; }
 .workflow-hero-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 14px 24px; }
 .workflow-graph { display: grid; grid-template-columns: 1fr; justify-items: center; gap: 28px; padding: 8px 0; position: relative; }
-.workflow-graph::before { content: ''; position: absolute; width: 1px; top: 20px; bottom: 20px; left: 50%; background: #bda9d5; }
+@keyframes workflow-dag-flow {
+  0% { background-position: 0 0; }
+  100% { background-position: 0 32px; }
+}
+.workflow-graph::before {
+  content: '';
+  position: absolute;
+  width: 2px;
+  top: 20px;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: repeating-linear-gradient(to bottom, var(--console-primary, #6750a4) 0px, var(--console-primary, #6750a4) 6px, rgba(103, 80, 164, 0.2) 6px, rgba(103, 80, 164, 0.2) 16px);
+  background-size: 2px 32px;
+  animation: workflow-dag-flow 1.5s linear infinite;
+}
 .workflow-graph-input, .workflow-graph-merge, .workflow-graph-output { position: relative; display: flex; gap: 13px; align-items: center; padding: 14px 22px; border-radius: 18px; color: var(--console-primary); border: 1px solid #d9c9eb; background: #fff; box-shadow: 0 8px 24px #4f387c08; }
 .workflow-graph span { font-size: 13px; font-weight: 600; }
 .workflow-graph small { display: block; margin-top: 4px; font-size: 10px; font-weight: 400; color: var(--console-muted); }
 .workflow-branches { display: flex; gap: 14px; position: relative; }
 .workflow-branches::before { content: ''; position: absolute; top: -14px; left: 17%; right: 17%; height: calc(100% + 28px); border: 1px solid #bda9d5; border-radius: 16px; }
-.workflow-branches > div { position: relative; display: grid; gap: 12px; justify-items: center; padding: 14px 17px; background: #fff; border: 1px solid #e1d4ee; border-radius: 16px; min-width: 72px; }
+.workflow-branches > div {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #e1d4ee;
+  border-radius: 16px;
+  min-width: 74px;
+  box-shadow: 0 4px 14px rgba(79, 56, 124, 0.05);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s;
+}
+.workflow-branches > div:hover {
+  transform: translateY(-2px);
+  border-color: var(--console-primary);
+}
+.workflow-branch-tag {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--console-tonal);
+  color: var(--console-primary);
+}
+.workflow-branch-node.more {
+  justify-content: center;
+  align-content: center;
+  border-style: dashed;
+}
 .workflow-branches span { font-size: 10px; align-self: start; color: #a18aae; }
 .workflow-branches svg { color: var(--console-primary); }
 .workflow-branches strong { font-size: 10px; font-weight: 500; }
@@ -89,3 +134,210 @@
 .agent-task-result .workflow-step-content { width: 100%; min-width: 0; }
 .agent-task-result pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 700px) { .workflow-agent-choice { align-items: stretch; flex-direction: column; } }
+
+/* Dark theme for Workflows */
+[data-theme="dark"] .workflow-hero,
+:root.dark-theme .workflow-hero {
+  background: radial-gradient(ellipse at 85% 10%, rgba(170, 129, 252, 0.15), transparent 60%), #130d22;
+  border-color: #31214e;
+  box-shadow: 0 16px 44px -8px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] .workflow-graph-input,
+[data-theme="dark"] .workflow-graph-merge,
+:root.dark-theme .workflow-graph-input,
+:root.dark-theme .workflow-graph-merge {
+  background: #18112b;
+  border-color: #332352;
+  color: #cfb1ff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="dark"] .workflow-branches > div,
+:root.dark-theme .workflow-branches > div {
+  background: #18112b;
+  border-color: #332352;
+  color: #ede5f7;
+}
+
+[data-theme="dark"] .workflow-branches strong,
+:root.dark-theme .workflow-branches strong {
+  color: #ede5f7;
+}
+
+[data-theme="dark"] .workflow-upload,
+:root.dark-theme .workflow-upload {
+  background: #140f22;
+  border-color: #3b285f;
+}
+
+/* Value Chips in Hero */
+.workflow-value-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 24px;
+}
+
+.workflow-value-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(103, 80, 164, 0.08);
+  border: 1px solid rgba(103, 80, 164, 0.2);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--console-primary);
+  letter-spacing: 0.2px;
+}
+
+[data-theme="dark"] .workflow-value-chip,
+:root.dark-theme .workflow-value-chip {
+  background: rgba(170, 129, 252, 0.12);
+  border-color: rgba(170, 129, 252, 0.25);
+  color: #cfb1ff;
+}
+
+/* Ready-to-Run Blueprints */
+.workflow-blueprints {
+  margin-top: 8px;
+}
+
+.workflow-blueprints-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-top: 24px;
+}
+
+.workflow-blueprint-card {
+  display: flex;
+  flex-direction: column;
+  padding: 24px 22px;
+  border-radius: 20px;
+  background: var(--console-surface, #fff);
+  border: 1px solid var(--console-line, #e2d9ec);
+  box-shadow: 0 6px 20px rgba(79, 56, 124, 0.04);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease;
+}
+
+.workflow-blueprint-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--console-primary);
+  box-shadow: 0 16px 36px rgba(79, 56, 124, 0.1);
+}
+
+.blueprint-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.blueprint-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--console-tonal);
+  color: var(--console-primary);
+}
+
+.blueprint-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(103, 80, 164, 0.1);
+  color: var(--console-primary);
+  border: 1px solid rgba(103, 80, 164, 0.2);
+}
+
+.workflow-blueprint-card h3 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  letter-spacing: -0.3px;
+  color: var(--console-ink);
+}
+
+.blueprint-sub {
+  font-size: 12px;
+  color: var(--console-muted);
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+
+.blueprint-adv {
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--console-bg, #faf8fc);
+  border-left: 3px solid var(--console-primary);
+  margin: 0 0 18px;
+  color: var(--console-ink);
+  flex: 1;
+}
+
+.blueprint-specs {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--console-muted);
+  padding: 12px 0;
+  border-top: 1px solid var(--console-line);
+  margin-bottom: 18px;
+}
+
+.blueprint-specs strong {
+  color: var(--console-ink);
+  font-weight: 600;
+}
+
+.blueprint-btn {
+  width: 100%;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 11px 18px;
+}
+
+[data-theme="dark"] .workflow-blueprint-card,
+:root.dark-theme .workflow-blueprint-card {
+  background: #18112b;
+  border-color: #31214e;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="dark"] .workflow-blueprint-card:hover,
+:root.dark-theme .workflow-blueprint-card:hover {
+  border-color: #9d6fff;
+  box-shadow: 0 16px 36px rgba(124, 77, 255, 0.25);
+}
+
+[data-theme="dark"] .blueprint-adv,
+:root.dark-theme .blueprint-adv {
+  background: #130d22;
+  color: #ded4ec;
+  border-left-color: #aa81fc;
+}
+
+[data-theme="dark"] .blueprint-badge,
+:root.dark-theme .blueprint-badge {
+  background: rgba(170, 129, 252, 0.15);
+  border-color: rgba(170, 129, 252, 0.3);
+  color: #cfb1ff;
+}
+
+@media (max-width: 950px) {
+  .workflow-blueprints-grid {
+    grid-template-columns: 1fr;
+  }
+}

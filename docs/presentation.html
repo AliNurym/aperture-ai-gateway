@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#fef7ff">
+  <meta name="description" content="Aperture: контролируемые вычисления для AI-агентов. Семь слайдов о продукте, проверенном CSV-сценарии и протоколе Solana.">
+  <title>Aperture | Вычисления для AI-агентов</title>
+  <style>
+    @font-face { font-family:Roboto; src:url('Roboto-Variable.ttf') format('truetype'); font-style:normal; font-weight:100 900; font-display:swap; }
+    :root { color-scheme:light; --md-primary:#6750a4; --md-on-primary:#fff; --md-primary-container:#eaddff; --md-on-primary-container:#21005d; --md-surface:#fef7ff; --md-surface-container-low:#f7f2fa; --md-surface-container:#f3edf7; --md-surface-container-high:#ece6f0; --md-on-surface:#1d1b20; --md-on-surface-variant:#49454f; --md-outline:#79747e; --md-outline-variant:#cac4d0; --md-tertiary:#7d5260; --md-tertiary-container:#ffd8e4; --purple:var(--md-primary); --deep:var(--md-on-primary-container); --lavender:var(--md-primary-container); --ink:var(--md-on-surface); --muted:var(--md-on-surface-variant); --line:var(--md-outline-variant); --mint:#386a20; --paper:var(--md-surface); --stage:var(--md-surface-container); font-family:Roboto,"Segoe UI",Arial,sans-serif; }
+    :root[data-theme="dark"] {
+      color-scheme:dark;
+      --md-primary:#d0bcff;
+      --md-on-primary:#381e72;
+      --md-primary-container:#4f378b;
+      --md-on-primary-container:#eaddff;
+      --md-surface:#141218;
+      --md-surface-container-low:#1d1b20;
+      --md-surface-container:#211f26;
+      --md-surface-container-high:#2b2930;
+      --md-on-surface:#e6e0e9;
+      --md-on-surface-variant:#cac4d0;
+      --md-outline:#938f99;
+      --md-outline-variant:#49454f;
+      --md-tertiary:#efb8c8;
+      --md-tertiary-container:#633b48;
+      --purple:var(--md-primary);
+      --deep:var(--md-on-primary-container);
+      --lavender:var(--md-primary-container);
+      --ink:var(--md-on-surface);
+      --muted:var(--md-on-surface-variant);
+      --line:var(--md-outline-variant);
+      --mint:#a6f483;
+      --paper:var(--md-surface);
+      --stage:#0e0c12;
+    }
+    :root[data-theme="dark"] .nav-button.primary { color:var(--md-on-primary); }
+    :root[data-theme="dark"] .nav-button:not(:disabled):hover { background:#362c4a; }
+    :root[data-theme="dark"] .nav-button.primary:not(:disabled):hover { background:#be9ff6; }
+    :root[data-theme="dark"] .code-string { color:#85df6a; }
+    :root[data-theme="dark"] .timer.over { color:#f2b8b5; }
+    :root[data-theme="dark"] .dot { background:#49454f; }
+    :root[data-theme="dark"] dialog::backdrop { background:#0a0812b3; }
+    :root[data-theme="dark"] button:focus-visible, :root[data-theme="dark"] a:focus-visible { outline:3px solid #a6f483; }
+    :root[data-theme="dark"] .quiet-button:hover { background:#d0bcff1a; }
+    .shortcuts-grid { display:grid; gap:8px; margin-top:16px; }
+    .shortcut-row { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:8px 0; border-bottom:1px solid var(--line); font-size:15px; }
+    .shortcut-row:last-child { border:0; }
+    .shortcut-row kbd { background:var(--md-surface-container); border:1px solid var(--line); border-radius:6px; padding:3px 8px; font:13px/1 Consolas,monospace; color:var(--purple); font-weight:600; white-space:nowrap; }
+    .shortcut-row span { color:var(--muted); text-align:right; font-size:14px; }
+    :root[data-theme="dark"] .shortcut-row kbd { background:#2b2930; border-color:#49454f; color:#d0bcff; }
+    * { box-sizing:border-box; }
+    body { margin:0; height:100dvh; display:grid; grid-template-rows:68px minmax(0,1fr) 76px; overflow:hidden; background:var(--stage); color:var(--ink); }
+    button,a { -webkit-tap-highlight-color:transparent; }
+    button { font:inherit; cursor:pointer; }
+    button:disabled { opacity:.35; cursor:default; }
+    button:focus-visible,a:focus-visible { outline:3px solid #287657; outline-offset:4px; }
+    .toolbar,.controls { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:0 32px; }
+    .wordmark { color:var(--ink); font-weight:500; font-size:22px; letter-spacing:.025em; text-decoration:none; }
+    .toolbar-sub { font-size:14px; color:var(--muted); margin-left:20px; max-width:420px; display:inline-block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle; }
+    .toolbar-right { display:flex; align-items:center; gap:18px; font-size:13px; color:var(--muted); }
+    .mode { font-weight:600; color:var(--purple); }
+    .timer { font-variant-numeric:tabular-nums; min-width:46px; }
+    .timer.over { color:#a53143; }
+    .quiet-button { border:1px solid var(--md-outline); color:var(--purple); background:transparent; padding:10px 18px; min-height:40px; border-radius:100px; font-size:14px; font-weight:500; letter-spacing:.1px; transition:background .15s; }
+    .viewport { position:relative; min-height:0; overflow:hidden; }
+    .canvas { position:absolute; top:50%; left:50%; width:1600px; height:900px; transform-origin:center; border-radius:28px; background:var(--paper); border:1px solid var(--line); overflow:hidden; }
+    .slide { height:900px; padding:66px 88px 44px; display:none; position:relative; flex-direction:column; overflow:hidden; background:var(--paper); }
+    .slide.active { display:flex; animation:enter .2s cubic-bezier(.2,0,0,1); }
+    .canvas[data-direction="backward"] .slide.active { animation-name:enter-back; }
+    @keyframes enter { from { opacity:0; } to { opacity:1; } }
+    @keyframes enter-back { from { opacity:0; } to { opacity:1; } }
+    .slide-header { margin-bottom:42px; }
+    .eyebrow { margin:0 0 18px; color:var(--purple); font-size:20px; font-weight:500; letter-spacing:.1px; }
+    h1,h2,h3,p { margin:0; }
+    h1 { font-size:76px; line-height:1.16; font-weight:400; letter-spacing:-.25px; }
+    h2 { font-size:56px; line-height:1.18; font-weight:400; letter-spacing:0; max-width:1370px; }
+    h3 { font-size:30px; line-height:1.27; letter-spacing:0; font-weight:500; }
+    p { font-size:28px; line-height:1.46; }
+    .subtitle { margin-top:20px; font-size:28px; color:var(--muted); max-width:1220px; }
+    .accent { color:var(--purple); }
+    .body { flex:1; min-height:0; }
+    .slide-footer { display:flex; justify-content:space-between; gap:28px; align-items:flex-end; border-top:1px solid var(--line); margin-top:30px; padding-top:19px; font-size:20px; color:var(--muted); line-height:1.35; }
+    .slide-footer > :first-child { max-width:1250px; }
+    .folio { font-variant-numeric:tabular-nums; color:var(--purple); white-space:nowrap; font-weight:600; }
+    .cover { background:var(--md-surface); }
+    .cover .slide-header { margin-bottom:24px; display:flex; align-items:center; gap:18px; }
+    .cover-brand img { width:44px; height:44px; object-fit:contain; }
+    .cover .eyebrow { margin:0; font-size:27px; color:var(--ink); letter-spacing:.5px; }
+    .cover-category { margin-left:22px; padding-left:28px; border-left:1px solid var(--line); font-size:18px; letter-spacing:.1px; color:var(--muted); }
+    .cover-layout { display:grid; grid-template-columns:1.2fr 1fr; gap:80px; align-items:center; height:100%; }
+    .cover-copy { max-width:720px; padding-bottom:30px; }
+    .cover h1 { font-size:76px; line-height:1.16; letter-spacing:-.25px; }
+    .cover-copy p { max-width:660px; margin-top:28px; font-size:30px; color:var(--muted); }
+    .cover-capabilities { display:flex; gap:12px; margin-top:36px; font-size:20px; font-weight:500; }
+    .cover-capabilities span { border:1px solid var(--md-outline); border-radius:8px; padding:10px 16px; }
+    .cover-route { background:var(--md-surface-container); border-radius:28px; padding:32px; }
+    .route-title { font-size:22px; font-weight:500; margin-bottom:24px; color:var(--muted); }
+    .route-step { display:flex; align-items:center; gap:24px; padding:20px 0; border-bottom:1px solid var(--line); }
+    .route-step:last-child { border:0; }
+    .route-icon { width:56px; height:56px; border-radius:16px; background:var(--md-primary-container); color:var(--md-on-primary-container); display:grid; place-items:center; flex-shrink:0; }
+    .route-icon svg { width:28px; height:28px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+    .route-step h3 { font-size:26px; }.route-step p { font-size:22px; margin-top:4px; color:var(--muted); }
+    .split { display:grid; grid-template-columns:1fr 1fr; gap:72px; height:100%; }
+    .request { background:var(--md-primary-container); border-radius:28px; padding:40px; display:flex; flex-direction:column; justify-content:space-between; }
+    .request .quote { font-size:40px; line-height:1.3; letter-spacing:0; margin:24px 0; color:var(--deep); }
+    .small-label { font-size:20px; font-weight:500; color:var(--deep); letter-spacing:.1px; }
+    .file-line { padding-top:24px; border-top:1px solid var(--line); font-size:24px; color:var(--muted); }
+    .requirements { display:flex; flex-direction:column; justify-content:space-between; }
+    .requirement { display:grid; grid-template-columns:48px 1fr; gap:20px; padding-bottom:20px; border-bottom:1px solid var(--line); }
+    .requirement:last-child { border:0; padding-bottom:0; }
+    .num { font-size:22px; color:var(--purple); font-weight:700; padding-top:5px; }
+    .requirement p { color:var(--muted); font-size:25px; margin-top:8px; }
+    .flow { margin:0; padding:0; list-style:none; display:grid; grid-template-columns:repeat(4,1fr); gap:32px; }
+    .flow li { border-top:1px solid var(--line); padding-top:25px; }
+    .flow li:last-child { border-color:var(--line); }
+    .flow-number { display:grid; place-items:center; width:56px; height:56px; border-radius:50%; background:var(--md-primary-container); color:var(--deep); font-size:24px; font-weight:500; margin-bottom:24px; }
+    .flow li:last-child .flow-number { color:#102000; background:#b8f397; }
+    .flow h3 { margin-bottom:17px; }
+    .flow p { color:var(--muted); font-size:26px; }
+    .budget-band { display:flex; gap:56px; margin-top:36px; padding:28px 36px; border-radius:28px; background:var(--md-surface-container-high); align-items:center; }
+    .budget-band strong { font-size:36px; color:var(--deep); font-weight:700; }
+    .budget-band span { display:block; font-size:22px; color:var(--muted); margin-top:6px; }
+    .budget-description { flex:1; font-size:24px; color:var(--deep); line-height:1.35; }
+    .evidence { grid-template-columns:.95fr 1.05fr; gap:64px; }
+    .big-number { font-size:132px; font-weight:400; letter-spacing:-1px; line-height:1; color:var(--purple); font-variant-numeric:tabular-nums; }
+    .big-label { font-size:32px; margin-top:16px; }
+    .evidence-stats { display:flex; gap:36px; margin-top:28px; }
+    .evidence-stats strong { display:block; font-size:48px; font-weight:400; letter-spacing:0; }
+    .evidence-stats span { display:block; font-size:22px; color:var(--muted); margin-top:5px; }
+    .timing { margin-top:24px; padding-top:20px; border-top:1px solid var(--line); font-size:25px; line-height:1.35; }
+    .timing strong { color:var(--deep); }
+    .proof-slide { background:var(--md-surface); }
+    .proof-slide h2 { font-size:56px; }
+    .result-sheet { background:var(--md-surface-container); border:0; border-radius:28px; padding:24px 30px; color:var(--ink); }
+    .result-title { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); padding-bottom:14px; margin-bottom:16px; font-size:26px; font-weight:650; }
+    .result-title span { font-size:20px; color:var(--mint); font-weight:600; }
+    .result-counts { display:flex; justify-content:space-between; gap:20px; margin-bottom:18px; }
+    .result-counts strong { display:block; font-size:34px; color:var(--deep); }
+    .result-counts span { font-size:20px; color:var(--muted); }
+    .artifact { display:flex; justify-content:space-between; gap:24px; padding:11px 0; border-top:1px solid var(--line); font-size:21px; }
+    .artifact code { color:var(--purple); font-size:20px; }
+    .artifact span { color:var(--muted); font-size:20px; }
+    .verified { margin-top:14px; color:var(--mint); font-size:20px; line-height:1.4; }
+    .protocol { display:grid; grid-template-columns:1fr 1fr; gap:64px; }
+    .protocol-column { border-top:1px solid var(--line); padding-top:26px; }
+    .protocol-column:last-child { border-color:var(--line); }
+    .protocol-column h3 { margin-bottom:24px; font-size:34px; }
+    .plain-list { padding:0; margin:0; list-style:none; }
+    .plain-list li { padding:16px 0; border-bottom:1px solid var(--line); font-size:27px; line-height:1.35; color:var(--muted); }
+    .plain-list li:last-child { border:0; }
+    .trust-note { background:var(--md-surface-container-high); padding:24px 32px; border-radius:28px; margin-top:28px; font-size:25px; color:var(--ink); line-height:1.4; }
+    .integration { grid-template-columns:.87fr 1.13fr; gap:54px; }
+    .integration-copy p { font-size:25px; line-height:1.4; color:var(--muted); margin-top:12px; }
+    .integration-copy h3 { margin-top:18px; }
+    .integration-copy h3:first-child { margin-top:0; }
+    .channel-list { display:flex; gap:16px; margin-top:20px; color:var(--purple); font-size:25px; font-weight:650; }
+    .code-block { background:var(--md-surface-container-high); color:var(--ink); border-radius:28px; padding:30px 34px; align-self:start; }
+    .code-label { color:var(--muted); font-size:21px; margin-bottom:22px; }
+    pre { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; font:23px/1.46 Consolas,"Courier New",monospace; tab-size:2; }
+    .comment { color:var(--muted); }
+    .code-accent { color:var(--purple); }
+    .code-string { color:#386a20; }
+    .roadmap { display:grid; grid-template-columns:repeat(3,1fr); gap:42px; }
+    .roadmap-phase { border-top:1px solid var(--line); padding-top:24px; }
+    .roadmap-phase:first-child { border-color:var(--mint); }
+    .phase-label { color:var(--purple); font-size:21px; font-weight:650; margin-bottom:18px; }
+    .roadmap-phase:first-child .phase-label { color:var(--mint); }
+    .roadmap-phase h3 { margin-bottom:20px; }
+    .roadmap-phase p { color:var(--muted); font-size:25px; line-height:1.35; margin-bottom:12px; }
+    .finale { background:var(--md-surface); }
+    .finale .slide-header { margin-bottom:32px; }
+    .finale h2 { font-size:56px; max-width:1120px; line-height:1.18; }
+    .finale .roadmap-phase:first-child { border-color:var(--mint); }
+    .finale .phase-label { font-size:19px; }
+    .invitation { margin-top:30px; display:flex; align-items:center; justify-content:space-between; gap:32px; background:var(--md-primary-container); color:var(--deep); border:0; border-radius:28px; padding:25px 32px; }
+    .invitation h3 { font-size:29px; }
+    .invitation p { margin-top:8px; font-size:23px; color:var(--deep); }
+    .invitation a { background:var(--purple); color:var(--md-on-primary); padding:17px 25px; border-radius:100px; text-decoration:none; font-size:24px; font-weight:500; white-space:nowrap; }
+    .controls { position:relative; }
+    .control-group { display:flex; align-items:center; gap:10px; }
+    .nav-button { border:0; border-radius:100px; min-height:40px; padding:12px 24px; color:var(--deep); background:var(--md-primary-container); font-size:14px; font-weight:500; letter-spacing:.1px; transition:background .15s; }
+    .nav-button.primary { background:var(--purple); color:white; }
+    .nav-button:not(:disabled):hover { background:#dfd2f5; }
+    .nav-button.primary:not(:disabled):hover { background:#725dad; }
+    .nav-button:not(:disabled):active { background:#d7c8ed; }.nav-button.primary:not(:disabled):active { background:#7b67b2; }
+    .quiet-button:hover { background:#6750a414; }
+    .dots { display:flex; gap:9px; }
+    .dot { width:10px; height:10px; padding:0; border:0; border-radius:10px; background:#cbbddd; transition:width .2s,background .2s; }
+    .dot[aria-current="step"] { background:var(--purple); width:30px; }
+    .dot::after { content:""; display:block; height:30px; width:100%; transform:translateY(-10px); }
+    .counter { font-size:14px; font-variant-numeric:tabular-nums; color:var(--muted); }
+    .progress { position:fixed; left:0; bottom:0; height:3px; background:var(--purple); width:14.2857%; transition:width .2s; }
+    dialog { color:var(--ink); border:0; border-radius:28px; width:min(720px,calc(100vw - 32px)); max-height:calc(100dvh - 48px); padding:30px; background:var(--md-surface-container-high); box-shadow:0 6px 20px #00000026; }
+    dialog::backdrop { background:#251d3566; }
+    .dialog-header { display:flex; justify-content:space-between; align-items:center; gap:20px; margin-bottom:24px; }
+    .dialog-header h2 { font-size:25px; }
+    .dialog-timing { color:var(--purple); font-size:16px; margin-bottom:16px; }
+    .notes-text { font-size:21px; line-height:1.6; }
+    .source-text { margin-top:24px; padding-top:20px; border-top:1px solid var(--line); font-size:15px; color:var(--muted); line-height:1.55; }
+    .source-text a { color:var(--purple); }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
+    noscript { position:fixed; bottom:80px; background:#fff; padding:15px; z-index:5; }
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }
+    @media screen and (max-width:700px) {
+      body { grid-template-rows:60px minmax(0,1fr) 112px; }
+      .toolbar,.controls { padding:0 16px; gap:10px; }
+      .toolbar-sub,.mode,#btn-fullscreen,#btn-help { display:none; }
+      .wordmark { font-size:18px; }
+      .toolbar-right { gap:8px; }
+      #btn-print { padding:8px; font-size:12px; }
+      .viewport { overflow:auto; padding:0 12px 16px; }
+      .canvas { position:static; width:100%; height:auto; min-height:100%; transform:none!important; border-radius:20px; }
+      .slide { height:auto; min-height:100%; padding:30px 24px 26px; overflow:visible; }
+      .slide-header { margin-bottom:28px; }
+      .eyebrow { font-size:12px; margin-bottom:14px; }
+      h1 { font-size:40px; } h2 { font-size:32px; } h3 { font-size:23px; } p,.subtitle { font-size:18px; }
+      .subtitle { margin-top:14px; }
+      .split,.cover-layout,.flow,.protocol,.roadmap { grid-template-columns:1fr; gap:28px; height:auto; }
+      .cover .slide-header { padding-bottom:0; gap:12px; }
+      .cover-brand img { width:32px; height:32px; }
+      .cover .eyebrow { font-size:18px; }.cover-category { display:none; }
+      .cover-copy { padding-bottom:0; }.cover h1 { font-size:40px; }
+      .cover-route { padding:24px; border-radius:24px; }.route-title { font-size:18px; margin-bottom:12px; }.route-step { gap:16px; padding:16px 0; }.route-step h3 { font-size:21px; }.route-step p { font-size:16px; }.route-icon { width:44px; height:44px; }
+      .cover-copy p { font-size:19px; margin-top:22px; }
+      .cover-capabilities { flex-wrap:wrap; gap:14px 22px; font-size:16px; margin-top:28px; }
+      .request { padding:24px; border-radius:20px; }.request .quote { font-size:27px; margin:20px 0; }
+      .small-label,.file-line { font-size:15px; }.requirement { margin-bottom:18px; gap:10px; grid-template-columns:30px 1fr; }
+      .num { font-size:16px; }.requirement p,.flow p,.plain-list li,.integration-copy p,.roadmap-phase p { font-size:18px; }
+      .flow-number { font-size:30px; margin-bottom:12px; }.flow li { padding-top:16px; }
+      .budget-band { flex-wrap:wrap; gap:20px; padding:22px; margin-top:28px; }.budget-band strong { font-size:25px; }.budget-band span { font-size:15px; }.budget-description { flex-basis:100%; font-size:17px; }
+      .big-number { font-size:78px; }.big-label { font-size:23px; }.evidence-stats { margin-top:25px; gap:26px; }.evidence-stats strong { font-size:36px; }.evidence-stats span { font-size:16px; }.timing { font-size:18px; margin-top:24px; }
+      .proof-slide h2 { font-size:32px; }.finale h2 { font-size:39px; }.finale .phase-label { font-size:15px; }
+      .result-sheet { padding:22px; border-radius:20px; }.result-title { font-size:20px; }.result-title span { font-size:14px; }.result-counts strong { font-size:28px; }.result-counts span { font-size:15px; }
+      .artifact { flex-direction:column; gap:6px; padding:13px 0; }.artifact code,.artifact span,.verified { font-size:16px; }
+      .protocol-column h3 { font-size:25px; }.trust-note { font-size:17px; padding:20px; }
+      .channel-list { font-size:18px; }.code-block { padding:24px 18px; border-radius:20px; }.code-label { font-size:14px; }pre { font-size:14px; }
+      .phase-label { font-size:16px; }.invitation { flex-direction:column; align-items:flex-start; padding:24px; }.invitation h3 { font-size:23px; }.invitation p { font-size:17px; }.invitation a { font-size:18px; }
+      .slide-footer { font-size:13px; margin-top:26px; padding-top:16px; gap:12px; }
+      .controls { flex-wrap:wrap; align-content:center; justify-content:center; gap:12px 22px; }.control-group { justify-content:center; }.nav-button { padding:11px 16px; }.dots { order:3; }.counter { order:4; }
+      .notes-text { font-size:18px; }dialog { padding:24px; }
+    }
+    @media print {
+      @page { size:1600px 900px; margin:0; }
+      :root, :root[data-theme="dark"] {
+        color-scheme:light!important;
+        --paper:#fff!important;
+        --stage:#fff!important;
+        --ink:#1d1b20!important;
+        --muted:#49454f!important;
+        --line:#cac4d0!important;
+        --deep:#21005d!important;
+        --purple:#6750a4!important;
+        --md-surface:#fff!important;
+        --md-surface-container:#f3edf7!important;
+        --md-surface-container-high:#ece6f0!important;
+        --md-primary-container:#eaddff!important;
+        --md-on-primary-container:#21005d!important;
+        --mint:#386a20!important;
+      }
+      html,body { width:1600px; height:auto; display:block; overflow:visible; background:white; }
+      .toolbar,.controls,.progress,dialog,noscript,.sr-only { display:none!important; }
+      .viewport { padding:0; overflow:visible; }.canvas { position:static; width:1600px; height:auto; transform:none!important; box-shadow:none; border-radius:0; overflow:visible; }
+      .slide { display:flex!important; width:1600px; height:900px; padding:66px 88px 44px; break-after:page; break-inside:avoid; border-radius:0; animation:none; print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+      .slide:last-child { break-after:auto; }
+    }
+  </style>
+</head>
+<body>
+  <header class="toolbar">
+    <div><a class="wordmark" href="#slide-1" aria-label="Aperture, первый слайд">APERTURE</a><span class="toolbar-sub" id="chapter-title">Вычисления для AI-агентов</span></div>
+    <div class="toolbar-right"><span class="mode">Локальный CPU MVP</span><button class="quiet-button" id="btn-timer" aria-label="Запустить таймер питча" title="Клик — пуск/пауза [T], двойной клик — сброс [R]" aria-pressed="false"><span id="timer" class="timer">0:00</span></button><button class="quiet-button" id="btn-theme" aria-label="Переключить тему оформления" title="Переключить тему [D]">Тема</button><button class="quiet-button" id="btn-help" aria-label="Справка по горячим клавишам" title="Горячие клавиши [?]">Справка [?]</button><button class="quiet-button" id="btn-print" title="Печать / PDF [P]">Печать / PDF</button></div>
+  </header>
+  <main class="viewport" aria-label="Презентация Aperture">
+    <div class="canvas" id="canvas">
+      <section class="slide cover active" id="slide-1" aria-labelledby="title-1" data-timing="0:00–0:15">
+        <header class="slide-header cover-brand"><img src="aperture-mark-v3.png" alt="" width="44" height="44"><p class="eyebrow">APERTURE</p><span class="cover-category">CPU MVP / Solana protocol</span></header>
+        <div class="body cover-layout">
+          <div class="cover-copy"><h1 id="title-1">Безопасный compute<br> <span class="accent">для AI-агентов</span></h1><p>Разрешение владельца, лимит расходов Solana и проверенные файлы результата.</p><div class="cover-capabilities"><span>CPU Sandbox (512 MiB)</span><span>Лимит бюджета</span><span>Восстановление при сбое</span><span>19 MCP-инструментов</span></div></div>
+          <div class="cover-route" aria-label="Участники рабочего процесса">
+            <div class="route-title">От задания к файлам</div>
+            <div class="route-step"><span class="route-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="4"/><path d="m11 12 8 8m-3-3 3-3m-6 0 3-3"/></svg></span><div><h3>Владелец</h3><p>Разрешение и бюджет</p></div></div>
+            <div class="route-step"><span class="route-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M7 9h10M7 13h7"/></svg></span><div><h3>AI-агент</h3><p>План задания</p></div></div>
+            <div class="route-step"><span class="route-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4"/><rect x="10" y="10" width="4" height="4"/></svg></span><div><h3>Aperture</h3><p>Выполнение CPU-задач</p></div></div>
+            <div class="route-step"><span class="route-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M8 13h8M8 17h6"/></svg></span><div><h3>Результат</h3><p>JSON и CSV с проверкой хэшей</p></div></div>
+          </div>
+        </div>
+        <footer class="slide-footer"><span>CPU MVP с платёжным протоколом Solana</span><span class="folio">01 / 07</span></footer>
+      </section>
+
+      <section class="slide" id="slide-2" aria-labelledby="title-2" data-timing="0:15–0:30" hidden>
+        <header class="slide-header"><p class="eyebrow">Задача владельца</p><h2 id="title-2">Делегирование вместо прямого скрипта</h2><p class="subtitle">Скрипт в руках агента рискует бюджетом и сервером. Aperture связывает лимиты, журнал и файлы.</p></header>
+        <div class="body split">
+          <div class="request"><div><div class="small-label">КЛЮЧЕВОЙ СЦЕНАРИЙ</div><p class="quote">«Собери итоговый отчёт по моим CSV: уложись в лимит бюджета и заверши цепочку при сбоях»</p></div><div class="file-line">Вход: внутренние данные<br>Выход: сводный JSON и CSV</div></div>
+          <div class="requirements"><div class="requirement"><span class="num">01</span><div><h3>Данные вне контекста LLM</h3><p>Файлы обрабатываются в изолированной среде, а не летят в промпт.</p></div></div><div class="requirement"><span class="num">02</span><div><h3>Потолок бюджета Solana</h3><p>Hard cap расходов: агент не спишет больше разрешённого лимита.</p></div></div><div class="requirement"><span class="num">03</span><div><h3>Восстановление без доплат</h3><p>Журнал шлюза продолжает шаги после сбоя без повторной оплаты.</p></div></div><div class="requirement"><span class="num">04</span><div><h3>Проверяемый результат</h3><p>Файлы связаны с кодом и подписанной квитанцией.</p></div></div></div>
+        </div>
+        <footer class="slide-footer"><span>Первый сценарий продукта: CSV-аналитика через отдельного агента</span><span class="folio">02 / 07</span></footer>
+      </section>
+
+      <section class="slide" id="slide-3" aria-labelledby="title-3" data-timing="0:30–0:50" hidden>
+        <header class="slide-header"><p class="eyebrow">Путь задания</p><h2 id="title-3">Одна цепочка под контролем владельца</h2><p class="subtitle">Код, входные файлы и лимиты связаны с конкретным разрешением.</p></header>
+        <div class="body"><ol class="flow"><li><div class="flow-number">01</div><h3>Передать данные</h3><p>Владелец загружает CSV и назначает ссылки выбранному агенту.</p></li><li><div class="flow-number">02</div><h3>Одобрить план</h3><p>Владелец проверяет шаги и общий потолок бюджета цепочки.</p></li><li><div class="flow-number">03</div><h3>Выполнить шаги</h3><p>Шлюз проверяет разрешения. Worker считает, журнал сохраняет прогресс.</p></li><li><div class="flow-number">04</div><h3>Получить отчёт</h3><p>Клиент проверяет подписи и хэши скачанных файлов.</p></li></ol><div class="budget-band"><div><strong>500 000</strong><span>lamports на всю цепочку</span></div><div><strong>100 000</strong><span>lamports на один шаг</span></div><div class="budget-description">Потолки из локального примера.<br>Фактический платёж в OFF_CHAIN: 0.</div></div></div>
+        <footer class="slide-footer"><span>Одобрение бюджета цепочки выполняется один раз. Другие авторизации выполняются отдельно.</span><span class="folio">03 / 07</span></footer>
+      </section>
+
+      <section class="slide proof-slide" id="slide-4" aria-labelledby="title-4" data-timing="0:50–1:15" hidden>
+        <header class="slide-header"><p class="eyebrow">Проверенный локальный сценарий</p><h2 id="title-4">Отчёт готов. Повторных задач нет.</h2><p class="subtitle">Прерывание после принятия задачи. Восстановление с прежним журналом.</p></header>
+        <div class="body split evidence"><div><div class="big-number">17 000</div><p class="big-label">синтетических строк</p><div class="evidence-stats"><div><strong>5</strong><span>шагов цепочки</span></div><div><strong>0</strong><span>повторных задач</span></div><div><strong>1</strong><span>одобрение бюджета</span></div></div><div class="timing"><strong>7,96 с</strong> на полный сценарий<br><span>Включая прерывание и восстановление.</span></div></div><div class="result-sheet"><div class="result-title">Результат <span>Хэши проверены</span></div><div class="result-counts"><div><strong>16 983</strong><span>корректные строки</span></div><div><strong>17</strong><span>ошибки формата числа</span></div></div><div class="artifact"><code>report.json</code><span>Сводка и качество данных</span></div><div class="artifact"><code>categories.csv</code><span>Итоги по категориям</span></div><div class="artifact"><code>quality.csv</code><span>Причины исключений</span></div><p class="verified">Итоговые файлы совпали байт в байт с прямым расчётом Python.</p></div></div>
+        <footer class="slide-footer"><span>05.10.2026 / Windows / Python 3.13.14. Доверенное локальное выполнение, без Docker и платежа Solana. Запуск сервисов исключён.</span><span class="folio">04 / 07</span></footer>
+      </section>
+
+      <section class="slide" id="slide-5" aria-labelledby="title-5" data-timing="1:15–1:35" hidden>
+        <header class="slide-header"><p class="eyebrow">Авторизация и расчёты</p><h2 id="title-5">Solana ограничивает затраты</h2><p class="subtitle">Правила платежа хранятся в протоколе. Расчёт данных выполняется вне цепочки.</p></header>
+        <div class="body"><div class="protocol"><div class="protocol-column"><h3>Правила на Solana</h3><ul class="plain-list"><li>Паспорт, срок действия и отзыв доступа.</li><li>Резервирование бюджета и предел списания.</li><li>Платёжный канал и квитанция расчёта.</li></ul></div><div class="protocol-column"><h3>Исполнение вне цепочки</h3><ul class="plain-list"><li>Gateway проверяет разрешение до запуска.</li><li>CPU worker выполняет код и сохраняет файлы.</li><li>SDK сверяет подписи и хэши результата.</li></ul></div></div><div class="trust-note">Сохранённый paid run: 3 200 lamports и on-chain TaskReceipt. Два публичных Devnet RPC подтвердили genesis hash и finalized-транзакцию.<br>Подписи подтверждают целостность и авторство квитанции, но не правильность удалённого вычисления.</div></div>
+        <footer class="slide-footer"><span>Платёж подтверждён в Devnet; перед записью повторить readiness после возможного перезапуска сети.</span><span class="folio">05 / 07</span></footer>
+      </section>
+
+      <section class="slide" id="slide-6" aria-labelledby="title-6" data-timing="1:35–1:50" hidden>
+        <header class="slide-header"><p class="eyebrow">Интеграция</p><h2 id="title-6">19 инструментов для вашего агента</h2><p class="subtitle">Модель остаётся в выбранном AI-хосте. Aperture предоставляет вычисления.</p></header>
+        <div class="body split integration"><div class="integration-copy"><h3>Вычисления и файлы</h3><p>Загрузка входов, котировка и получение проверенных файлов.</p><h3>Работа после перезапуска</h3><p>История задач, подключение к принятым заданиям и восстановление цепочек.</p><h3>Выбранный AI-хост</h3><p>MCP предоставляет инструменты. Модель и ключ агента остаются в вашей среде.</p><div class="channel-list"><span>Console</span><span>Python SDK</span><span>MCP</span></div></div><div class="code-block"><div class="code-label">aperture_client / синхронный Python SDK</div><pre><code><span class="comment"># Настроены client, source и csv_input</span>
+quote = client.<span class="code-accent">quote_job</span>(
+    source, inputs=[csv_input],
+    max_cost_lamports=100_000,
+    max_runtime_seconds=60)
+task = client.<span class="code-accent">execute_job</span>(
+    quote, source, inputs=[csv_input])
+result = client.<span class="code-accent">wait</span>(task)
+report = client.<span class="code-accent">download_artifact</span>(
+    task, result[<span class="code-string">"receipt"</span>], <span class="code-string">"report.json"</span>)</code></pre></div></div>
+        <footer class="slide-footer"><span>Пакет: aperture_client. Требуются ключ агента, паспорт и настроенный gateway. SDK проверяет подписи и хэши.</span><span class="folio">06 / 07</span></footer>
+      </section>
+
+      <section class="slide finale" id="slide-7" aria-labelledby="title-7" data-timing="1:50–2:00" hidden>
+        <header class="slide-header"><p class="eyebrow">Статус проекта</p><h2 id="title-7">CPU MVP и следующие этапы</h2></header>
+        <div class="body"><div class="roadmap"><div class="roadmap-phase"><div class="phase-label">РЕАЛИЗОВАНО</div><h3>CPU-пайплайн</h3><p>Console, gateway и worker.</p><p>SDK и 19 MCP-инструментов.</p><p>CSV-цепочки и восстановление.</p></div><div class="roadmap-phase"><div class="phase-label">СЛЕДУЮЩИЙ ЭТАП</div><h3>Пилоты и проверка</h3><p>Пилоты на реальных экспортах.</p><p>Проверка Docker и Devnet.</p><p>Контрактный аудит до Mainnet.</p></div><div class="roadmap-phase"><div class="phase-label">НАПРАВЛЕНИЕ РАЗВИТИЯ</div><h3>Новые исполнители</h3><p>Независимые операторы.</p><p>GPU-задачи и инференс.</p><p>Mainnet после аудита.</p></div></div><div class="invitation"><div><h3>Первый пилот: ваш CSV-отчёт через агента</h3><p>Локальный запуск: <code>start_preview.bat</code></p></div><a href="https://github.com/AliNurym/aperture-ai-gateway" target="_blank" rel="noopener noreferrer">Открыть репозиторий</a></div></div>
+        <footer class="slide-footer"><span>В preview выполняется доверенный локальный код. Результаты и логи нужно выбирать с учётом приватности данных.</span><span class="folio">07 / 07</span></footer>
+      </section>
+    </div>
+  </main>
+  <footer class="controls" aria-label="Управление презентацией"><div class="control-group"><button id="btn-prev" class="nav-button" disabled aria-label="Предыдущий слайд">Назад</button><button id="btn-next" class="nav-button primary" aria-label="Следующий слайд">Далее</button><button id="btn-notes" class="quiet-button" aria-haspopup="dialog">Заметки</button></div><nav class="dots" id="dots" aria-label="Выбор слайда"></nav><div class="control-group"><span class="counter" id="counter">01 / 07</span><button id="btn-fullscreen" class="quiet-button">Полный экран</button></div></footer>
+  <div class="progress" id="progress" aria-hidden="true"></div>
+  <p class="sr-only" id="announcement" role="status" aria-live="polite"></p>
+  <dialog id="notes-dialog" aria-labelledby="notes-title"><div class="dialog-header"><h2 id="notes-title">Заметки докладчика</h2><button id="btn-close-notes" class="quiet-button" aria-label="Закрыть заметки">Закрыть</button></div><p class="dialog-timing" id="notes-timing"></p><p class="notes-text" id="notes-text"></p><div class="source-text" id="notes-source"></div><div class="source-text" style="margin-top:14px;padding-top:12px;font-size:13px;">Горячие клавиши: Стрелки / Пробел — переключение, 1-7 — слайды, N — заметки, F — полный экран, T — таймер, R — сброс таймера, D — тема, P — печать.</div></dialog>
+  <dialog id="help-dialog" aria-labelledby="help-title">
+    <div class="dialog-header"><h2 id="help-title">Горячие клавиши</h2><button id="btn-close-help" class="quiet-button" aria-label="Закрыть справку">Закрыть</button></div>
+    <div class="shortcuts-grid">
+      <div class="shortcut-row"><kbd>Space / Стрелки / PageDown</kbd><span>Следующий / Предыдущий слайд</span></div>
+      <div class="shortcut-row"><kbd>1 – 7</kbd><span>Быстрый переход к выбранному слайду</span></div>
+      <div class="shortcut-row"><kbd>Home / End</kbd><span>Первый / Последний слайд</span></div>
+      <div class="shortcut-row"><kbd>N</kbd><span>Заметки докладчика и первоисточники</span></div>
+      <div class="shortcut-row"><kbd>F</kbd><span>Полноэкранный режим</span></div>
+      <div class="shortcut-row"><kbd>T</kbd><span>Пуск / Пауза таймера (2 минуты)</span></div>
+      <div class="shortcut-row"><kbd>R</kbd><span>Сброс таймера на 0:00 (или двойной клик)</span></div>
+      <div class="shortcut-row"><kbd>D</kbd><span>Переключение темы Material 3 (светлая / тёмная)</span></div>
+      <div class="shortcut-row"><kbd>P</kbd><span>Печать всех слайдов / экспорт в чистый PDF</span></div>
+      <div class="shortcut-row"><kbd>? / H</kbd><span>Открыть эту справку</span></div>
+      <div class="shortcut-row"><kbd>Esc</kbd><span>Закрыть активное диалоговое окно</span></div>
+    </div>
+  </dialog>
+  <noscript>Для переключения слайдов включите JavaScript. Печать страницы содержит все семь слайдов.</noscript>
+  <script id="speaker-data" type="application/json">
+    [
+      {
+            "speech": "Aperture помогает AI-агентам выполнять CPU-задачи в пределах строгого разрешения владельца. Зачем это нужно вместо обычного скрипта? Обычному скрипту нельзя доверить кредитную карту и сервер: агент может упасть на середине или уйти в бесконечный платный цикл. Aperture держит данные вне контекста LLM, фиксирует потолок расходов в Solana и возобновляет работу после сбоев без повторных затрат. Сегодня это CPU MVP с Python SDK, девятнадцатью MCP-инструментами и платёжным протоколом Solana.",
+            "source": "README.md; sdk/python/aperture_client/mcp_server.py. Возврат данных в LLM зависит от выбранных результатов и логов. Дизайн: Google Material 3; цветовые роли primary / primary-container / surface-container / on-surface; локальный Roboto из google/fonts (Roboto-OFL.txt). Типографика увеличена для презентации. Схема показывает участников CSV-сценария."
+      },
+      {
+            "speech": "Наш ключевой сценарий: владелец поручает агенту аналитику по CSV. Ему важно ограничить доступ и расходы, продолжить работу после сбоя и получить файлы, целостность которых можно проверить. Эти четыре требования Aperture объединяет в одном контролируемом процессе: данные изолированы, бюджет ограничен, а сбой не приводит к потере денег или повторным шагам.",
+            "source": "docs/mvp-evidence.md; backend/owner_workspace.py; backend/artifact_store.py; sdk/python/aperture_client/workflows.py. Пример запроса иллюстрирует сценарий, а не подтверждённый клиентский кейс."
+      },
+      {
+            "speech": "Владелец загружает данные и назначает их агенту. Затем одобряет известный план и общий потолок бюджета. Шлюз проверяет разрешение перед запуском каждого шага, worker выполняет расчёт, а журнал сохраняет прогресс. Для бюджета всей цепочки достаточно одного одобрения. Загрузка, паспорт и другие операции имеют отдельные авторизации.",
+            "source": "backend/workflow_inbox.py; frontend/src/utils/workflowPlan.js; sdk/python/aperture_client/assigned_workflows.py. Потолки 500 000 и 100 000 lamports взяты из локальной проверки от 05.10.2026. В ней платежей не было."
+      },
+      {
+            "speech": "Мы проверили этот путь на семнадцати тысячах синтетических строк. Прервали выполнение после принятия первой задачи, затем восстановили его с прежним журналом. Завершились ровно пять задач, без дубликатов. Все три файла совпали с прямым расчётом Python. Полный сценарий занял около восьми секунд на одном компьютере. Это локальный результат без Docker и платежей Solana.",
+            "source": "presentation-evidence.json: assigned_workflow. Полный путь: 7,964213 с, исполнение worker: 0,864 с, прямой Python: 0,907977 с. Полный путь включает намеренный сбой и восстановление, исключает запуск сервисов и паспорт. Сравнение не доказывает превосходство по скорости. Отдельная проверка экспортированного frontend-плана завершила 20 шагов, повторно использовала файлы и освободила активное хранилище."
+      },
+      {
+            "speech": "Solana отвечает за паспорт агента и правила расчёта в платёжном канале. Владелец делегирует доступ отдельному ключу, задаёт ограничения и может отозвать паспорт. Протокол ограничивает списание и защищает от повторного расчёта одной задачи. Подписанные квитанции связывают результат с разрешением, но сами по себе не доказывают правильность удалённого вычисления.",
+            "source": "programs/src/lib.rs; backend/gateway.py; sdk/python/aperture_client/client.py; scripts/devnet.py status; presentation-evidence.json: devnet_execution. Сохранённый запуск списал 3 200 lamports и создал on-chain TaskReceipt; execution mode — trusted-local без Docker. Два публичных Devnet RPC подтвердили совпадающий genesis hash и finalized-транзакцию на слоте 504877196. Read-only preflight подтвердил программу и ProtocolConfig v2. Статический пример в Solana getGenesisHash docs отличается; перед записью перепроверить, не перезапускался ли Devnet."
+      },
+      {
+            "speech": "Мы ориентируемся на разработчиков агентной аналитики: повторяемые CSV-отчёты и задания между процессами. Агент использует MCP или Python SDK. Выбранный AI-хост предоставляет модель, Aperture выполняет задачи и возвращает проверяемые файлы. Здесь показаны реальные методы синхронного SDK после настройки клиента.",
+            "source": "sdk/python/aperture_client/client.py: quote_job, execute_job, wait, download_artifact. Фрагмент требует настроенного client, проверенного source и csv_input, полученного при upload_input. source должен создавать report.json. Научные, финансовые и производительные гарантии из этого примера не следуют."
+      },
+      {
+            "speech": "Локальный CPU MVP работает. Следующий этап: пилоты, проверка среды и аудит. GPU и Mainnet остаются планами. Начать можно с CSV-отчёта через агента.",
+            "source": "README.md; docs/mvp-evidence.md; presentation-evidence.json. На 05.10.2026 прошли 178 тестов, 2 Docker-теста пропущены. Проверены build и lint. Это не измерение покрытия. Пилоты, аудит, GPU и Mainnet указаны как планы без обещанных сроков или подтверждённых партнёров."
+      }
+]
+  </script>
+  <script>
+    (() => {
+      'use strict';
+      const slides = [...document.querySelectorAll('.slide')];
+      const notes = JSON.parse(document.getElementById('speaker-data').textContent);
+      const byId = id => document.getElementById(id);
+      const canvas = byId('canvas');
+      const viewport = document.querySelector('.viewport');
+      const dialog = byId('notes-dialog');
+      const pad = number => String(number).padStart(2, '0');
+      let current = 0;
+      const dots = slides.map((slide, index) => {
+        const button = document.createElement('button');
+        button.className = 'dot';
+        button.setAttribute('aria-label', `${index + 1}. ${slide.querySelector('h1,h2').textContent}`);
+        button.addEventListener('click', () => showSlide(index));
+        byId('dots').append(button);
+        return button;
+      });
+      function fit() {
+        if (window.matchMedia('(max-width:700px)').matches) { canvas.style.transform = ''; return; }
+        const scale = Math.max(.05, Math.min((viewport.clientWidth - 32) / 1600, (viewport.clientHeight - 24) / 900));
+        canvas.style.transform = `translate(-50%, -50%) scale(${scale})`;
+      }
+      function showSlide(index, updateHash = true) {
+        if (!Number.isInteger(index) || index < 0 || index >= slides.length) return;
+        canvas.dataset.direction = index < current ? 'backward' : 'forward';
+        current = index;
+        slides.forEach((slide, i) => { slide.hidden = i !== index; slide.classList.toggle('active', i === index); dots[i].setAttribute('aria-current', i === index ? 'step' : 'false'); });
+        byId('btn-prev').disabled = index === 0;
+        byId('btn-next').disabled = index === slides.length - 1;
+        byId('counter').textContent = `${pad(index + 1)} / ${pad(slides.length)}`;
+        byId('chapter-title').textContent = slides[index].querySelector('h1,h2').textContent;
+        byId('progress').style.width = `${(index + 1) / slides.length * 100}%`;
+        byId('announcement').textContent = `Слайд ${index + 1} из ${slides.length}: ${slides[index].querySelector('h1,h2').textContent}`;
+        byId('notes-timing').textContent = `Слайд ${index + 1} / ${slides[index].dataset.timing}`;
+        byId('notes-text').textContent = notes[index].speech;
+        byId('notes-source').replaceChildren(document.createTextNode(`Источники и границы: ${notes[index].source} `));
+        if (index === 3 || index === 6) { const link = document.createElement('a'); link.href = 'presentation-evidence.json'; link.textContent = 'Открыть данные проверки'; link.target = '_blank'; link.rel = 'noopener noreferrer'; byId('notes-source').append(link); }
+        if (updateHash && location.hash !== `#slide-${index + 1}`) { try { history.replaceState(null, '', `#slide-${index + 1}`); } catch { /* Local files can disallow history writes. */ } }
+        viewport.scrollTop = 0;
+      }
+      function fromHash() { const match = /^#slide-([1-7])$/.exec(location.hash); showSlide(match ? Number(match[1]) - 1 : 0, false); }
+      byId('btn-prev').addEventListener('click', () => showSlide(current - 1));
+      byId('btn-next').addEventListener('click', () => showSlide(current + 1));
+      const helpDialog = byId('help-dialog');
+      byId('btn-notes').addEventListener('click', () => dialog.showModal());
+      byId('btn-close-notes').addEventListener('click', () => dialog.close());
+      dialog.addEventListener('click', event => { if (event.target === dialog) { const r = dialog.getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) dialog.close(); } });
+      byId('btn-help').addEventListener('click', () => helpDialog.showModal());
+      byId('btn-close-help').addEventListener('click', () => helpDialog.close());
+      helpDialog.addEventListener('click', event => { if (event.target === helpDialog) { const r = helpDialog.getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) helpDialog.close(); } });
+      byId('btn-print').addEventListener('click', () => { if (dialog.open) dialog.close(); window.print(); });
+      async function fullscreen() { try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch { byId('announcement').textContent = 'Полный экран недоступен в этом окне. Откройте презентацию в отдельной вкладке.'; } }
+      byId('btn-fullscreen').addEventListener('click', fullscreen);
+      document.addEventListener('fullscreenchange', () => { byId('btn-fullscreen').textContent = document.fullscreenElement ? 'Выйти из экрана' : 'Полный экран'; fit(); });
+      document.addEventListener('keydown', event => {
+        if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.repeat || dialog.open || event.target.closest('input,textarea,select,[contenteditable="true"]')) return;
+        if (event.key === ' ' && event.target.closest('button,a')) return;
+        if (['ArrowRight','PageDown',' '].includes(event.key)) { event.preventDefault(); showSlide(current + 1); }
+        else if (['ArrowLeft','PageUp'].includes(event.key)) { event.preventDefault(); showSlide(current - 1); }
+        else if (event.key === 'Home') { event.preventDefault(); showSlide(0); }
+        else if (event.key === 'End') { event.preventDefault(); showSlide(slides.length - 1); }
+        else if (/^[1-7]$/.test(event.key)) { event.preventDefault(); showSlide(Number(event.key) - 1); }
+        else if (event.key.toLowerCase() === 'n') { event.preventDefault(); dialog.showModal(); }
+        else if (event.key.toLowerCase() === 'f') { event.preventDefault(); fullscreen(); }
+        else if (event.key.toLowerCase() === 't') { event.preventDefault(); toggleTimer(); }
+        else if (event.key.toLowerCase() === 'r') { event.preventDefault(); resetTimer(); }
+        else if (event.key.toLowerCase() === 'd') { event.preventDefault(); applyTheme(currentTheme === 'dark' ? 'light' : 'dark'); }
+        else if (event.key.toLowerCase() === 'p') { event.preventDefault(); if (dialog.open) dialog.close(); if (helpDialog.open) helpDialog.close(); window.print(); }
+        else if (event.key === '?' || event.key.toLowerCase() === 'h') { event.preventDefault(); if (helpDialog.open) helpDialog.close(); else helpDialog.showModal(); }
+      });
+      const themeMeta = document.querySelector('meta[name="theme-color"]');
+      let currentTheme = 'light';
+      try {
+        const storedTheme = localStorage.getItem('aperture-theme');
+        if (storedTheme === 'dark' || storedTheme === 'light') {
+          currentTheme = storedTheme;
+        } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+          currentTheme = 'dark';
+        }
+      } catch {}
+      function applyTheme(th) {
+        currentTheme = th;
+        document.documentElement.setAttribute('data-theme', th);
+        byId('btn-theme').textContent = th === 'dark' ? 'Светлая тема' : 'Тёмная тема';
+        if (themeMeta) themeMeta.setAttribute('content', th === 'dark' ? '#141218' : '#fef7ff');
+        try { localStorage.setItem('aperture-theme', th); } catch {}
+      }
+      applyTheme(currentTheme);
+      byId('btn-theme').addEventListener('click', () => applyTheme(currentTheme === 'dark' ? 'light' : 'dark'));
+
+      let elapsed = 0;
+      let startedAt = null;
+      let interval = null;
+      function updateTimer() { const seconds = Math.floor((elapsed + (startedAt === null ? 0 : performance.now() - startedAt)) / 1000); byId('timer').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; byId('timer').classList.toggle('over', seconds >= 120); }
+      function toggleTimer() {
+        if (startedAt === null) {
+          startedAt = performance.now();
+          interval = setInterval(updateTimer, 250);
+          byId('btn-timer').setAttribute('aria-pressed','true');
+          byId('btn-timer').setAttribute('aria-label','Приостановить таймер питча');
+        } else {
+          elapsed += performance.now() - startedAt;
+          startedAt = null;
+          clearInterval(interval);
+          interval = null;
+          byId('btn-timer').setAttribute('aria-pressed','false');
+          byId('btn-timer').setAttribute('aria-label','Продолжить таймер питча');
+        }
+        updateTimer();
+      }
+      function resetTimer() {
+        elapsed = 0;
+        if (startedAt !== null) startedAt = performance.now();
+        updateTimer();
+      }
+      byId('btn-timer').addEventListener('click', toggleTimer);
+      byId('btn-timer').addEventListener('dblclick', event => { event.preventDefault(); resetTimer(); });
+
+      let touchStartX = null;
+      let touchStartY = null;
+      document.addEventListener('touchstart', event => {
+        if (event.touches && event.touches.length === 1) {
+          touchStartX = event.touches[0].clientX;
+          touchStartY = event.touches[0].clientY;
+        }
+      }, { passive: true });
+      document.addEventListener('touchend', event => {
+        if (touchStartX === null || touchStartY === null || !event.changedTouches || event.changedTouches.length === 0) return;
+        const deltaX = event.changedTouches[0].clientX - touchStartX;
+        const deltaY = event.changedTouches[0].clientY - touchStartY;
+        touchStartX = null;
+        touchStartY = null;
+        if (Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+          if (deltaX < 0) showSlide(current + 1);
+          else showSlide(current - 1);
+        }
+      }, { passive: true });
+      window.addEventListener('resize', fit);
+      window.addEventListener('hashchange', fromHash);
+      window.addEventListener('pagehide', () => { if (startedAt !== null) elapsed += performance.now() - startedAt; startedAt = null; clearInterval(interval); interval = null; byId('btn-timer').setAttribute('aria-pressed','false'); byId('btn-timer').setAttribute('aria-label','Продолжить таймер питча'); updateTimer(); });
+      fit(); fromHash();
+    })();
+  </script>
+</body>
+</html>

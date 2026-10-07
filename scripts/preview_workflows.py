@@ -115,6 +115,7 @@ def main():
             Path(os.environ.get("ProgramFiles", "")) / "nodejs" / "node.exe",
             Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "nodejs" / "node.exe",
             Path.home() / ".cache" / "codex-runtimes" / "codex-primary-runtime" / "dependencies" / "node" / "bin" / "node.exe",
+            Path.home() / "Documents" / "GitHub" / "medsklad1" / "temp_node" / "node-v20.12.2-win-x64" / "node.exe",
         ]:
             if candidate.is_file():
                 node = str(candidate)

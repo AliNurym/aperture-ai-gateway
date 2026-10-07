@@ -206,7 +206,7 @@ export async function verifyCompletedStep(context, saved, connection, signal) {
   check(['completed', 'failed', 'cancelled'].includes(saved.receipt.execution_status), 'Receipt execution status is invalid.');
   if (saved.receipt.execution_status === 'completed') check(saved.receipt.settlement_type === (context.network === 'devnet' ? 'DEVNET' : 'OFF_CHAIN'), 'A completed task must have the settlement type of its approved network.');
   if (saved.receipt.settlement_type === 'DEVNET') {
-    check(connection && await connection.getGenesisHash() === 'GH7ome3EiwEr7tu9JuTh2dpYWBJK3z69Xm1ZE3MEE6JC', 'The independent RPC is not Solana Devnet.');
+    check(connection && await connection.getGenesisHash() === 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG', 'The independent RPC is not Solana Devnet.');
     await verifyDevnetSettlement(connection, saved.receipt, saved.quote, saved.task_id);
   }
   return verified;
