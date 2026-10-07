@@ -1,6 +1,7 @@
 # Ультимативный сценарий 3-минутной живой демонстрации Aperture (Demo Day Runbook)
 
 - **Общий хронометраж:** 3 минуты 00 секунд (180 секунд)
+- **Условия показа:** Кошелек **Solflare уже подключен** к консоли на Devnet; внешние API-токены (OpenAI/Anthropic) **не требуются** (рантайм Aperture самодостаточен).
 - **Формат:** Инструкции и экранные действия — на русском языке; реплики спикера (Speech) — на чистом презентационном английском языке.
 - **Интерфейс:** Консоль Aperture (`http://localhost:3000` или Vercel деплой)
 - **Сеть:** Solana Devnet
@@ -8,13 +9,13 @@
 
 ---
 
-## 1. Чек-лист готовности за 3 минуты до выхода (Zero-Fail Setup)
+## 1. Чек-лист готовности за 2 минуты до выхода (Zero-Fail Setup)
 
 1. Открыть браузер на странице `Overview` в полноэкранном режиме (**клавиша F11**).
-2. Заранее открыть расширение **Solflare** и ввести пароль, чтобы во время питча оно не запрашивало разблокировку.
-3. В настройках Solflare убедиться, что выбрана сеть **Devnet** и на балансе есть тестовые SOL (0.5+ SOL).
-4. Во второй фоновой вкладке открыть репозиторий GitHub: `https://github.com/AliNurym/aperture-ai-gateway`.
-5. В блоке симулятора на Overview убедиться, что выбрана первая вкладка: **Resilient CSV Pipeline**.
+2. Убедиться, что кошелек **Solflare уже подключен** в правом верхнем углу (отображается сокращенный адрес и бейдж сети `Devnet`).
+3. Никаких API-ключей вводить не нужно: шлюз и песочница исполняют код автономно без зависимости от сторонних платных LLM-провайдеров.
+4. Во второй фоновой вкладке браузера открыть репозиторий GitHub: `https://github.com/AliNurym/aperture-ai-gateway`.
+5. В блоке симулятора на Overview активна вкладка: **Resilient CSV Pipeline**.
 
 ---
 
@@ -36,22 +37,21 @@
 
 ---
 
-### Блок 2. Подключение Solflare и Budget Guardrail (0:35 – 1:15 | 40 секунд)
+### Блок 2. Ончейн-паспорт и Budget Guardrail (0:35 – 1:15 | 40 секунд)
 
 #### Что делать на экране:
-1. В правом верхнем углу кликнуть на кнопку **Select Wallet**.
-2. В появившемся модальном окне кликнуть на **Solflare** (кошелек подключается мгновенно, так как он уже разблокирован).
-3. Показать, что отобразился адрес кошелька и статус сети `Devnet`.
-4. Проскроллить страницу чуть вниз до блока **Deterministic Execution Telemetry**.
-5. Нажать на вторую вкладку: **Budget Guardrail (POLICY)**.
-6. Нажать появившуюся кнопку: **Test Budget Guardrail Rejection**.
+1. Плавно навести курсор на правый верхний угол: показать, что кошелек **Solflare уже подключен** и отображает адрес в сети `Devnet`.
+2. Проскроллить страницу вниз до блока **Deterministic Execution Telemetry**.
+3. Нажать на вторую вкладку: **Budget Guardrail (POLICY)**.
+4. Нажать кнопку: **Test Budget Guardrail Rejection**.
+5. Наблюдать мгновенный перехват: HTTP 403 Forbidden, статус `0 lamports debited`.
 
 #### Что говорить на английском (Speech):
-> "Let’s see it live. The owner connects their wallet—here we’re using Solflare on Solana Devnet. The owner never delegates their private key. Instead, they issue an on-chain passport with an explicit budget ceiling.
+> "Notice in the top right that my Solflare wallet is already connected on Solana Devnet. The key architecture here: the owner never shares private keys or expensive API tokens with the agent. Instead, the owner issues an on-chain passport with a strict budget ceiling.
 > 
-> Take a look at this Budget Guardrail scenario. An autonomous agent attempts to execute an unconstrained job requesting 500,000 lamports, but the owner policy capped it at 50,000.
+> Take a look at this Budget Guardrail scenario. An autonomous agent attempts to execute an unconstrained job requesting 500,000 lamports, but our owner policy strictly capped it at 50,000.
 > 
-> When we trigger the run, the gateway intercepts the call before spinning up any worker process. It immediately returns an HTTP 403 Forbidden. Zero transactions hit the chain, zero lamports are debited, and the treasury stays completely safe."
+> When we trigger the run, our gateway intercepts the call before spinning up any worker process. It immediately returns an HTTP 403 Forbidden. Zero transactions hit the chain, zero lamports are debited, and the treasury stays completely safe."
 
 ---
 
@@ -65,7 +65,7 @@
 5. Появляется карточка результатов: покажите блок **State Journal Timeline** слева и артефакты **report.json** и **categories.csv** справа.
 
 #### Что говорить на английском (Speech):
-> "Now for our flagship benchmark: aggregating a private 17,000-row dataset. This dataset never enters the LLM prompt context—it runs inside an isolated CPU sandbox.
+> "Now for our flagship benchmark: aggregating a private 17,000-row dataset. This dataset never enters the LLM prompt context—it runs inside an isolated CPU sandbox without requiring any external API keys.
 > 
 > Let’s trigger the pipeline. During Step 1, we simulate an intentional process interruption: the worker is abruptly killed. In any traditional setup, that means a total pipeline failure and double charges.
 > 
@@ -79,7 +79,7 @@
 
 #### Что делать на экране:
 1. Внизу карточки результатов нажать кнопку **Verify Cryptographic Proof**.
-2. В открывшемся окне показать зеленую плашку `Verified`, публичные ключи воркера/шлюза, хэш SHA-256 и подпись Ed25519.
+2. В модальном окне показать зеленую плашку `Verified`, подписи Ed25519, хэши SHA-256.
 3. Закрыть модальное окно (крестик или Esc).
 4. Нажать кнопку **Inspect in Studio** (или перейти в раздел **Studio** в левом сайдбаре).
 5. Показать код Python-воркера и параметры лимитов.
@@ -87,7 +87,7 @@
 #### Что говорить на английском (Speech):
 > "Every completed task is cryptographically attested. When we click 'Verify Cryptographic Proof', we see the full Ed25519 signatures from both worker and gateway, the SHA-256 code and output hashes, and the PDA receipt on Solana. The owner has mathematical proof of what was computed.
 > 
-> And inside Workload Studio, developers can inspect and customize their workloads. Aperture exposes 19 Model Context Protocol tools: any agent built on Claude, Cursor, or local LLMs connects to our gateway with a single config line."
+> And inside Workload Studio, developers can inspect their workloads directly. Because Aperture handles compute deterministically, you don't depend on proprietary API tokens. For integration, Aperture exposes 19 Model Context Protocol tools to any agent framework."
 
 ---
 
@@ -109,10 +109,10 @@
 
 | Вопрос жюри | Что ответить на английском (Speech) | Пояснение для вас (на русском) |
 |---|---|---|
-| **"Why not run the computation directly on Solana smart contracts?"** | "On-chain compute is too expensive and constrained for processing 17,000 rows. Aperture uses an Off-Chain Compute with On-Chain Settlement model: heavy CPU computation runs in sandboxes, while Solana locks the escrow deposit and verifies cryptographic receipts." | Почему не ончейн: в блокчейне дорого считать 17k строк. Мы считаем в оффчейне, а сеттлим на Solana. |
+| **"Do I need OpenAI or Anthropic API keys to use Aperture?"** | "No. Aperture separates reasoning from execution. We are the compute and settlement layer. Workloads run in sandboxed Python environments and MCP servers, so you don't need external LLM API tokens to execute bounded jobs." | Нужны ли API-ключи: Нет, Aperture — это слой вычислений и расчетов. Код крутится в песочнице, ключи LLM не требуются. |
+| **"Why not run the computation directly on Solana smart contracts?"** | "On-chain compute is too expensive and constrained for processing 17,000 rows. Aperture uses an Off-Chain Compute with On-Chain Settlement model: heavy CPU computation runs in sandboxes, while Solana locks the escrow deposit and verifies cryptographic receipts." | Почему не ончейн: в блокчейне дорого считать тысячи строк; считаем в песочнице, сеттлим на Solana. |
 | **"What prevents a malicious worker from returning fake data?"** | "The gateway validates the output structure and SHA-256 hash before co-signing the receipt. Escrow funds are only released from the payment channel when both worker and gateway signatures match the agreement." | Защита от мусора: шлюз проверяет хэш и схему. Без подписи шлюза эскроу воркеру не выплачивается. |
-| **"How is this different from standard Docker containers?"** | "Docker only provides OS isolation. It doesn't enforce Solana payment channel budgets, it doesn't provide 18-millisecond journal resumption across crashes, and it doesn't integrate with 19 agent MCP tools." | Отличие от Docker: Docker — это просто изоляция. Aperture дает экономический смарт-контракт, журнал восстановления без переплат и MCP. |
-| **"If Solflare delays on stage during demo?"** | "While the Solana RPC completes the handshake, let’s jump straight into our deterministic telemetry simulator." | Если кошелек долго крутится: не ждите, сразу говорите эту фразу и жмите кнопку симулятора. |
+| **"How is this different from standard Docker containers?"** | "Docker only provides OS isolation. It doesn't enforce Solana payment channel budgets, it doesn't provide 18-millisecond journal resumption across crashes, and it doesn't integrate with 19 agent MCP tools." | Отличие от Docker: Docker — это просто изоляция, а Aperture дает экономический смарт-контракт, журнал без переплат и MCP. |
 
 ---
 
