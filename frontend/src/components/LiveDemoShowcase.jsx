@@ -18,15 +18,66 @@ const SCENARIOS = [
     actionHint: 'Simulates intentional worker termination at Step 1 and instant journal resume with zero duplicate tasks',
     resultTitle: 'CRASH RESILIENCE VERIFIED',
     resultSubtitle: '0 duplicate tasks · 0 extra charges · 100% deterministic output',
-    chartLabel: 'Batch Cardinality Distribution (17,000 rows across 12 compute chunks)',
+    auditBadge: 'Crash Resilient · 0 Duplicates',
+    auditTrail: [
+      {
+        step: '01',
+        label: 'Dataset Staging & Partition',
+        detail: '17,000 synthetic rows partitioned into 12 batches with SHA-256 integrity check.',
+        status: 'passed',
+        statusLabel: 'Staged',
+      },
+      {
+        step: '02',
+        label: 'Synthetic Interruption',
+        detail: 'Process halted at Step 1. State snapshot and row offset committed to on-disk journal.',
+        status: 'warning',
+        statusLabel: 'Interrupted',
+      },
+      {
+        step: '03',
+        label: 'Journal Resumption',
+        detail: 'Resumed in 18ms from journal. Exactly 0 duplicate rows executed, 0 extra lamports spent.',
+        status: 'passed',
+        statusLabel: 'Recovered',
+      },
+      {
+        step: '04',
+        label: 'Consensus & Output Hash',
+        detail: 'Output hashes compared byte-for-byte against pre-crash baseline. Ed25519 receipt attested.',
+        status: 'passed',
+        statusLabel: 'Verified',
+      },
+    ],
+    artifacts: [
+      {
+        icon: 'code',
+        name: 'report.json',
+        size: '48.2 KB',
+        description: '16,983 valid rows aggregated',
+        tag: 'SHA-256 Validated',
+      },
+      {
+        icon: 'grid',
+        name: 'categories.csv',
+        size: '128.4 KB',
+        description: '12 partitioned categories',
+        tag: '100% Parsed',
+      },
+      {
+        icon: 'shield',
+        name: 'receipt.pda',
+        size: '64 B',
+        description: 'Solana Devnet escrow receipt',
+        tag: 'Ed25519 Signed',
+      },
+    ],
     stats: [
       { label: 'Accepted rows', value: '16,983 (17 invalid)', positive: true },
       { label: 'Crash resilience', value: '0 duplicate tasks', positive: true },
       { label: 'Capital loss', value: '0 lamports (Protected)', positive: true },
       { label: 'Verified output', value: 'report.json · categories.csv', neutral: true },
     ],
-    bars: [24, 48, 85, 120, 150, 160, 138, 102, 65, 35, 18, 6],
-    barLabels: ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B09', 'B10', 'B11', 'B12'],
     studioPreset: 'dataset',
     mockReceipt: {
       taskId: 'task-csv-17000-resilient-recov',
@@ -76,15 +127,66 @@ const SCENARIOS = [
     actionHint: 'Simulates rogue 500,000 lamport request blocked at the gateway gatekeeper; verifies zero compute spent and zero treasury drain',
     resultTitle: 'TREASURY GUARDRAIL ACTIVE',
     resultSubtitle: 'HTTP 403 Forbidden · Pre-flight rejection · 0 lamports debited',
-    chartLabel: 'Requested Budget vs. Allowed Policy Ceiling',
+    auditBadge: 'HTTP 403 · Treasury Safe',
+    auditTrail: [
+      {
+        step: '01',
+        label: 'Agent Task Request',
+        detail: 'Agent submitted workload requesting 500,000 lamports unconstrained execution.',
+        status: 'neutral',
+        statusLabel: 'Received',
+      },
+      {
+        step: '02',
+        label: 'Policy Gatekeeper Check',
+        detail: 'Gateway checked Owner Passport policy. Maximum authorized limit is 50,000 lamports.',
+        status: 'warning',
+        statusLabel: 'Exceeded',
+      },
+      {
+        step: '03',
+        label: 'Pre-flight Halt',
+        detail: 'Request intercepted with HTTP 403 Forbidden before worker process was instantiated.',
+        status: 'passed',
+        statusLabel: 'Halted',
+      },
+      {
+        step: '04',
+        label: 'Zero Treasury Impact',
+        detail: 'Zero on-chain transactions broadcasted to Solana network. 0 lamports debited.',
+        status: 'passed',
+        statusLabel: 'Protected',
+      },
+    ],
+    artifacts: [
+      {
+        icon: 'shield',
+        name: 'policy_verdict.json',
+        size: '1.2 KB',
+        description: 'HTTP 403 Forbidden',
+        tag: 'Policy Enforced',
+      },
+      {
+        icon: 'code',
+        name: 'security_audit.log',
+        size: '3.4 KB',
+        description: '0 lamports spent',
+        tag: 'Treasury Safe',
+      },
+      {
+        icon: 'wallet',
+        name: 'passport_state.pda',
+        size: '32 B',
+        description: 'Allowance intact (50k)',
+        tag: 'Balance Preserved',
+      },
+    ],
     stats: [
       { label: 'Requested budget', value: '500,000 lamports' },
       { label: 'Owner allowance', value: '50,000 lamports' },
       { label: 'Gateway verdict', value: '403 Forbidden', warning: true },
       { label: 'Capital loss', value: '0 lamports (Protected)', positive: true },
     ],
-    bars: [50, 45, 40, 30, 20, 10, 5, 0, 0, 0, 0, 0],
-    barLabels: ['Req', 'Auth', 'Rule', 'Cap', 'Halt', 'Log', '-', '-', '-', '-', '-', '-'],
     studioPreset: 'policy',
     mockReceipt: {
       taskId: 'task-guardrail-budget-capped',
@@ -134,15 +236,66 @@ const SCENARIOS = [
     actionHint: 'Simulates 10,000 vectorized portfolio simulation paths in sandboxed CPU worker with cryptographic Ed25519 settlement',
     resultTitle: 'ISOLATED SIMULATION ATTESTED',
     resultSubtitle: '10,000 paths evaluated · VaR 95% confirmed · Ed25519 receipt verified',
-    chartLabel: 'Gaussian Log-Normal VaR Distribution (10,000 paths)',
+    auditBadge: '10k Paths · Sandboxed',
+    auditTrail: [
+      {
+        step: '01',
+        label: 'Parameter Vector Staging',
+        detail: '10,000 portfolio distributions staged into isolated 512 MiB CPU worker.',
+        status: 'neutral',
+        statusLabel: 'Staged',
+      },
+      {
+        step: '02',
+        label: 'Sandboxed Compute',
+        detail: 'Vectorized Monte Carlo loop evaluated in 284ms with 0 network and 0 disk leakage.',
+        status: 'passed',
+        statusLabel: 'Executed',
+      },
+      {
+        step: '03',
+        label: 'Risk Boundary Metric',
+        detail: 'Tail loss VaR (95%) calculated at -3.2%; Sharpe ratio at 2.14; alpha at +18.4%.',
+        status: 'passed',
+        statusLabel: 'Evaluated',
+      },
+      {
+        step: '04',
+        label: 'Ed25519 Settlement Receipt',
+        detail: 'Gateway validated worker cryptographic signature; 35,000 lamports released.',
+        status: 'passed',
+        statusLabel: 'Signed',
+      },
+    ],
+    artifacts: [
+      {
+        icon: 'code',
+        name: 'var_distribution.json',
+        size: '38.6 KB',
+        description: '10,000 vector paths',
+        tag: 'VaR 95% Confirmed',
+      },
+      {
+        icon: 'grid',
+        name: 'risk_metrics.csv',
+        size: '14.2 KB',
+        description: 'Sharpe 2.14, Alpha 18.4%',
+        tag: 'Risk Attested',
+      },
+      {
+        icon: 'shield',
+        name: 'receipt.pda',
+        size: '64 B',
+        description: '35k lamports settlement',
+        tag: 'Ed25519 Signed',
+      },
+    ],
     stats: [
       { label: 'Expected alpha', value: '+18.4%', positive: true },
       { label: 'VaR (95%)', value: '-3.2%', neutral: true },
       { label: 'Worker runtime', value: '284 ms' },
       { label: 'Settlement cost', value: '35,000 lamports' },
     ],
-    bars: [12, 28, 55, 84, 120, 158, 142, 105, 68, 38, 18, 8],
-    barLabels: ['-4s', '-3s', '-2s', '-1s', '-0.5s', 'Mean', '+0.5s', '+1s', '+2s', '+3s', '+4s', '+5s'],
     studioPreset: 'risk',
     mockReceipt: {
       taskId: 'task-montecarlo-10k-bounded',
@@ -394,23 +547,59 @@ export default function LiveDemoShowcase({ onOpenStudio, onOpenWorkflows }) {
               ))}
             </div>
 
-            <div className="demo-chart-section" aria-label={scenario.chartLabel}>
-              <div className="demo-chart-header">
-                <span className="demo-chart-title">{scenario.chartLabel}</span>
-                <span className="demo-chart-legend">Relative Batch Weight</span>
+            <div className="demo-audit-section">
+              <div className="demo-audit-header">
+                <div className="demo-audit-title-wrap">
+                  <Icon name="spark" size={14} />
+                  <span>Execution Audit Trail & Verified Artifacts</span>
+                </div>
+                <span className="demo-audit-badge">
+                  <span className="demo-beacon-dot" />
+                  {scenario.auditBadge}
+                </span>
               </div>
-              <div className="demo-histogram-wrap">
-                <div className="demo-histogram">
-                  {scenario.bars.map((height, i) => (
-                    <div key={i} className="demo-bar-col">
-                      <div
-                        className="demo-bar"
-                        style={{ height: `${Math.max(6, (height / 160) * 100)}%` }}
-                        title={`${scenario.barLabels[i]}: ${height} units`}
-                      />
-                      <span className="demo-bar-sub">{scenario.barLabels[i]}</span>
-                    </div>
-                  ))}
+
+              <div className="demo-audit-grid">
+                <div className="demo-audit-trail">
+                  <div className="demo-audit-subhead">State Journal Timeline</div>
+                  <div className="demo-timeline-track">
+                    {scenario.auditTrail.map((item, idx) => (
+                      <div key={idx} className={`demo-timeline-item ${item.status}`}>
+                        <div className="demo-timeline-node">
+                          <span className="demo-node-dot" />
+                          {idx < scenario.auditTrail.length - 1 && <span className="demo-node-line" />}
+                        </div>
+                        <div className="demo-timeline-content">
+                          <div className="demo-timeline-row">
+                            <strong className="demo-timeline-label">{item.label}</strong>
+                            <span className={`demo-timeline-tag ${item.status}`}>{item.statusLabel}</span>
+                          </div>
+                          <p className="demo-timeline-detail">{item.detail}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="demo-artifacts-wrap">
+                  <div className="demo-audit-subhead">Attested Output Artifacts</div>
+                  <div className="demo-artifacts-list">
+                    {scenario.artifacts.map((art, idx) => (
+                      <div key={idx} className="demo-artifact-card">
+                        <div className="demo-artifact-icon">
+                          <Icon name={art.icon} size={16} />
+                        </div>
+                        <div className="demo-artifact-info">
+                          <div className="demo-artifact-top">
+                            <strong className="demo-artifact-name">{art.name}</strong>
+                            <span className="demo-artifact-size">{art.size}</span>
+                          </div>
+                          <span className="demo-artifact-desc">{art.description}</span>
+                        </div>
+                        <span className="demo-artifact-tag">{art.tag}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
