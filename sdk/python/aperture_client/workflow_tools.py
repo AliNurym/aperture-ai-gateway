@@ -6,16 +6,16 @@ import sqlite3
 import threading
 import time
 from contextlib import closing
-from pathlib import Path
 
 from .client import ApertureClient, Task, canonical, require, sha256
 from .workflows import WorkflowRunner, validate_workflow
+from .local_paths import durable_path, readonly_sqlite_uri
 
 
 class WorkflowTools:
     def __init__(self, tools, directory, max_cost_lamports):
         self.tools = tools
-        self.root = Path(directory).resolve()
+        self.root = durable_path(directory)
         self.maximum_cost = max_cost_lamports
         self.lock = threading.RLock()
         self.active = {}
@@ -132,7 +132,7 @@ class WorkflowTools:
         journal = self._path(identifier, ".sqlite3")
         if not journal.exists():
             return []
-        with closing(sqlite3.connect(journal.as_uri() + "?mode=ro", uri=True)) as db:
+        with closing(sqlite3.connect(readonly_sqlite_uri(journal), uri=True)) as db:
             # The runner creates the database before installing its schema.
             # An immediate cancellation still records the stop flag below.
             if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='steps'").fetchone() is None:
@@ -158,7 +158,7 @@ class WorkflowTools:
         journal = self._path(identifier, ".sqlite3")
         if not journal.exists():
             return []
-        with closing(sqlite3.connect(journal.as_uri() + "?mode=ro", uri=True)) as db:
+        with closing(sqlite3.connect(readonly_sqlite_uri(journal), uri=True)) as db:
             if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='steps'").fetchone() is None:
                 return []
             result = []

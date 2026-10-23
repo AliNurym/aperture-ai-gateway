@@ -22,32 +22,13 @@ const formatBytes = value => value < 1024 ? value + ' B' : value < 1024 * 1024 ?
 
 const BLUEPRINTS = [
   {
-    id: 'csv-resilient',
-    title: 'Resilient CSV Pipeline',
-    subtitle: '3 parallel batches (17,000 rows) + merge aggregator',
-    tag: '17k Rows · Auto-Resume',
+    id: 'resumable-csv',
+    title: 'Resumable CSV workflow',
+    subtitle: 'Process uploaded batches and recover accepted steps after interruption.',
+    tag: 'Workflow recovery',
     icon: 'network',
-    advantage: 'Crash-resilient state journal guarantees 0 duplicate charges if a worker drops.',
-    batches: [
-      {
-        name: 'batch-sales-west.csv',
-        object_id: 'obj-00000000000000000000000000000001',
-        sha256: 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90',
-        size_bytes: 215040
-      },
-      {
-        name: 'batch-sales-east.csv',
-        object_id: 'obj-00000000000000000000000000000002',
-        sha256: 'b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1',
-        size_bytes: 240640
-      },
-      {
-        name: 'batch-sales-central.csv',
-        object_id: 'obj-00000000000000000000000000000003',
-        sha256: 'c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2',
-        size_bytes: 198400
-      }
-    ],
+    advantage: 'The journal tracks accepted tasks so a workflow can resume without blindly admitting them again.',
+    batches: [],
     mapping: {
       category_column: 'category',
       amount_column: 'amount',
@@ -60,26 +41,13 @@ const BLUEPRINTS = [
     runtime: '45'
   },
   {
-    id: 'financial-audit',
-    title: 'Financial Spend Cap',
-    subtitle: 'Micro-budget audit with strict 0.00005 SOL barrier',
-    tag: 'Hard Ceiling · Zero Runaway',
+    id: 'spend-capped-report',
+    title: 'Spend-capped report',
+    subtitle: 'Set a maximum charge and runtime before dispatch.',
+    tag: 'Task limits',
     icon: 'shield',
-    advantage: 'Enforces hard spending limits; rogue AI loops cannot drain wallet funds.',
-    batches: [
-      {
-        name: 'treasury-ledger-2026.csv',
-        object_id: 'obj-10000000000000000000000000000001',
-        sha256: 'd4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3',
-        size_bytes: 491520
-      },
-      {
-        name: 'disbursements-q1.csv',
-        object_id: 'obj-10000000000000000000000000000002',
-        sha256: 'e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4',
-        size_bytes: 317440
-      }
-    ],
+    advantage: 'The gateway checks each signed task quote against its cost and runtime ceilings before admission.',
+    batches: [],
     mapping: {
       category_column: 'department',
       amount_column: 'total',
@@ -92,20 +60,13 @@ const BLUEPRINTS = [
     runtime: '30'
   },
   {
-    id: 'mcp-delegation',
-    title: 'MCP Agent Delegation',
-    subtitle: 'Confidential pipeline without prompt context leakage',
-    tag: 'Zero Prompt Leaks · Privacy',
+    id: 'agent-data-handoff',
+    title: 'Agent data handoff',
+    subtitle: 'Choose which result files or logs an agent receives after processing.',
+    tag: 'Explicit context',
     icon: 'code',
-    advantage: 'Processes sensitive tables in private sandbox; agent receives only signed artifacts.',
-    batches: [
-      {
-        name: 'confidential-customer-metrics.csv',
-        object_id: 'obj-20000000000000000000000000000001',
-        sha256: 'f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5',
-        size_bytes: 532480
-      }
-    ],
+    advantage: 'Raw CSV bytes are not added to a model prompt automatically; the gateway and worker still process the selected files.',
+    batches: [],
     mapping: {
       category_column: 'region',
       amount_column: 'revenue',
@@ -119,7 +80,7 @@ const BLUEPRINTS = [
   }
 ];
 
-export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, externalBusy = false, onBusyChange, onRecord, releasedObject, onOpenStudio }) {
+export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, externalBusy = false, onBusyChange, onRecord, releasedObject, onOpenStudio, onOpenFunding }) {
   const { publicKey, signMessage, wallet, connect, connecting } = useWallet();
   const { connection } = useConnection();
   const { setVisible } = useWalletModal();
@@ -333,117 +294,18 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
       nextSchemas.set(b.object_id, [bp.mapping.category_column, bp.mapping.amount_column]);
     });
     setSchemas(nextSchemas);
-    setNotice('Loaded blueprint: ' + bp.title + '. Plan validated with ' + bp.batches.length + ' batches.');
+    setNotice('Loaded starter: ' + bp.title + '. Add CSV files, review the mapping and limits, then request a quote.');
     const heading = document.getElementById('workflow-builder-heading');
     heading?.closest('details')?.setAttribute('open', '');
     revealContent(heading, { focus: true, block: 'start' });
   };
   return <div className={'workflows' + (controller.run ? ' has-run' : '')}>
-    <section className="workflow-hero">
-      <div className="workflow-hero-copy">
-        <span className="console-eyebrow"><Icon name="network" size={16} /> AGENT WORKFLOWS</span>
-        <h2>Delegate data pipelines<br /><span>without runaway risk.</span></h2>
-        <p>Why Aperture instead of a plain script? Deliver large-scale pipelines to your AI agent with deterministic 512 MiB sandboxes, immutable Solana budget caps, and crash-resilient journal recovery.</p>
-        <div className="workflow-value-chips">
-          <span className="workflow-value-chip"><Icon name="shield" size={13} /> Hard Spend Ceiling</span>
-          <span className="workflow-value-chip"><Icon name="refresh" size={13} /> Crash-Resilient Journal</span>
-          <span className="workflow-value-chip"><Icon name="chip" size={13} /> 512 MiB Sandboxed CPU</span>
-          <span className="workflow-value-chip"><Icon name="code" size={13} /> Zero Prompt Leakage</span>
-        </div>
-        <div className="workflow-hero-actions">
-          <button className="console-button primary" disabled={editsBlocked} onClick={() => {
-            const heading = document.getElementById('workflow-builder-heading');
-            heading?.closest('details')?.setAttribute('open', '');
-            revealContent(heading, { focus: true, block: 'start' });
-          }}>Build a workflow<Icon name="arrow" size={18} /></button>
-          <button className="console-text-button" onClick={() => applyBlueprint(BLUEPRINTS[0])}><Icon name="spark" size={16} />Quick 17k Demo</button>
-          <button className="console-text-button" onClick={downloadSample}><Icon name="download" size={17} />Sample CSV</button>
-        </div>
-      </div>
-      <div className="workflow-graph" role="img" aria-label="Pipeline DAG topology">
-        <div className="workflow-graph-input">
-          <Icon name="upload" size={18} />
-          <span>
-            {selectedInputs.length ? `${selectedInputs.length} Batches (${formatBytes(inputBytes)})` : 'Dataset'}
-            <small>Immutable cryptographic inputs</small>
-          </span>
-        </div>
-        <div className="workflow-branches">
-          {(selectedInputs.length ? selectedInputs.slice(0, 3) : [{ name: 'batch-01' }, { name: 'batch-02' }, { name: 'batch-03' }]).map((b, i) => (
-            <div key={i} className="workflow-branch-node">
-              <span>0{i + 1}</span>
-              <Icon name="chip" size={20} />
-              <strong>{b.name ? b.name.replace('.csv', '').slice(0, 12) : 'Batch compute'}</strong>
-              <small className="workflow-branch-tag">512 MiB</small>
-            </div>
-          ))}
-          {selectedInputs.length > 3 && (
-            <div className="workflow-branch-node more">
-              <span>+{selectedInputs.length - 3}</span>
-              <small>more</small>
-            </div>
-          )}
-        </div>
-        <div className="workflow-graph-merge">
-          <Icon name="network" size={22} />
-          <span>
-            Combine & Deduplicate
-            <small>Up to 16 inputs per join · Journal tracked</small>
-          </span>
-        </div>
-        <div className="workflow-graph-output">
-          <Icon name="check" size={20} />
-          <span>
-            report.json
-            <small>categories.csv · quality.csv · Signed Receipt</small>
-          </span>
-        </div>
-      </div>
-    </section>
-    <section className="workflow-blueprints console-panel">
-      <div className="console-section-heading">
-        <div>
-          <span className="console-eyebrow">READY-TO-RUN BLUEPRINTS</span>
-          <h2>Load a pre-configured pipeline in 1 click</h2>
-          <p>Explore production-grade agent workflows with deterministic cost caps, journal recovery, and zero prompt leakage.</p>
-        </div>
-      </div>
-      <div className="workflow-blueprints-grid">
-        {BLUEPRINTS.map(bp => (
-          <div key={bp.id} className="workflow-blueprint-card">
-            <div className="blueprint-header">
-              <span className="blueprint-icon"><Icon name={bp.icon} size={20} /></span>
-              <span className="blueprint-badge">{bp.tag}</span>
-            </div>
-            <h3>{bp.title}</h3>
-            <p className="blueprint-sub">{bp.subtitle}</p>
-            <p className="blueprint-adv">{bp.advantage}</p>
-            <div className="blueprint-specs">
-              <span><strong>{bp.batches.length}</strong> batches</span>
-              <span><strong>{bp.cost}</strong> SOL/step</span>
-              <span><strong>{bp.runtime}s</strong> max/step</span>
-            </div>
-            <button
-              className="console-button primary blueprint-btn"
-              disabled={editsBlocked}
-              onClick={() => applyBlueprint(bp)}
-            >
-              <Icon name="play" size={14} />
-              Load blueprint
-            </button>
-          </div>
-        ))}
-      </div>
-    </section>
-    <div className="workflow-principles">{[
-      ['shield', 'One total budget', 'Every step fits inside the approved cap.'],
-      ['refresh', 'Continue the same work', 'The journal retains admissions and results.'],
-      ['download', 'Files your agent can reuse', 'Signed outputs become downstream inputs.'],
-    ].map(([icon, title, body]) => <div key={title}><Icon name={icon} size={21} /><div><h3>{title}</h3><p>{body}</p></div></div>)}</div>
     {notice && <div className="studio-notice" role="status"><Icon name="book" size={18} /><p>{notice}</p></div>}
+    {onOpenFunding && !gatewayHealth?.demo_mode && <button className="console-text-button" disabled={editsBlocked} onClick={onOpenFunding}>Manage the shared Devnet payment channel<Icon name="arrow" size={15} /></button>}
     <details className="workflow-configuration" open={!controller.run}><summary>{controller.run ? 'Saved plan · ' + controller.run.total_steps + ' steps · ' + formatSol(controller.run.plan.max_cost_lamports) + ' SOL maximum' : 'Workflow setup'}</summary><section className="workflow-builder console-panel">
-      <div className="console-section-heading"><div><span className="console-eyebrow">CSV BATCH → REPORT</span><h2 id="workflow-builder-heading" tabIndex={-1}>Prepare your workflow</h2></div><span className="console-tag neutral">CSV processing</span></div>
+      <div className="console-section-heading"><div><span className="console-eyebrow">CSV BATCH → REPORT</span><h2 id="workflow-builder-heading" tabIndex={-1}>Prepare your workflow</h2></div><button className="console-text-button" onClick={downloadSample}><Icon name="download" size={17} />Sample CSV</button></div>
       <p className="workflow-description">Use your own CSV exports. Choose a grouping column and numeric amount; get exact totals, averages, minimums and maximums, plus a report explaining excluded records.</p>
+      <details className="workflow-starters"><summary>Start from a pattern</summary><div className="workflow-starter-list">{BLUEPRINTS.map(bp => <button key={bp.id} className="workflow-starter" disabled={editsBlocked} onClick={() => applyBlueprint(bp)}><span><strong>{bp.title}</strong><small>{bp.subtitle}</small></span><span>{bp.cost} SOL / step<small>{bp.runtime}s maximum</small></span><Icon name="arrow" size={16} /></button>)}</div></details>
       <div className="workflow-builder-grid">
         <div>
           <div className="workflow-upload" aria-busy={uploading}>
@@ -489,11 +351,12 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
         <p className="workflow-description">These are planned steps. No computation or payment starts when you import or export.</p>
       </div>}
     </section></details>
+    <WorkflowRun controller={controller} plan={plan} connected={Boolean(owner && (!controller.run || owner === controller.run.owner))} onConnect={connectWallet}
+      gatewayOnline={gatewayOnline} gatewayReady={gatewayOnline && gatewayHealth?.status === 'ready'} externalBusy={externalBusy || uploading} />
     <AgentWorkspace context={context} owner={owner} signMessage={signMessage} plan={plan}
       disabled={uploading || externalBusy || controller.busy || Boolean(controller.run)} onBusyChange={setDelegating} />
     {computeProfile && <section className="console-panel workflow-compute-profile"><span className="console-eyebrow">CSV COMPUTE</span><h2>Size the job before you approve it.</h2><p>Start with about 5,000 rows per batch and at most 10,000 groups across the report. More columns and longer values increase work; the quote's affordable runtime can be shorter than your requested limit.</p><p>{formatSol(computeProfile.pricing.rate_lamports_sec)} SOL per execution second · operator tariff · {context?.network === 'off_chain' ? 'no payment in this workspace' : 'settled within your approved cap'}. Each step supports 64 MiB of inputs and at most 180 seconds. Configured Docker workers use 1 CPU and 512 MiB; the local preview runs trusted Python on this host.</p><details><summary>Check your worker's batch size</summary><p>The benchmark runs the same CSV sources and records time and peak process memory. Its result applies to that host and dataset; it does not guarantee Docker or remote-provider performance.</p><CommandBlock label="Measure a CSV profile" command="python scripts/benchmark_csv_profile.py --rows 50000 --groups 4 --output .aperture-runs/cpu-profile.json" /></details></section>}
-    <WorkflowRun controller={controller} plan={plan} connected={Boolean(owner && (!controller.run || owner === controller.run.owner))} onConnect={connectWallet}
-      gatewayOnline={gatewayOnline} gatewayReady={gatewayOnline && gatewayHealth?.status === 'ready'} externalBusy={externalBusy || uploading} />
+
     <section className="workflow-how console-panel">
       <div><span className="console-eyebrow">FROM DATA TO RESULTS</span><h2>A useful pipeline in one command.</h2><p>Start from a CSV. The SDK splits it into batches, stages files, runs summaries and merges a report. Rerun with the same journal to recover progress.</p></div>
       <CommandBlock label="Batch processing" command="python examples/batch_data_workflow.py records.csv --batch-rows 5000 --workflow-budget-lamports 2000000" />

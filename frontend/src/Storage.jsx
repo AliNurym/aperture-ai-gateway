@@ -145,7 +145,7 @@ export default function Storage({ apiUrl, gatewayHealth, gatewayOnline, onOpenSt
 
   return <div className="storage">
     <section className="storage-intro">
-      <div><span className="console-eyebrow"><Icon name="shield" size={16} /> PRIVATE WORKSPACE</span><h2>Your data.<br /><span>Room to grow.</span></h2><p>Keep reusable inputs and result files together. Inspect your allowance and release the files you no longer need.</p></div>
+      <div><h2>Private workspace</h2><p>Keep inputs and result files together. Inspect your allowance and release files you no longer need.</p></div>
       <div className="storage-identity"><Icon name="wallet" size={22} /><span>Signing identity<strong>{owner ? owner.slice(0, 6) + '…' + owner.slice(-6) : 'Wallet not connected'}</strong><small>{context ? context.network === 'off_chain' ? 'Off-chain gateway' : 'Solana Devnet gateway' : 'Gateway unavailable'}</small></span></div>
     </section>
     {currentNotice && <div className={'storage-notice ' + currentNotice.kind} role={currentNotice.kind === 'error' ? 'alert' : 'status'}><Icon name={currentNotice.kind === 'success' ? 'check' : 'shield'} size={18} /><p>{currentNotice.message}</p></div>}

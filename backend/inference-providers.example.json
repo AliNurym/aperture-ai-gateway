@@ -1,0 +1,11 @@
+[
+  {
+    "id": "operator-model",
+    "name": "Operator-approved model",
+    "model": "YOUR_MODEL_ID",
+    "base_url": "https://model.example.com/v1",
+    "protocol": "openai_chat_completions",
+    "rate_lamports_sec": 1000,
+    "max_output_tokens": 512
+  }
+]

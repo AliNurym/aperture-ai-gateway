@@ -24,6 +24,9 @@ from state_store import ACTIVE_STATES, StateStore
 from worker_identity import receipt_bytes
 from security_config import worker_auth_is_configured, worker_id_is_valid, worker_token_is_configured
 from artifact_store import ArtifactStore, MAX_INPUT_BYTES, MAX_JOB_INPUTS, validate_descriptor
+from inference import (CAPABILITY as INFERENCE_CAPABILITY, PREFIX as INFERENCE_PREFIX,
+                       ChatRequest, load_providers, request_parameters, request_code,
+                       validate_request)
 
 
 def require_utf8_text(value):
@@ -74,6 +77,26 @@ class WorkflowBinding(Utf8Request):
     step_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 
 
+class WorkerTarget(Utf8Request):
+    model_config = {"extra": "forbid"}
+    node_id: str = Field(min_length=1, max_length=64)
+    worker_pubkey: str = Field(min_length=32, max_length=44)
+
+    @field_validator("node_id")
+    @classmethod
+    def valid_node(cls, value):
+        if not worker_id_is_valid(value):
+            raise ValueError("Invalid worker ID.")
+        return value
+
+    @field_validator("worker_pubkey")
+    @classmethod
+    def valid_key(cls, value):
+        if not valid_public_key(value):
+            raise ValueError("Invalid worker public key.")
+        return value
+
+
 class QuoteRequest(SourceRequest):
     wallet: str = Field(min_length=32, max_length=44)
     agent_pubkey: Optional[str] = Field(default=None, min_length=32, max_length=44)
@@ -83,6 +106,15 @@ class QuoteRequest(SourceRequest):
     inputs: list[dict] = Field(default_factory=list, max_length=MAX_JOB_INPUTS)
     parameters: dict = Field(default_factory=dict)
     workflow: Optional[WorkflowBinding] = None
+    worker_target: Optional[WorkerTarget] = None
+
+
+class InferenceQuoteRequest(ChatRequest):
+    wallet: str = Field(min_length=32, max_length=44)
+    agent_pubkey: Optional[str] = Field(default=None, min_length=32, max_length=44)
+    max_cost_lamports: StrictInt = Field(default=1_000_000, gt=0, le=1_000_000_000)
+    max_runtime_seconds: StrictInt = Field(default=30, ge=1, le=180)
+    worker_target: Optional[WorkerTarget] = None
 
 
 class ExecuteRequest(SourceRequest):
@@ -138,7 +170,7 @@ class PassportChallenge(Utf8Request):
     max_runtime_seconds: int = Field(default=30, ge=1, le=180)
     total_budget_lamports: int = Field(default=10_000_000, gt=0, le=100_000_000_000)
     expires_at: int = Field(gt=0)
-    capabilities: list[str] = Field(default_factory=lambda: list(CAPABILITIES), min_length=1, max_length=1)
+    capabilities: list[str] = Field(default_factory=lambda: list(CAPABILITIES), min_length=1, max_length=2)
 
 
 class PassportAuthorization(Utf8Request):
@@ -207,6 +239,7 @@ class Gateway:
     def __init__(self, solana, demo_mode, worker_token, store=None, worker_credentials=None):
         from compute_profiles import csv_rate
         self.csv_tariff = csv_rate()
+        self.inference_providers = load_providers()
         self.solana = solana
         self.demo_mode = demo_mode
         self.worker_token = (worker_token or "").strip()
@@ -218,6 +251,8 @@ class Gateway:
         self.recovery_task = None
         self._objects = None
         self._mount()
+        from worker_market import mount_worker_market
+        mount_worker_market(self)
 
     @property
     def objects(self):
@@ -229,6 +264,17 @@ class Gateway:
         return self._objects
 
     def job_manifest(self, req, *, resolve=True):
+        if req.code.startswith(INFERENCE_PREFIX):
+            try:
+                if req.job_version != 1 or req.inputs:
+                    raise ValueError("Inference requires job_version=1 and no file inputs.")
+                validate_request(req.code, req.parameters, self.inference_providers if resolve else None)
+                if len(canonical_json(req.parameters).encode("utf-8")) > 32000:
+                    raise ValueError("Inference request exceeds 32,000 UTF-8 bytes.")
+                return {"version": 1, "runtime": INFERENCE_CAPABILITY,
+                        "source_sha256": sha256_text(req.code), "inputs": [], "parameters": req.parameters}
+            except (ValueError, TypeError, KeyError) as error:
+                raise HTTPException(422, str(error)) from None
         if req.job_version is None and not req.inputs and not req.parameters:
             return None
         if req.job_version != 1:
@@ -280,13 +326,13 @@ class Gateway:
         if not all(valid_public_key(key) for key in keys):
             raise HTTPException(422, "A valid Ed25519 Solana public key is required.")
 
-    async def passport(self, owner, agent, max_cost, runtime):
+    async def passport(self, owner, agent, max_cost, runtime, capability="python.execute"):
         if owner == agent:
             return None
         item = self.store.get("agents", agent)
         if not item or item["owner"] != owner or item["revoked"] or item["expires_at"] <= int(time.time()):
             raise HTTPException(403, "Agent delegation is absent, revoked, expired, or belongs to another owner.")
-        if "python.execute" not in item["capabilities"] or max_cost > item["max_cost_lamports"] or runtime > item["max_runtime_seconds"]:
+        if capability not in item["capabilities"] or max_cost > item["max_cost_lamports"] or runtime > item["max_runtime_seconds"]:
             raise HTTPException(403, "The quote exceeds the agent's delegated capabilities or limits.")
         # Reserve full task bounds until final settlement; never spend a not-yet
         # reconciled allowance again after an RPC failure or process restart.
@@ -353,8 +399,16 @@ class Gateway:
     async def issue_quote(self, req):
         agent = req.agent_pubkey or req.wallet
         self._valid_keys(req.wallet, agent)
-        passport = await self.passport(req.wallet, agent, req.max_cost_lamports, req.max_runtime_seconds)
         manifest = self.job_manifest(req)
+        from sentinel_review import validate_sentinel_review
+        validate_sentinel_review(self.store, manifest, req.wallet, req.code)
+        target = req.worker_target.model_dump() if req.worker_target else None
+        from worker_market import require_worker_target
+        if target:
+            require_worker_target(self, target, manifest)
+        inference = manifest is not None and manifest["runtime"] == INFERENCE_CAPABILITY
+        capability = INFERENCE_CAPABILITY if inference else "python.execute"
+        passport = await self.passport(req.wallet, agent, req.max_cost_lamports, req.max_runtime_seconds, capability)
         audit = analyze_code_ast(req.code)
         if audit.get("security") == "DANGEROUS":
             raise HTTPException(403, audit.get("reason", "Source policy rejected workload."))
@@ -362,12 +416,19 @@ class Gateway:
         from compute_profiles import source_profile
         profile = source_profile(req.code)
         rate = self.csv_tariff if profile else max(1, int(round(calculate_ast_quote_rate(complexity) * 1_000_000_000)))
+        if inference:
+            rate = manifest["parameters"]["offer"]["rate_lamports_sec"]
         analysis = {'security': 'SAFE', 'status': 'success', 'complexity_score': complexity,
                     'predicted_sec': None if profile else audit.get('predicted_sec', 3), 'scores': audit,
                     'calculated_rate_sol_sec': rate / 1e9, 'calculated_rate_lamports_sec': rate,
                     'sol_market_price': None, 'reason': audit.get('reason'),
                     'pricing': 'published_cpu_tariff_v1' if profile else 'deterministic_ast_lamports_v1',
                     'compute_profile': profile}
+        if inference:
+            analysis.update(pricing="published_inference_time_tariff_v1", compute_profile=INFERENCE_CAPABILITY,
+                            predicted_sec=None, complexity_score=None,
+                            calculated_rate_sol_sec=rate / 1e9, calculated_rate_lamports_sec=rate,
+                            reason="Operator-set elapsed-time inference tariff, not AST or token pricing.")
         if req.max_cost_lamports < rate:
             raise HTTPException(422, "Budget must cover at least one second at the quoted rate.")
         config = None
@@ -395,12 +456,16 @@ class Gateway:
             quote["workflow"] = req.workflow.model_dump()
             from workflow_inbox import validate_bound_step
             validate_bound_step(self, quote, req.code)
+        if target:
+            quote["worker_target"] = target
         quote["message"] = quote_message(quote)
         async with self.lock:
             # RPC and passport checks can yield. Recheck retained input bytes while
             # holding the same lock used by release, then publish the authorization.
             if manifest is not None:
                 self.job_manifest(req)
+            if target:
+                require_worker_target(self, target, manifest)
             self.store.put("quotes", quote["quote_id"], quote)
         return quote
 
@@ -424,10 +489,14 @@ class Gateway:
                 self.job_manifest(req)
             if quote['expires_at'] < int(time.time()):
                 raise HTTPException(401, "Quote expired. Request a fresh quote.")
+            if quote.get("worker_target"):
+                from worker_market import require_worker_target
+                require_worker_target(self, quote["worker_target"], manifest)
             if "workflow" in quote:
                 from workflow_inbox import validate_bound_step
                 validate_bound_step(self, quote, req.code)
-            passport = await self.passport(req.wallet, agent, quote["max_cost_lamports"], quote["max_runtime_seconds"])
+            capability = INFERENCE_CAPABILITY if (manifest or {}).get("runtime") == INFERENCE_CAPABILITY else "python.execute"
+            passport = await self.passport(req.wallet, agent, quote["max_cost_lamports"], quote["max_runtime_seconds"], capability)
             if (passport["version"] if passport else 0) != quote["passport_version"]:
                 raise HTTPException(403, "Agent policy changed after this quote was issued.")
             if not self.demo_mode:
@@ -462,7 +531,8 @@ class Gateway:
                 "quote_id": job["quote_id"], "code_sha256": job["code_sha256"],
                 "burn_rate": job["rate_lamports"] / 1e9, "burn_rate_lamports": job["rate_lamports"],
                 "max_cost_lamports": job["max_cost_lamports"], "max_runtime_seconds": job["max_runtime_seconds"],
-                "complexity_score": job["analysis"].get("complexity_score"), "ai_analysis": job["analysis"]}
+                "complexity_score": job["analysis"].get("complexity_score"), "ai_analysis": job["analysis"],
+                **({"worker_target": job["worker_target"]} if job.get("worker_target") else {})}
 
     @staticmethod
     def worker_task_payload(job):
@@ -498,7 +568,13 @@ class Gateway:
         settlement = None
         if not self.demo_mode and job.get("start_intent"):
             try:
-                settlement = await self.solana.stop_task(job["wallet"], job["task_hash"], job["agent_pubkey"], start_intent=job.get("prepared_start"))
+                worker = self.store.get("workers", job.get("worker_id")) if job.get("worker_id") else None
+                worker_pubkey = job.get("worker_pubkey") or (worker or {}).get("worker_pubkey")
+                settlement = await self.solana.stop_task(
+                    job["wallet"], job["task_hash"], job["agent_pubkey"],
+                    start_intent=job.get("prepared_start"), worker_pubkey=worker_pubkey,
+                    worker_payout_bound=bool(job.get("worker_payout_bound")),
+                )
             except Exception as error:
                 job["last_settlement_error"] = type(error).__name__
             if not settlement:
@@ -523,12 +599,16 @@ class Gateway:
             "output_sha256": sha256_text(result.get("full_log", result.get("output", ""))),
             "source_hash": job["code_sha256"], "output_hash": sha256_text(result.get("full_log", result.get("output", ""))),
             "worker_id": job.get("worker_id"), "lease_id": job.get("lease_id"),
+            "worker_pubkey": job.get("worker_pubkey"),
             "execution_status": result.get("execution_status", "failed"), "exit_code": result.get("exit_code"),
             "execution_time": elapsed, "execution_backend": result.get("execution_backend", "unknown"),
             "execution_mode": result.get("execution_backend", "unknown"),
             "isolation": result.get("isolation"), "rate_lamports": job["rate_lamports"],
             "max_cost_lamports": job["max_cost_lamports"], "max_runtime_seconds": job["max_runtime_seconds"],
             "charged_lamports": charged, "cost_sol": charged / 1e9 if charged is not None else None,
+            "payout_destination": settlement.get("payout_destination") if settlement else None,
+            "worker_paid_lamports": (charged if settlement and job.get("worker_pubkey")
+                                     and settlement.get("payout_destination") == job.get("worker_pubkey") else None),
             "cost_is_exact": charged is not None, "settlement_type": settlement_type,
             "settlement_signature": settlement.get("signature") if settlement else None,
             "settlement_evidence": settlement.get("evidence") if settlement else None,
@@ -537,6 +617,8 @@ class Gateway:
         }
         if "workload" in job:
             evidence.update(workload_sha256=job["workload_sha256"], artifacts=result.get("artifacts", []))
+        if job.get("worker_target"):
+            evidence["worker_target"] = job["worker_target"]
         message = receipt_message(evidence)
         evidence["gateway_pubkey"] = str(self.solana.ai_signer.pubkey())
         evidence["gateway_signature"] = list(bytes(self.solana.ai_signer.sign_message(message.encode("utf-8"))))
@@ -655,6 +737,35 @@ class Gateway:
 
     def _mount(self):
         router = self.router
+
+        @router.get("/inference/providers")
+        async def inference_providers():
+            workers = self.store.list("workers")
+            return {"providers": [{**provider.offer(), "available_workers": sum(
+                1 for worker in workers if time.time() - worker.get("last_seen", 0) < 45
+                and worker.get("accepting_tasks", True)
+                and provider.offer() in worker.get("inference_offers", []))}
+                for provider in self.inference_providers.values() if not provider.is_development_only],
+                "discovery": "operator_configured", "worker_settlement_share_pct": 100,
+                "automatic_worker_payouts": "full_charge_on_confirmed_devnet_settlement",
+                "upstream_provider_payouts": False}
+
+        @router.post("/inference/quotes")
+        async def inference_quote(req: InferenceQuoteRequest):
+            provider = self.inference_providers.get(req.provider_id)
+            if provider is None or provider.is_development_only:
+                raise HTTPException(404, "Inference provider is not available in the public model catalog.")
+            try:
+                chat = ChatRequest.model_validate(req.model_dump(include={"provider_id", "messages", "max_tokens"}))
+                parameters = request_parameters(chat, provider)
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from None
+            code = request_code(parameters)
+            request = QuoteRequest(code=code, wallet=req.wallet, agent_pubkey=req.agent_pubkey,
+                                   max_cost_lamports=req.max_cost_lamports, max_runtime_seconds=req.max_runtime_seconds,
+                                   job_version=1, parameters=parameters, worker_target=req.worker_target)
+            quote = await self.issue_quote(request)
+            return {**quote, "execution_request": {"code": code, "job_version": 1, "inputs": [], "parameters": parameters}}
         from owner_workspace import mount_owner_workspace
         mount_owner_workspace(self)
         from workflow_inbox import mount_workflow_inbox
@@ -672,7 +783,10 @@ class Gateway:
         @router.post("/agents/challenge")
         async def agent_challenge(req: PassportChallenge):
             self._valid_keys(req.owner, req.agent_pubkey)
-            if req.capabilities != CAPABILITIES or req.max_cost_lamports > req.total_budget_lamports or req.expires_at <= int(time.time()) or req.expires_at > int(time.time()) + 366 * 86400:
+            if (len(set(req.capabilities)) != len(req.capabilities)
+                    or not set(req.capabilities) <= {*CAPABILITIES, INFERENCE_CAPABILITY}
+                    or req.max_cost_lamports > req.total_budget_lamports or req.expires_at <= int(time.time())
+                    or req.expires_at > int(time.time()) + 366 * 86400):
                 raise HTTPException(422, "Invalid agent capability, budget, or expiry policy.")
             existing = self.store.get("agents", req.agent_pubkey)
             if existing and existing["owner"] != req.owner:
@@ -845,11 +959,26 @@ class Gateway:
                             and not job.get("cancelled") and time.time() < job["deadline_unix"]):
                         return self.worker_task_payload(job)
                     return {"task_id": None}
+                worker = self.store.get("workers", worker_id)
+                if not worker.get("accepting_tasks", True):
+                    return {"task_id": None}
                 for job in active_jobs:
                     if job["state"] != "queued":
                         continue
+                    target = job.get("worker_target")
+                    if target and (target["node_id"] != worker_id or target["worker_pubkey"] != worker["worker_pubkey"]):
+                        continue
+                    inference = job.get("workload", {}).get("runtime") == INFERENCE_CAPABILITY
+                    worker = self.store.get("workers", worker_id)
+                    if inference:
+                        offer = job["workload"]["parameters"]["offer"]
+                        if offer not in worker.get("inference_offers", []):
+                            continue
+                    elif "python" not in worker.get("runtimes", ["python"]):
+                        continue
                     try:
-                        policy = await self.passport(job["wallet"], job["agent_pubkey"], 0, job["max_runtime_seconds"])
+                        policy = await self.passport(job["wallet"], job["agent_pubkey"], 0, job["max_runtime_seconds"],
+                                                     INFERENCE_CAPABILITY if inference else "python.execute")
                         if (policy["version"] if policy else 0) != job["passport_version"]:
                             raise HTTPException(403, "Delegation changed.")
                     except HTTPException:
@@ -867,10 +996,16 @@ class Gateway:
                     prepared = None
                     if not self.demo_mode:
                         try:
-                            prepared = await self.solana.prepare_start_task(job["wallet"], job["task_hash"], job["code_sha256"], job["agent_pubkey"], job["rate_lamports"], job["max_cost_lamports"], job["effective_runtime_seconds"])
+                            prepared = await self.solana.prepare_start_task(
+                                job["wallet"], job["task_hash"], job["code_sha256"], job["agent_pubkey"],
+                                job["rate_lamports"], job["max_cost_lamports"],
+                                job["effective_runtime_seconds"], worker["worker_pubkey"],
+                            )
                         except Exception:
                             return {"task_id": None}
-                    job.update(state="starting", worker_id=worker_id, lease_id=secrets.token_urlsafe(24), start_intent=True, prepared_start=prepared,
+                    job.update(state="starting", worker_id=worker_id, worker_pubkey=worker["worker_pubkey"],
+                               worker_payout_bound=not self.demo_mode, lease_id=secrets.token_urlsafe(24),
+                               start_intent=True, prepared_start=prepared,
                                started_at=None, deadline_unix=None)
                     self.store.save_job(job)
                     start = None
@@ -891,11 +1026,15 @@ class Gateway:
                     else:
                         try:
                             receipt = await self.solana.get_task_receipt(job["task_hash"])
+                            channel_state = await self.solana.get_channel_state(job["wallet"])
                             if (not receipt or receipt["settled"] or receipt["owner"] != job["wallet"]
                                     or receipt["agent_pubkey"] != job["agent_pubkey"]
                                     or receipt["source_hash"] != job["code_sha256"]
                                     or receipt["rate_lamports"] != job["rate_lamports"]
-                                    or receipt["max_cost_lamports"] != job["max_cost_lamports"]):
+                                    or receipt["max_cost_lamports"] != job["max_cost_lamports"]
+                                    or not channel_state or channel_state["task_hash"] != job["task_hash"]
+                                    or channel_state.get("executor_pubkey") != job["worker_pubkey"]
+                                    or not channel_state.get("worker_payout_bound")):
                                 raise ValueError("Confirmed task receipt does not match the admitted workload.")
                             started_at = receipt["started_at"]
                             deadline_unix = receipt["deadline"]

@@ -21,6 +21,17 @@ from aperture_client import ApertureClient
 from aperture_client.client import canonical
 from aperture_client.assigned_workflows import request as assigned_request
 
+REQUIRED_TOOLS = {
+    "list_workers",
+    "quote_python", "start_python_task", "list_python_tasks", "resume_python_task",
+    "get_python_task", "cancel_python_task", "list_inference_providers", "quote_inference",
+    "start_inference_task", "upload_compute_input", "quote_compute_job", "start_compute_job",
+    "read_compute_artifact", "get_compute_storage", "release_compute_object",
+    "prepare_compute_workflow", "get_assigned_workflows", "start_assigned_workflow",
+    "get_assigned_workflow_progress", "start_compute_workflow", "get_compute_workflow",
+    "cancel_compute_workflow",
+}
+
 
 async def call(client, name, arguments=None):
     result = await client.call_tool(name, arguments or {})
@@ -71,8 +82,23 @@ async def check(output, assigned=False):
         async with Client(parameters, read_timeout_seconds=30) as host:
             listed = await host.list_tools()
             expected_inbox = {"get_assigned_workflows", "start_assigned_workflow", "get_assigned_workflow_progress"}
-            if len(listed.tools) != 19 or not expected_inbox <= {item.name for item in listed.tools}:
-                raise ValueError("The stdio server did not advertise all 19 tools, including assigned workflows.")
+            advertised = {item.name for item in listed.tools}
+            if not REQUIRED_TOOLS <= advertised or not expected_inbox <= advertised:
+                raise ValueError("The stdio server is missing a required Python, inference, data, or workflow tool.")
+            inference_catalog = await call(host, "list_inference_providers")
+            if inference_catalog.get("discovery") != "operator_configured" or not isinstance(inference_catalog.get("providers"), list):
+                raise ValueError("MCP inference discovery did not return the configured-offer catalog.")
+            directory = await call(host, "list_workers")
+            candidates = [node for node in directory["workers"] if node["online"]
+                          and node["accepting_tasks"] and "python" in node["runtimes"]]
+            if not candidates:
+                raise ValueError("MCP worker discovery did not find the local CPU executor.")
+            target = {key: candidates[0][key] for key in ("node_id", "worker_pubkey")}
+            pinned_quote = await call(host, "quote_python", {"source": "print(6 * 7)", "worker_target": target})
+            if pinned_quote.get("worker_target") != target:
+                raise ValueError("The MCP quote lost its explicitly chosen worker.")
+            summary["worker_discovery"] = "live_registered_capacity"
+            summary["pinned_worker_quote"] = "preserved_through_stdio"
             references = []
             for name, data in [("first.csv", b"category,amount\nalpha,1.25\nbeta,2.50\nalpha,missing\n"),
                                ("second.csv", b"category,amount\nalpha,3.75\nbeta,-0.50\n")]:
@@ -165,7 +191,7 @@ async def check(output, assigned=False):
             response.raise_for_status()
             if response.json()["tasks_finished"] != 3:
                 raise ValueError("The restarted stdio workflow created duplicate tasks.")
-            summary.update(status="completed", advertised_tools=19, workflow_steps=3, new_tasks=3,
+            summary.update(status="completed", advertised_tools=len(advertised), workflow_steps=3, new_tasks=3,
                 console_assigned_workflow=assigned,
                 mcp_processes_started=2, first_admitted_task_reused=True,
                 json_csv_match_expected=True, sdk_mcp_bytes_match=True, storage_bytes_after_release=0)

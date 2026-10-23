@@ -1,0 +1,302 @@
+/* Aperture workbench: one shell and one set of surfaces across both generations. */
+:root, :root[data-theme="light"] {
+  --console-bg: #f6f7f9;
+  --console-surface: #fff;
+  --console-line: #e1e4eb;
+  --console-ink: #20232b;
+  --console-muted: #747985;
+  --console-primary: #6944e8;
+  --console-tonal: #f0edfc;
+  --console-radius: 7px;
+  --console-gap: 20px;
+  --md-sys-color-primary: #6944e8;
+  --md-sys-color-on-primary: #fff;
+  --md-sys-color-primary-container: #f0edfc;
+  --md-sys-color-on-primary-container: #39247a;
+  --md-sys-color-secondary-container: #f0edfc;
+  --md-sys-color-on-secondary-container: #5132be;
+  --md-sys-color-surface-container-low: #f6f7f9;
+  --md-sys-color-surface-container: #f1f2f5;
+  --md-sys-color-surface-container-high: #e9ebf1;
+  --md-sys-color-outline: #9298a5;
+  --md-sys-color-outline-variant: #e1e4eb;
+}
+:root[data-theme="dark"], :root.dark-theme {
+  --console-bg: #111317;
+  --console-surface: #191c21;
+  --console-line: #2d313a;
+  --console-ink: #e9ebf1;
+  --console-muted: #9ba1af;
+  --console-primary: #b39bf9;
+  --console-tonal: #2b263b;
+  --md-sys-color-primary: #b39bf9;
+  --md-sys-color-on-primary: #1c142f;
+  --md-sys-color-primary-container: #2b263b;
+  --md-sys-color-on-primary-container: #e5dafa;
+  --md-sys-color-secondary-container: #2b263b;
+  --md-sys-color-on-secondary-container: #d2bffa;
+  --md-sys-color-surface-container-low: #15181d;
+  --md-sys-color-surface-container: #1c2026;
+  --md-sys-color-surface-container-high: #242933;
+  --md-sys-color-outline: #666e7d;
+  --md-sys-color-outline-variant: #2d313a;
+}
+.console-app.aperture-workspace { font-size: 14px; }
+.console-app.aperture-workspace .console-sidebar {
+  inset: 0 auto 0 0; width: 240px; padding: 26px 16px 20px;
+  border: 0; border-right: 1px solid var(--console-line); border-radius: 0;
+  box-shadow: none; background: var(--console-surface);
+}
+.console-app.aperture-workspace .console-brand { margin: 0 12px 32px; gap: 12px; }
+.console-app.aperture-workspace .console-brand img { width: 36px; height: 36px; flex-basis: 36px; }
+.console-app.aperture-workspace .console-brand > span { font-size: 24px; letter-spacing: -.7px; }
+.console-app.aperture-workspace .console-brand span span { color: var(--console-muted); font-size: 8px; letter-spacing: 1.2px; }
+.console-app.aperture-workspace .console-nav-label { display: block; margin: 14px 14px 8px; font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--console-muted); }
+.console-app.aperture-workspace .console-nav-label:empty { display: none; }
+.console-app.aperture-workspace .console-nav-item { height: 42px; min-height: 42px; padding: 10px 14px; border-radius: 4px; font-size: 13px; color: var(--console-muted); }
+.console-app.aperture-workspace .console-nav-item.selected { color: var(--console-primary); font-weight: 500; }
+.console-app.aperture-workspace .console-nav-item.selected::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px; background: var(--console-primary); }
+.console-app.aperture-workspace .console-nav-indicator { border-radius: 4px; background: var(--console-tonal); }
+.console-app.aperture-workspace .console-nav-group { margin-bottom: 8px; }
+.console-app.aperture-workspace .console-sidebar-bottom { padding: 12px 14px 0; }
+.console-app.aperture-workspace .console-devnet, .console-app.aperture-workspace .console-version { color: var(--console-muted); font-size: 11px; }
+.console-app.aperture-workspace .console-body { margin-left: 240px; }
+.console-app.aperture-workspace .console-topbar { height: 64px; min-height: 64px; padding: 0 32px; background: var(--console-surface); border-bottom: 1px solid var(--console-line); }
+.console-app.aperture-workspace .console-breadcrumb { font-size: 13px; color: var(--console-muted); }
+.console-app.aperture-workspace .console-breadcrumb strong { color: var(--console-ink); font-weight: 500; }
+.console-app.aperture-workspace .console-top-actions { gap: 16px; }
+.console-app.aperture-workspace .console-hud-badge { min-height: 30px; border: 1px solid var(--console-line); background: transparent; border-radius: 4px; padding: 5px 8px; }
+.console-app.aperture-workspace .console-hud-label, .console-app.aperture-workspace .console-hud-sep, .console-app.aperture-workspace .console-hud-meta { display: none; }
+.console-app.aperture-workspace .console-hud-badge-tag { border: 0; background: none; color: var(--console-ink); text-transform: none; font: 12px Roboto, sans-serif; padding: 0; }
+.console-app.aperture-workspace .console-search-trigger, .console-app.aperture-workspace .console-attestation-btn, .console-app.aperture-workspace .console-theme-toggle, .console-app.aperture-workspace .console-wallet-choose-btn { height: 32px; min-height: 32px; min-width: 30px; padding: 6px; border: 0; border-radius: 4px; color: var(--console-muted); background: transparent; box-shadow: none; font-size: 12px; }
+.console-app.aperture-workspace .console-search-trigger kbd { background: var(--console-bg); border: 1px solid var(--console-line); padding: 2px 5px; border-radius: 3px; color: var(--console-muted); }
+.console-app.aperture-workspace .console-top-actions .wallet-adapter-button { height: 36px !important; line-height: 36px !important; border-radius: 5px !important; background: var(--console-primary) !important; color: var(--md-sys-color-on-primary) !important; font-size: 12px !important; font-weight: 500 !important; padding: 0 14px !important; box-shadow: none !important; }
+.console-app.aperture-workspace .console-top-actions .wallet-adapter-button:not([disabled]):hover { background: color-mix(in srgb, var(--console-primary) 90%, var(--console-ink)) !important; box-shadow: none !important; }
+.console-app.aperture-workspace .console-main { max-width: none; margin: 0; padding: 28px 32px 48px; }
+.console-app.aperture-workspace .console-page-heading { margin-bottom: 22px; gap: 20px; }
+.console-app.aperture-workspace .console-page-stage .console-page-heading h1 { color: var(--console-ink); font-size: 34px; line-height: 1.2; font-weight: 600; letter-spacing: -.9px; }
+.console-app.aperture-workspace .console-page-heading p { margin-top: 9px; color: var(--console-muted); font-size: 14px; line-height: 1.6; }
+.console-app.aperture-workspace .console-status { border: 0; border-radius: 4px; padding: 6px 0 6px 10px; min-height: 28px; background: none; font-size: 11px; color: var(--console-muted); }
+.console-app.aperture-workspace .console-session-notice { padding: 8px 12px; margin: 0 0 16px; border-radius: 4px; border-color: var(--console-line); background: var(--console-surface); color: var(--console-muted); }
+.console-app.aperture-workspace .console-studio-switcher { display: flex; gap: 10px; padding: 0; margin: 0 0 16px; border: 0; border-bottom: 1px solid var(--console-line); border-radius: 0; background: transparent; box-shadow: none; }
+.console-app.aperture-workspace .console-studio-switcher button { min-height: 42px; padding: 10px 14px; gap: 7px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--console-muted); box-shadow: none; font-size: 13px; }
+.console-app.aperture-workspace .console-studio-switcher button > svg { display: none; }
+.console-app.aperture-workspace .console-studio-switcher button.selected { color: var(--console-primary); border-bottom-color: var(--console-primary); background: transparent; box-shadow: none; }
+.console-app.aperture-workspace .console-studio-body, .console-app.aperture-workspace .console-studio-panel { min-width: 0; }
+.console-app.aperture-workspace .console-panel { border-color: var(--console-line); border-radius: 7px; background: var(--console-surface); box-shadow: none; }
+.console-app.aperture-workspace .console-section-heading h2 { font-size: 14px; line-height: 1.4; font-weight: 500; letter-spacing: 0; }
+.console-app.aperture-workspace .console-section-heading p { font-size: 12px; }
+.console-app.aperture-workspace .console-eyebrow { display: none; }
+.console-app.aperture-workspace .console-button { min-height: 34px; padding: 8px 13px; border-radius: 5px; font-size: 12px; font-weight: 500; letter-spacing: 0; box-shadow: none; }
+.console-app.aperture-workspace .console-button.primary { color: var(--md-sys-color-on-primary); background: var(--console-primary); border: 1px solid var(--console-primary); box-shadow: none; }
+.console-app.aperture-workspace .console-button.secondary { color: var(--console-ink); background: var(--console-surface); border: 1px solid var(--console-line); box-shadow: none; }
+.console-app.aperture-workspace .console-text-button { color: var(--console-muted); border-radius: 4px; font-size: 12px; }
+.console-app.aperture-workspace .console-tag { border-radius: 4px; font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.console-app.aperture-workspace .studio { gap: 0; }
+.console-app.aperture-workspace .studio-status-card { padding: 0; margin: 0 0 14px; background: none; border: 0; }
+.console-app.aperture-workspace .studio-action-row { min-height: 60px; padding: 12px 16px; margin-bottom: 16px; border: 1px solid var(--console-line); border-radius: 5px; background: var(--console-surface); }
+.console-app.aperture-workspace .studio-status-heading { gap: 10px; }
+.console-app.aperture-workspace .studio-status-heading h2 { font-size: 13px; font-weight: 500; }
+.console-app.aperture-workspace .studio-status-heading > div > p { display: none; }
+.console-app.aperture-workspace .studio-status-icon { width: 26px; height: 26px; border-radius: 50%; background: var(--console-tonal); }
+.console-app.aperture-workspace .studio-status-icon svg { width: 16px; height: 16px; }
+.console-app.aperture-workspace .studio-run-summary { gap: 22px; }
+.console-app.aperture-workspace .studio-run-summary .studio-run-control > button { min-height: 36px; border-radius: 5px; padding: 9px 15px; font-size: 12px; }
+.console-app.aperture-workspace .studio-steps { display: flex; gap: 0; padding: 0 12px; justify-content: flex-start; }
+.console-app.aperture-workspace .studio-steps li { display: flex; flex: 1; gap: 10px; margin: 0; min-width: 0; font-size: 12px; color: var(--console-muted); }
+.console-app.aperture-workspace .studio-steps li::before { display: none; }
+.console-app.aperture-workspace .studio-steps li:not(:last-child)::after { content: ''; flex: 1; height: 1px; margin: 0 14px; background: var(--console-line); }
+.console-app.aperture-workspace .studio-steps .studio-step-number { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; border-radius: 50%; background: var(--md-sys-color-surface-container-high); color: var(--console-muted); border: 0; font-size: 12px; }
+.console-app.aperture-workspace .studio-steps .studio-step-label { width: auto; height: auto; background: none; border: 0; color: inherit; font-size: inherit; }
+.console-app.aperture-workspace .studio-step-action { display: flex; align-items: center; gap: 10px; padding: 0; border: 0; background: none; color: inherit; font: inherit; }
+.console-app.aperture-workspace .studio-step-action:hover:not(:disabled) { color: var(--console-primary); }
+.console-app.aperture-workspace .studio-steps li.current { color: var(--console-primary); }
+.console-app.aperture-workspace .studio-steps li.current .studio-step-number { background: var(--console-primary); color: var(--md-sys-color-on-primary); box-shadow: none; outline: none; }
+.console-app.aperture-workspace .studio-grid { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(330px, 1fr); grid-template-rows: auto auto 1fr; gap: 14px; align-items: start; }
+.console-app.aperture-workspace .studio-editor { grid-column: 1; grid-row: 1; background: var(--console-surface); border: 1px solid var(--console-line); border-radius: 6px; box-shadow: none; }
+.console-app.aperture-workspace .studio-editor-heading { display: flex; flex-wrap: nowrap; min-height: 52px; padding: 10px 16px; gap: 12px; background: var(--console-surface); color: var(--console-ink); border-bottom: 1px solid var(--console-line); }
+.console-app.aperture-workspace .studio-editor-heading strong { color: var(--console-ink); font-size: 15px; }
+.console-app.aperture-workspace .studio-file-dot, .console-app.aperture-workspace .studio-language { display: none; }
+.console-app.aperture-workspace .studio-editor-heading > div:last-child { display: flex; gap: 10px; }
+.console-app.aperture-workspace .studio-editor-heading button { width: 26px; height: 26px; padding: 4px; border: 0; border-radius: 3px; background: none; color: var(--console-muted); }
+.console-app.aperture-workspace .studio-presets { display: flex; flex: 1; max-width: 320px; gap: 8px; margin-left: auto; padding: 0; background: none; border: 0; }
+.console-app.aperture-workspace .studio-presets label { color: var(--console-muted); font-size: 12px; }
+.console-app.aperture-workspace .studio-presets select { min-width: 0; padding: 7px 9px; border: 1px solid var(--console-line); border-radius: 4px; color: var(--console-ink); background: var(--console-surface); font-size: 13px; }
+.console-app.aperture-workspace .studio-source { min-height: 280px; background: var(--console-surface); }
+.console-app.aperture-workspace .studio-source textarea { height: 300px; min-height: 240px; padding: 16px 16px 16px 60px; font: 13px/24px Consolas, monospace; color: transparent; caret-color: var(--console-ink); background: transparent; }
+.console-app.aperture-workspace .studio-code-highlight { padding: 16px 0; font: 13px/24px Consolas, monospace; color: var(--console-ink); }
+.console-app.aperture-workspace .studio-code-line { line-height: 24px; min-height: 24px; }
+.console-app.aperture-workspace .studio-line-number { flex-basis: 40px; color: var(--console-muted); }
+.console-app.aperture-workspace .studio-code-text { padding-left: 20px; }
+.console-app.aperture-workspace .py-token-comment { color: #808695; }
+.console-app.aperture-workspace .py-token-keyword { color: #7e3cc4; }
+.console-app.aperture-workspace .py-token-number { color: #ad6029; }
+.console-app.aperture-workspace .py-token-string { color: #257d4d; }
+.console-app.aperture-workspace .py-token-builtin { color: #285ab7; }
+.console-app.aperture-workspace .studio-editor-meta { padding: 9px 16px; border-top: 1px solid var(--console-line); background: var(--console-bg); color: var(--console-muted); font: 10px/16px Consolas, monospace; }
+.console-app.aperture-workspace .studio-editor-meta kbd { background: none; border: 0; }
+.console-app.aperture-workspace .studio-inspector { display: flex; flex-direction: column; grid-column: 2; grid-row: 1 / span 3; gap: 0; border: 1px solid var(--console-line); border-radius: 6px; overflow: hidden; background: var(--console-surface); }
+.console-app.aperture-workspace .studio-inspector-heading { padding: 14px 18px; }
+.console-app.aperture-workspace .studio-inspector-heading h2 { font-size: 16px; font-weight: 500; }
+.console-app.aperture-workspace .studio-inspector > .console-panel { border: 0; border-top: 1px solid var(--console-line); border-radius: 0; padding: 14px 18px; margin: 0; background: transparent; box-shadow: none; }
+.console-app.aperture-workspace .studio-inspector > .console-studio-sentinel { padding: 16px 18px; border: 0; border-radius: 0; background: var(--console-surface); }
+.console-app.aperture-workspace .console-studio-sentinel .inference-request, .console-app.aperture-workspace .console-studio-sentinel .inference-evidence > .console-panel { padding: 14px 0; border: 0; border-top: 1px solid var(--console-line); border-radius: 0; }
+.console-app.aperture-workspace .console-studio-sentinel .inference-intro h2 { font-size: 17px; }
+.console-app.aperture-workspace .console-studio-sentinel .inference-layout h3 { font-size: 13px; font-weight: 500; }
+.console-app.aperture-workspace .console-studio-sentinel .inference-layout p { font-size: 12px; line-height: 1.6; }
+.console-app.aperture-workspace .inference-setup { border-radius: 4px; border-color: var(--console-line); background: var(--console-bg); padding: 14px; }
+.console-app.aperture-workspace .inference-setup h3 { margin-bottom: 10px; }
+.console-app.aperture-workspace .inference-setup button { margin-top: 12px; }
+.console-app.aperture-workspace .studio-inspector .console-section-heading { margin: 0 0 10px; align-items: center; gap: 10px; }
+.console-app.aperture-workspace .studio-inspector .console-section-heading h2 { display: flex; align-items: center; gap: 9px; margin: 0; font-size: 14px; }
+.console-app.aperture-workspace .studio-section-state { color: var(--console-muted); font-size: 10px; text-align: right; }
+.console-app.aperture-workspace .studio-inspector p { margin: 6px 0 0; font-size: 12px; line-height: 1.5; color: var(--console-muted); }
+.console-app.aperture-workspace .studio-inspector input, .console-app.aperture-workspace .studio-inspector select { min-width: 0; padding: 9px 10px; border: 1px solid var(--console-line); border-radius: 4px; background: var(--console-surface); color: var(--console-ink); font-size: 12px; }
+.console-app.aperture-workspace .studio-sentinel-action { display: flex; margin: 10px 0 0 auto; padding: 7px 12px; border: 1px solid var(--console-primary); border-radius: 4px; color: var(--console-primary); min-height: 32px; }
+.console-app.aperture-workspace .studio-policy-note { font-size: 10px !important; }
+.console-app.aperture-workspace .studio-budget { gap: 12px; margin: 0 0 8px; }
+.console-app.aperture-workspace .studio-budget label { display: block; }
+.console-app.aperture-workspace .studio-budget label > span { margin-bottom: 6px; color: var(--console-muted); font-size: 11px; line-height: 16px; }
+.console-app.aperture-workspace .studio-budget label > span > small { display: inline; margin-left: 4px; color: var(--console-muted); font-size: 10px; }
+.console-app.aperture-workspace .studio-budget input { height: 36px; min-height: 36px; }
+.console-app.aperture-workspace .studio-route label { font-size: 11px; }
+.console-app.aperture-workspace .studio-quote { border: 0; border-top: 1px solid var(--console-line); padding: 12px 0 0; margin-top: 14px; border-radius: 0; background: none; }
+.console-app.aperture-workspace .studio-quote h3 { font-size: 12px; font-weight: 500; }
+.console-app.aperture-workspace .studio-quote dl > div { padding: 6px 0; font-size: 11px; }
+.console-app.aperture-workspace .studio-price-rate { display: block; margin: 12px 0; color: var(--console-ink); font-size: 22px; font-weight: 500; }
+.console-app.aperture-workspace .studio-price-rate small { font-size: 11px; font-weight: 400; color: var(--console-muted); }
+.console-app.aperture-workspace .studio-analysis-scores { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 12px 0; }
+.console-app.aperture-workspace .studio-analysis-scores dt { font-size: 10px; color: var(--console-muted); }
+.console-app.aperture-workspace .studio-analysis-scores dd { margin: 6px 0 0; font-size: 13px; color: var(--console-ink); }
+.console-app.aperture-workspace .studio-linked-review { display: flex; gap: 6px; align-items: center; color: var(--console-primary) !important; }
+.console-app.aperture-workspace .studio-disclosure { padding-top: 0; border-top: 0; margin: 10px 0 0; }
+.console-app.aperture-workspace .studio-disclosure > summary { font-size: 11px; color: var(--console-muted); }
+.console-app.aperture-workspace .studio-inspector > .studio-channel { padding: 12px 18px; }
+.console-app.aperture-workspace .studio-channel .console-section-heading { margin-bottom: 8px; }
+.console-app.aperture-workspace .studio-channel > p { margin-top: 0; }
+.console-app.aperture-workspace .studio-channel .studio-disclosure { margin-top: 6px; }
+.console-app.aperture-workspace .studio-channel .studio-disclosure > summary { padding: 0; line-height: 18px; }
+.console-app.aperture-workspace .studio-sentinel-result { border-radius: 4px; padding: 10px 0; background: none; border: 0; border-top: 1px solid var(--console-line); }
+.console-app.aperture-workspace .studio-terminal { grid-column: 1; grid-row: 2; background: var(--console-surface); border: 1px solid var(--console-line); border-radius: 6px; box-shadow: none; }
+.console-app.aperture-workspace .studio-terminal-heading { padding: 10px 16px; min-height: 48px; border-bottom: 1px solid var(--console-line); background: var(--console-surface); }
+.console-app.aperture-workspace .studio-terminal-heading h2 { font-size: 14px; color: var(--console-ink); }
+.console-app.aperture-workspace .studio-log { display: block; height: 100px; min-height: 100px; padding: 12px 18px; background: none; }
+.console-app.aperture-workspace .studio-terminal-empty { display: block; width: 100%; height: auto; margin: 0; align-self: stretch; text-align: left; padding: 8px 0; font-family: Roboto, sans-serif; }
+.console-app.aperture-workspace .studio-terminal-empty p { margin: 0; max-width: none; width: 100%; text-align: left; font: 12px/1.6 Roboto, sans-serif; color: var(--console-muted); }
+.console-app.aperture-workspace .studio-log-line { font-size: 11px; }
+.console-app.aperture-workspace .studio-data { grid-column: 1; grid-row: 3; padding: 16px 18px; border: 1px solid var(--console-line); border-radius: 6px; }
+.console-app.aperture-workspace .studio-data.compact { padding: 12px 18px; }
+.console-app.aperture-workspace .studio-data-toggle { margin: 0; font-size: 12px; }
+.console-app.aperture-workspace .studio-receipt { margin-top: 22px; padding: 22px; }
+.console-app.aperture-workspace .console-dispatch-intro { grid-template-columns: 1fr; padding: 26px; border-radius: 7px; background: var(--console-surface); border-color: var(--console-line); }
+.console-app.aperture-workspace .console-dispatch-visual { display: none; }
+.console-app.aperture-workspace .console-dispatch-main h2 { font-size: 26px; line-height: 1.3; }
+.console-app.aperture-workspace .console-dispatch-path { background: none; border-radius: 0; box-shadow: none; }
+.console-app.aperture-workspace .console-metrics { gap: 0; border: 1px solid var(--console-line); border-radius: 6px; overflow: hidden; }
+.console-app.aperture-workspace .console-metric { padding: 18px; border: 0; border-right: 1px solid var(--console-line); border-radius: 0; box-shadow: none; background: var(--console-surface); }
+.console-app.aperture-workspace .console-metric:last-child { border-right: 0; }
+.console-app.aperture-workspace .console-metric strong { font-size: 24px; }
+.console-app.aperture-workspace .workflow-upload { background: var(--console-bg); border-radius: 6px; border-color: var(--console-line); }
+.console-app.aperture-workspace .workflow-upload-icon { border-radius: 8px; width: 42px; height: 42px; }
+.console-app.aperture-workspace .workflow-builder-grid { grid-template-columns: 1fr 1.15fr; gap: 28px; margin-top: 24px; }
+.console-app.aperture-workspace .workflow-builder aside { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: 18px 16px; padding-left: 28px; }
+.console-app.aperture-workspace .workflow-builder aside > label { margin: 0; min-width: 0; }
+.console-app.aperture-workspace .workflow-builder aside :is(input, select) { margin-top: 8px; min-height: 40px; padding: 9px 10px; font-size: 12px; }
+.console-app.aperture-workspace .workflow-builder aside > :is(dl, p, button) { grid-column: 1 / -1; margin: 0; }
+.console-app.aperture-workspace .workflow-builder aside > dl { border-top: 1px solid var(--console-line); padding-top: 8px; }
+.console-app.aperture-workspace .workflow-builder aside > dl > div { margin: 10px 0; }
+.console-app.aperture-workspace .workflow-builder input, .console-app.aperture-workspace .workflow-builder select, .console-app.aperture-workspace .workflow-builder textarea { border-radius: 4px; background: var(--console-surface); border-color: var(--console-line); }
+.console-app.aperture-workspace .provider-intro { padding: 20px 24px; }
+.console-app.aperture-workspace .provider-intro h2 { font-size: 22px; margin: 0 0 8px; letter-spacing: -.4px; }
+.console-app.aperture-workspace .market-intro { padding: 22px 24px; border-radius: 7px; border-color: var(--console-line); background: var(--console-surface); }
+.console-app.aperture-workspace .market-intro h2 { font-size: 22px; line-height: 1.3; margin: 0 0 10px; letter-spacing: -.5px; }
+.console-app.aperture-workspace .market-intro-copy > p { font-size: 13px; }
+.console-app.aperture-workspace .market-directory, .console-app.aperture-workspace .market-filters { border-radius: 6px; border-color: var(--console-line); background: var(--console-surface); }
+.console-app.aperture-workspace .market-filters button { border-radius: 4px; }
+.console-app.aperture-workspace .market-directory-heading h2 { font-size: 18px; }
+.console-app.aperture-workspace :is(.provider-connection-help, .market-settlement-details) { margin-top: 12px; font-size: 12px; color: var(--console-muted); }
+.console-app.aperture-workspace :is(.provider-connection-help, .market-settlement-details) > summary { cursor: pointer; line-height: 1.6; }
+.console-app.aperture-workspace .provider-connect .console-text-button { padding-left: 0; margin-top: 12px; color: var(--console-primary); }
+.console-app.aperture-workspace .storage-intro { padding: 0 0 8px; }
+.console-app.aperture-workspace .storage-intro h2 { margin: 0 0 10px; font-size: 20px; letter-spacing: -.4px; }
+.console-app.aperture-workspace .storage-intro p { font-size: 13px; }
+.console-app.aperture-workspace .storage-identity { padding: 14px 18px; border: 1px solid var(--console-line); border-radius: 5px; color: var(--console-muted); background: var(--console-surface); }
+.console-app.aperture-workspace .inference-intro h2 { font-size: 22px; margin: 0 0 8px; }
+.console-app.aperture-workspace .inference-intro p { font-size: 13px; line-height: 1.6; }
+.console-app.aperture-workspace .inference-boundary { margin-top: 16px; font-size: 11px; color: var(--console-muted); }
+.console-app.aperture-workspace .inference-boundary summary { cursor: pointer; }
+.console-app.aperture-workspace .provider-connect input, .console-app.aperture-workspace .provider-totals, .console-app.aperture-workspace .result-preview { border-radius: 6px; }
+.console-app.aperture-workspace .console-footer { color: var(--console-muted); margin-top: 24px; }
+:root[data-theme="dark"] .console-app.aperture-workspace .py-token-keyword { color: #bf9ce6; }
+:root[data-theme="dark"] .console-app.aperture-workspace .py-token-number { color: #e7b185; }
+:root[data-theme="dark"] .console-app.aperture-workspace .py-token-string { color: #90c7a5; }
+:root[data-theme="dark"] .console-app.aperture-workspace .py-token-builtin { color: #92b6f0; }
+@media (max-width: 1150px) {
+  .console-app.aperture-workspace .console-sidebar { width: 76px; padding: 20px 10px; }
+  .console-app.aperture-workspace .console-body { margin-left: 76px; }
+  .console-app.aperture-workspace .console-brand { margin: 0 8px 24px; }
+  .console-app.aperture-workspace .console-brand > span, .console-app.aperture-workspace .console-nav-label, .console-app.aperture-workspace .console-sidebar-bottom, .console-app.aperture-workspace .console-nav-full, .console-app.aperture-workspace .console-nav-short { display: none; }
+  .console-app.aperture-workspace .console-sidebar nav { width: 56px; gap: 4px; }
+  .console-app.aperture-workspace .console-nav-item { justify-content: center; height: 44px; min-height: 44px; padding: 10px; }
+  .console-app.aperture-workspace .console-topbar { padding: 0 24px; }
+  .console-app.aperture-workspace .console-main { padding: 24px; }
+  .console-app.aperture-workspace .console-top-actions { gap: 10px; }
+  .console-app.aperture-workspace .console-search-trigger > span, .console-app.aperture-workspace .console-search-trigger kbd { display: none; }
+}
+@media (max-width: 980px) {
+  .console-app.aperture-workspace .workflow-builder-grid { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .console-app.aperture-workspace .workflow-builder aside { padding: 24px 0 0; border-left: 0; border-top: 1px solid var(--console-line); }
+  .console-app.aperture-workspace .studio-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .console-app.aperture-workspace .studio-inspector { grid-column: 1; grid-row: 4; }
+  .console-app.aperture-workspace .studio-inspector > .console-panel { padding: 16px 20px; }
+  .console-app.aperture-workspace .studio-presets { max-width: 340px; }
+  .console-app.aperture-workspace .console-attestation-btn > span { display: none; }
+}
+@media (max-width: 640px) {
+  .console-app.aperture-workspace .console-sidebar { inset: auto 0 0; width: 100%; height: 64px; padding: 0 6px; border: 0; border-top: 1px solid var(--console-line); background: var(--console-surface); }
+  .console-app.aperture-workspace .console-brand { display: none; }
+  .console-app.aperture-workspace .console-sidebar nav { display: flex; justify-content: space-between; width: 100%; gap: 0; }
+  .console-app.aperture-workspace .console-nav-group { display: contents; }
+  .console-app.aperture-workspace .console-nav-item { flex: 1 1 0; min-width: 0; height: 62px; min-height: 62px; flex-direction: column; gap: 5px; padding: 8px 1px; border-radius: 3px; }
+  .console-app.aperture-workspace .console-nav-short { display: inline; font-size: 9px; }
+  .console-app.aperture-workspace .console-nav-item.selected::before { inset: 0 10px auto; width: auto; height: 2px; }
+  .console-app.aperture-workspace .console-body { margin-left: 0; padding-bottom: 64px; }
+  .console-app.aperture-workspace .console-topbar { min-height: 56px; height: 56px; padding: 0 16px; gap: 8px; }
+  .console-app.aperture-workspace .console-top-actions { gap: 6px; }
+  .console-app.aperture-workspace .console-hud-badge { display: flex; min-height: 24px; padding: 4px 6px; }
+  .console-app.aperture-workspace .console-hud-badge-tag { font-size: 10px; }
+  .console-app.aperture-workspace .console-search-trigger, .console-app.aperture-workspace .console-attestation-btn { display: none; }
+  .console-app.aperture-workspace .console-top-actions .wallet-adapter-button { max-width: 130px; min-width: 0; height: 32px !important; padding: 0 10px !important; font-size: 11px !important; }
+  .console-app.aperture-workspace .workflow-builder aside { grid-template-columns: minmax(0, 1fr); }
+  .console-app.aperture-workspace .workflow-builder aside :is(input, select) { font-size: 16px; }
+  .console-app.aperture-workspace .console-main { padding: 20px 16px 32px; }
+  .console-app.aperture-workspace .console-page-heading { margin-bottom: 14px; gap: 8px; align-items: flex-start; flex-direction: column; }
+  .console-app.aperture-workspace .console-page-stage .console-page-heading h1 { font-size: 27px; line-height: 1.2; }
+  .console-app.aperture-workspace .console-page-heading p { margin-top: 7px; font-size: 12px; }
+  .console-app.aperture-workspace .console-status { padding: 0; min-height: 22px; font-size: 10px; }
+  .console-app.aperture-workspace .console-studio-switcher { gap: 0; margin-bottom: 12px; }
+  .console-app.aperture-workspace .console-studio-switcher button { flex: 1; min-width: 0; padding: 10px 5px; font-size: 11px; white-space: nowrap; }
+  .console-app.aperture-workspace .studio-action-row { padding: 10px 12px; gap: 10px; margin-bottom: 12px; }
+  .console-app.aperture-workspace .studio-run-summary { flex: 1; justify-content: space-between; gap: 10px; }
+  .console-app.aperture-workspace .studio-run-summary > p { text-align: left; font-size: 11px; }
+  .console-app.aperture-workspace .studio-run-summary > p > span { font-size: 9px; }
+  .console-app.aperture-workspace .studio-run-summary .studio-run-control > button { padding: 9px 11px; font-size: 11px; }
+  .console-app.aperture-workspace .studio-steps { padding: 0; }
+  .console-app.aperture-workspace .studio-steps li { flex-direction: column; gap: 5px; font-size: 10px; }
+  .console-app.aperture-workspace .studio-step-action { flex-direction: column; gap: 5px; }
+  .console-app.aperture-workspace .studio-steps li::after { display: none; }
+  .console-app.aperture-workspace .studio-steps .studio-step-number { width: 24px; height: 24px; flex-basis: 24px; font-size: 11px; }
+  .console-app.aperture-workspace .studio-editor-heading { flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
+  .console-app.aperture-workspace .studio-editor-heading > div:first-child { flex: 1; }
+  .console-app.aperture-workspace .studio-presets { order: 3; flex-basis: 100%; max-width: none; margin: 0; }
+  .console-app.aperture-workspace .studio-presets select { flex: 1; font-size: 16px; padding: 7px; }
+  .console-app.aperture-workspace .studio-source textarea { height: 260px; padding-left: 48px; font-size: 12px; }
+  .console-app.aperture-workspace .studio-code-highlight { font-size: 12px; }
+  .console-app.aperture-workspace .studio-line-number { flex-basis: 32px; }
+  .console-app.aperture-workspace .studio-code-text { padding-left: 16px; }
+  .console-app.aperture-workspace .studio-inspector input, .console-app.aperture-workspace .studio-inspector select { font-size: 16px; }
+  .console-app.aperture-workspace .studio-log { height: 120px; }
+  .console-app.aperture-workspace .console-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .console-app.aperture-workspace .console-metric:nth-child(-n+2) { border-bottom: 1px solid var(--console-line); }
+  .console-app.aperture-workspace .console-metric:nth-child(2) { border-right: 0; }
+}

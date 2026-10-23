@@ -43,6 +43,7 @@ class StateStore:
           CREATE TABLE IF NOT EXISTS challenges (id TEXT PRIMARY KEY, data TEXT NOT NULL, consumed INTEGER NOT NULL DEFAULT 0);
           CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, data TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS workers (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS worker_statistics (id TEXT PRIMARY KEY, data TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, wallet TEXT NOT NULL, state TEXT NOT NULL, data TEXT NOT NULL, agent_pubkey TEXT);
           CREATE TABLE IF NOT EXISTS agent_spend (agent_pubkey TEXT PRIMARY KEY, charged_lamports INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS store_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -61,6 +62,64 @@ class StateStore:
         self.lock = threading.RLock()
         self._migrate_agent_spend()
         self._migrate_statistics()
+        self._migrate_worker_statistics()
+
+    @staticmethod
+    def _worker_completion_statistics(job):
+        result = StateStore._completion_statistics(job)
+        result.pop("total_charged_lamports")
+        receipt = job.get("receipt") or {}
+        paid = receipt.get("worker_paid_lamports")
+        confirmed = (receipt.get("settlement_type") == "DEVNET" and type(paid) is int and paid >= 0
+                     and paid == receipt.get("charged_lamports")
+                     and receipt.get("payout_destination") == job.get("worker_pubkey"))
+        off_chain = receipt.get("settlement_type") == "OFF_CHAIN"
+        result.update(paid_lamports=paid if confirmed else 0, off_chain_tasks=int(off_chain),
+                      off_chain_estimated_lamports=(min(job["max_cost_lamports"],
+                          math.ceil(result["total_compute_seconds"] * job["rate_lamports"])) if off_chain else 0))
+        return result
+
+    @staticmethod
+    def _empty_worker_totals(tracked_since):
+        return {"tasks_finished": 0, "tasks_completed": 0, "total_compute_seconds": 0.0,
+                "paid_lamports": 0, "off_chain_tasks": 0, "off_chain_estimated_lamports": 0,
+                "tracked_since": tracked_since, "baseline_finished": 0}
+
+    def _record_worker_completion(self, db, job, *, baseline=False):
+        worker_id = job.get("worker_id")
+        if not worker_id:
+            return
+        row = db.execute("SELECT data FROM worker_statistics WHERE id=?", (worker_id,)).fetchone()
+        totals = json.loads(row[0]) if row else self._empty_worker_totals(time.time())
+        for key, value in self._worker_completion_statistics(job).items():
+            totals[key] += value
+        if baseline:
+            totals["baseline_finished"] += 1
+        db.execute("INSERT INTO worker_statistics(id,data) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+                   (worker_id, json.dumps(totals, sort_keys=True)))
+
+    def _migrate_worker_statistics(self):
+        with self.transaction() as db:
+            if db.execute("SELECT 1 FROM store_metadata WHERE key='worker_statistics_v1'").fetchone():
+                return
+            for (raw,) in db.execute("SELECT data FROM jobs WHERE state='completed'").fetchall():
+                self._record_worker_completion(db, json.loads(raw), baseline=True)
+            db.execute("INSERT INTO store_metadata(key,value) VALUES ('worker_statistics_v1',?)", (str(time.time()),))
+
+    def worker_totals(self, worker_id):
+        with self.lock:
+            row = self.connection.execute("SELECT data FROM worker_statistics WHERE id=?", (worker_id,)).fetchone()
+            if row:
+                return json.loads(row[0])
+            tracked = self.connection.execute("SELECT value FROM store_metadata WHERE key='worker_statistics_v1'").fetchone()
+            return self._empty_worker_totals(float(tracked[0]))
+
+    def worker_jobs(self, worker_id):
+        with self.lock:
+            return [json.loads(row[0]) for row in self.connection.execute(
+                "SELECT data FROM jobs WHERE json_extract(data,'$.worker_id')=? OR "
+                "(state='queued' AND json_extract(data,'$.worker_target.node_id')=?) ORDER BY rowid DESC LIMIT 20",
+                (worker_id, worker_id))]
 
     @staticmethod
     def _completion_statistics(job):
@@ -362,6 +421,7 @@ class StateStore:
             db.execute("INSERT INTO jobs(id,wallet,state,data,agent_pubkey,quote_id) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,data=excluded.data,agent_pubkey=excluded.agent_pubkey,quote_id=excluded.quote_id", (job["task_id"], job["wallet"], job["state"], json.dumps(job, sort_keys=True), job.get("agent_pubkey"), job.get("quote_id")))
             if job.get("state") == "completed" and (not previous or previous[0] != "completed"):
                 self._record_completion_statistics(db, job)
+                self._record_worker_completion(db, job)
                 if job.get("workflow"):
                     flow_id = job["workflow"]["workflow_id"]
                     record = db.execute("SELECT data FROM assigned_workflows WHERE id=?", (flow_id,)).fetchone()

@@ -8,11 +8,11 @@ Crypto lets software pay for data, APIs, and compute. But giving an AI agent a w
 
 ## Slide 2 — Aperture’s solution (0:23–0:49)
 
-Aperture is a task-level control layer for agent compute. The owner selects permitted data, approves the task, and sets one total spending ceiling before work begins. The agent executes inside that boundary, while the owner can stop the workflow or revoke its allowance.
+Aperture is an early AI inference gateway and compute marketplace on Solana. It connects configured model offers and authenticated compute workers to one owner-approved task flow. Model requests, Python jobs, and recoverable data workflows carry signed spending and runtime limits before dispatch.
 
 ## Slide 3 — How it works (0:49–1:07)
 
-Agents connect through MCP or our Python SDK. Aperture records accepted steps so work can recover after interruption and returns named output files with checkable hashes. Dataset contents stay outside the model’s context unless selected results are sent back.
+The capacity directory combines authenticated CPU workers with model offers configured by the gateway operator. Agents connect through MCP or our Python SDK; each task binds its route, input, limits, and owner approval. Accepted workflow steps are journaled for recovery, and the gateway returns named output files with checkable hashes. Discovery remains operator-managed. Updated contract source routes the full confirmed Devnet task charge to the assigned worker, pending deployment and live verification; upstream model API bills remain outside Aperture.
 
 ## Slide 4 — Recovery evidence (1:07–1:27)
 
@@ -20,11 +20,11 @@ After an intentional interruption, the workflow completed all five tasks across 
 
 ## Slide 5 — The Solana layer (1:27–1:47)
 
-On Solana, Aperture links delegated budgets to task-level settlement. A retained Devnet run on September 27 settled 3,200 lamports on-chain and recorded a task receipt binding identities and file hashes. The receipt does not prove the calculation was correct.
+The retained September 27 Devnet run used the earlier treasury-settlement build: it charged 3,200 lamports and recorded a task receipt binding identities and file hashes. The updated contract source instead routes 100% of new confirmed task charges to the assigned worker; this path still needs deployment and live verification. The receipt does not prove the calculation was correct, and upstream model API vendors are not paid by Aperture.
 
 ## Slide 6 — The invitation (1:47–2:00)
 
-That’s our goal: let agents use compute within clear limits and give owners results they can inspect. We’re looking for pilot teams with recurring workflows.
+That’s our goal: bring model inference and compute into one marketplace while keeping every request bounded by its owner. The MVP uses operator-configured model offers and CPU workers; we’re looking for pilot teams and independent providers to validate the next stage.
 
 ## Run of show
 

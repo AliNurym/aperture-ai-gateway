@@ -1,0 +1,38 @@
+.provider-workspace { display: grid; gap: 24px; color: var(--console-ink); }
+.provider-workspace .console-panel { padding: 28px; }
+.provider-intro, .provider-identity { display: flex; justify-content: space-between; align-items: center; gap: 32px; }
+.provider-intro h2 { font-size: clamp(24px, 3vw, 34px); font-weight: 500; letter-spacing: -.035em; margin: 14px 0; }
+.provider-intro p, .provider-connect p, .provider-admission p, .provider-capabilities > p { font-size: 13px; line-height: 1.7; color: var(--console-muted); max-width: 650px; }
+.provider-actions { display: flex; flex-wrap: wrap; gap: 10px; flex-shrink: 0; }
+.provider-connect { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; }
+.provider-connect h3 { margin: 18px 0 10px; font-weight: 500; font-size: 22px; }
+.provider-connect form { display: grid; gap: 18px; align-content: center; }
+.provider-connect label { display: grid; gap: 8px; font-size: 12px; color: var(--console-muted); }
+.provider-connect input { width: 100%; box-sizing: border-box; background: var(--console-surface); border: 1px solid var(--console-line); border-radius: 8px; padding: 12px; font: inherit; color: var(--console-ink); }
+.provider-session, .provider-session > span, .provider-session > div { display: flex; align-items: center; gap: 12px; }
+.provider-session { justify-content: space-between; font-size: 13px; }
+.provider-identity h2 { font-size: 24px; font-weight: 500; overflow-wrap: anywhere; margin: 16px 0 8px; }
+.provider-identity code { display: block; font-size: 12px; overflow-wrap: anywhere; }
+.provider-identity small { display: block; margin-top: 10px; font-size: 11px; color: var(--console-muted); }
+.provider-identity > div { min-width: 0; }
+.provider-admission { flex: 0 1 330px; border-left: 1px solid var(--console-line); padding-left: 28px; }
+.provider-totals { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--console-line); border-radius: var(--console-radius); background: var(--console-surface); }
+.provider-totals > div { padding: 24px; border-right: 1px solid var(--console-line); }
+.provider-totals > div:last-child { border-right: 0; }
+.provider-totals span, .provider-totals p { font-size: 11px; line-height: 1.6; color: var(--console-muted); }
+.provider-totals strong { display: block; font-size: 28px; font-weight: 500; margin: 12px 0; }
+.provider-totals strong small { font-size: 13px; }
+.provider-table-scroll { overflow-x: auto; }
+.provider-history table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+.provider-history th { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; font-weight: 500; color: var(--console-muted); }
+.provider-history td, .provider-history th { padding: 16px 12px; border-bottom: 1px solid var(--console-line); white-space: nowrap; }
+.provider-history td small { display: block; font-size: 10px; color: var(--console-muted); margin-top: 6px; }
+.provider-history-scope { font-size: 11px; color: var(--console-muted); line-height: 1.7; margin: 18px 0 0; }
+.provider-empty { padding: 36px 16px; text-align: center; color: var(--console-muted); }
+.provider-empty h3 { font-weight: 500; color: var(--console-ink); }
+.provider-empty p { font-size: 13px; }
+.provider-capabilities dl { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.provider-capabilities dt { font-size: 11px; color: var(--console-muted); margin-bottom: 7px; }
+.provider-capabilities dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+@media (max-width: 1050px) { .provider-intro { align-items: flex-start; flex-direction: column; } .provider-totals { grid-template-columns: 1fr 1fr; } .provider-totals > div:nth-child(2) { border-right: 0; } .provider-totals > div:nth-child(-n+2) { border-bottom: 1px solid var(--console-line); } }
+@media (max-width: 650px) { .provider-workspace .console-panel { padding: 20px; } .provider-connect { grid-template-columns: 1fr; gap: 24px; } .provider-identity { align-items: stretch; flex-direction: column; } .provider-admission { flex: auto; padding: 24px 0 0; border-left: 0; border-top: 1px solid var(--console-line); } .provider-capabilities dl { grid-template-columns: 1fr; } .provider-session { align-items: flex-start; flex-direction: column; } .provider-totals > div { padding: 18px; } }

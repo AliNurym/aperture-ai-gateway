@@ -7,6 +7,9 @@ declare_id!("A5HfdyRWy77i5DxhTMBa1ZinxVGZbVZnb35EvXUvkNzQ");
 pub const PROTOCOL_VERSION: u16 = 2;
 pub const MAX_BURN_RATE_LAMPORTS_PER_SECOND: u64 = 25_000;
 pub const MAX_TASK_RUNTIME_SECONDS: u32 = 3_600;
+// While a task is active, last_charged is unused and marks that the worker
+// destination was pinned by the current start_task implementation.
+const WORKER_PAYOUT_BOUND: u64 = u64::MAX;
 
 fn configured_protocol_authority() -> Result<Pubkey> {
     let authority_str = option_env!("APERTURE_CONFIG_AUTHORITY")
@@ -169,6 +172,39 @@ fn validate_runtime_budget(rate: u64, max_cost: u64, max_runtime: u32) -> Result
     Ok(())
 }
 
+fn bind_task_worker(channel: &mut ChannelState, worker: Pubkey) -> Result<()> {
+    require!(
+        worker != Pubkey::default() && worker != crate::ID,
+        ApertureError::InvalidWorker
+    );
+    channel.last_task_hash = worker.to_bytes();
+    channel.last_charged = WORKER_PAYOUT_BOUND;
+    Ok(())
+}
+
+fn bound_task_worker(channel: &ChannelState) -> Result<Pubkey> {
+    require!(
+        channel.last_charged == WORKER_PAYOUT_BOUND,
+        ApertureError::InvalidWorker
+    );
+    let worker = Pubkey::new_from_array(channel.last_task_hash);
+    require!(
+        worker != Pubkey::default() && worker != crate::ID,
+        ApertureError::InvalidWorker
+    );
+    Ok(worker)
+}
+
+fn validate_worker_account(worker: &AccountInfo) -> Result<()> {
+    require_keys_eq!(
+        *worker.owner,
+        system_program::ID,
+        ApertureError::InvalidWorker
+    );
+    require!(worker.data_len() == 0, ApertureError::InvalidWorker);
+    Ok(())
+}
+
 fn settle_task_state(
     channel: &mut ChannelState,
     passport: Option<&mut AgentPassport>,
@@ -198,6 +234,13 @@ fn settle_task_state(
             && receipt.deadline == channel.task_deadline,
         ApertureError::TaskMismatch
     );
+    let bound_worker = if channel.last_charged == WORKER_PAYOUT_BOUND {
+        Some(bound_task_worker(channel)?)
+    } else {
+        // Receipts created before worker pinning was added remain settleable.
+        // Their stop transaction must supply the recipient while signed by the oracle.
+        None
+    };
     let delegated = channel.agent != channel.user;
     require!(
         delegated == passport.is_some(),
@@ -247,7 +290,9 @@ fn settle_task_state(
     channel.last_charged = charge;
     channel.last_update_time = now;
     channel.burn_rate = 0;
-    channel.agent = Pubkey::default();
+    // Preserve the most recent worker in the existing account field when the
+    // task was pinned. No account-size migration is needed for old channels.
+    channel.agent = bound_worker.unwrap_or_default();
     channel.task_hash = [0; 32];
     channel.task_max_cost = 0;
     channel.task_deadline = 0;
@@ -263,7 +308,7 @@ fn pay_from_channel(
 ) -> Result<()> {
     require!(
         channel.key != destination.key,
-        ApertureError::InvalidTreasury
+        ApertureError::InvalidPaymentRecipient
     );
     let remaining = channel
         .lamports()
@@ -287,14 +332,6 @@ fn pay_from_channel(
         **channel.try_borrow_mut_lamports()? = remaining;
         **destination.try_borrow_mut_lamports()? = credited;
     }
-    Ok(())
-}
-
-fn require_rent_exempt_payment_destination(destination: &AccountInfo) -> Result<()> {
-    require!(
-        destination.lamports() >= Rent::get()?.minimum_balance(destination.data_len()),
-        ApertureError::PaymentRecipientNotRentExempt
-    );
     Ok(())
 }
 
@@ -437,12 +474,12 @@ pub mod aperture_gateway {
         task_hash: [u8; 32],
         source_hash: [u8; 32],
         agent: Pubkey,
+        worker: Pubkey,
         rate: u64,
         max_cost: u64,
         max_runtime: u32,
     ) -> Result<()> {
         require_v2(&ctx.accounts.config)?;
-        require_rent_exempt_payment_destination(&ctx.accounts.treasury.to_account_info())?;
         require!(
             ctx.accounts.channel.burn_rate == 0 && ctx.accounts.channel.task_hash == [0; 32],
             ApertureError::ChannelBusy
@@ -503,6 +540,7 @@ pub mod aperture_gateway {
         receipt.deadline = deadline;
         receipt.bump = ctx.bumps.receipt;
         let channel = &mut ctx.accounts.channel;
+        bind_task_worker(channel, worker)?;
         channel.agent = agent;
         channel.task_hash = task_hash;
         channel.task_max_cost = max_cost;
@@ -513,6 +551,7 @@ pub mod aperture_gateway {
         emit!(TaskStartedEvent {
             owner: channel.user,
             agent,
+            worker,
             task_hash,
             max_cost,
             deadline,
@@ -524,6 +563,14 @@ pub mod aperture_gateway {
     pub fn stop_task(ctx: Context<StopTask>, task_hash: [u8; 32]) -> Result<()> {
         require_v2(&ctx.accounts.config)?;
         if !ctx.accounts.receipt.settled {
+            if ctx.accounts.channel.last_charged == WORKER_PAYOUT_BOUND {
+                require_keys_eq!(
+                    ctx.accounts.worker.key(),
+                    bound_task_worker(&ctx.accounts.channel)?,
+                    ApertureError::InvalidWorker
+                );
+            }
+            validate_worker_account(&ctx.accounts.worker.to_account_info())?;
             if let Some(passport) = ctx.accounts.passport.as_ref() {
                 validate_passport_identity(
                     passport.key(),
@@ -543,14 +590,15 @@ pub mod aperture_gateway {
         )? {
             pay_from_channel(
                 &ctx.accounts.channel.to_account_info(),
-                &ctx.accounts.treasury.to_account_info(),
+                &ctx.accounts.worker.to_account_info(),
                 charge,
-                true,
+                false,
             )?;
             emit!(TaskSettledEvent {
                 owner: ctx.accounts.receipt.owner,
                 agent: ctx.accounts.receipt.agent,
                 task_hash,
+                recipient: ctx.accounts.worker.key(),
                 charged_lamports: charge,
                 settled_at: now
             });
@@ -593,6 +641,24 @@ pub mod aperture_gateway {
                     ctx.accounts.channel.agent,
                 )?;
             }
+            let (recipient_info, recipient) =
+                if ctx.accounts.channel.last_charged == WORKER_PAYOUT_BOUND {
+                    let worker = bound_task_worker(&ctx.accounts.channel)?;
+                    require_keys_eq!(
+                        ctx.accounts.worker.key(),
+                        worker,
+                        ApertureError::InvalidWorker
+                    );
+                    validate_worker_account(&ctx.accounts.worker.to_account_info())?;
+                    (ctx.accounts.worker.to_account_info(), worker)
+                } else {
+                    // A pre-upgrade task has no pinned worker key. Preserve the
+                    // prior owner-controlled recovery path for this legacy case.
+                    (
+                        ctx.accounts.treasury.to_account_info(),
+                        ctx.accounts.treasury.key(),
+                    )
+                };
             let now = Clock::get()?.unix_timestamp;
             let charge = settle_task_state(
                 &mut ctx.accounts.channel,
@@ -604,14 +670,15 @@ pub mod aperture_gateway {
             .ok_or(ApertureError::TaskMismatch)?;
             pay_from_channel(
                 &ctx.accounts.channel.to_account_info(),
-                &ctx.accounts.treasury.to_account_info(),
+                &recipient_info,
                 charge,
-                true,
+                false,
             )?;
             emit!(TaskSettledEvent {
                 owner: receipt.owner,
                 agent: receipt.agent,
                 task_hash,
+                recipient,
                 charged_lamports: charge,
                 settled_at: now
             });
@@ -690,9 +757,6 @@ pub struct StartTask<'info> {
     pub channel: Account<'info, ChannelState>,
     #[account(mut, address = config.oracle @ ApertureError::UnauthorizedOracle)]
     pub oracle: Signer<'info>,
-    /// CHECK: Immutable configured payment destination; no data is read.
-    #[account(mut, address = config.treasury @ ApertureError::InvalidTreasury, constraint = treasury.key() != channel.key() @ ApertureError::InvalidTreasury)]
-    pub treasury: UncheckedAccount<'info>,
     #[account(mut)]
     pub passport: Option<Account<'info, AgentPassport>>,
     #[account(init, payer = oracle, space = 8 + TaskReceipt::INIT_SPACE, seeds = [b"task".as_ref(), task_hash.as_ref()], bump)]
@@ -712,6 +776,9 @@ pub struct StopTask<'info> {
     /// CHECK: Immutable configured payment destination; no data is read.
     #[account(mut, address = config.treasury @ ApertureError::InvalidTreasury, constraint = treasury.key() != channel.key() @ ApertureError::InvalidTreasury)]
     pub treasury: UncheckedAccount<'info>,
+    /// CHECK: The handler checks this against the worker pinned in the channel.
+    #[account(mut)]
+    pub worker: UncheckedAccount<'info>,
     #[account(mut)]
     pub passport: Option<Account<'info, AgentPassport>>,
     #[account(mut, seeds = [b"task".as_ref(), task_hash.as_ref()], bump = receipt.bump)]
@@ -742,6 +809,9 @@ pub struct CloseChannel<'info> {
     /// CHECK: Immutable configured payment destination; no data is read.
     #[account(mut, address = config.treasury @ ApertureError::InvalidTreasury, constraint = treasury.key() != channel.key() @ ApertureError::InvalidTreasury)]
     pub treasury: UncheckedAccount<'info>,
+    /// CHECK: The handler checks this against the worker pinned in the active task.
+    #[account(mut)]
+    pub worker: UncheckedAccount<'info>,
     #[account(mut)]
     pub passport: Option<Account<'info, AgentPassport>>,
     #[account(mut)]
@@ -785,6 +855,7 @@ pub struct ChannelState {
     pub burn_rate: u64,
     pub last_update_time: i64,
     pub bump: u8,
+    // Active task agent, or most recently paid worker while the channel is idle.
     pub agent: Pubkey,
     pub task_hash: [u8; 32],
     pub task_max_cost: u64,
@@ -815,6 +886,7 @@ pub struct TaskReceipt {
 pub struct TaskStartedEvent {
     pub owner: Pubkey,
     pub agent: Pubkey,
+    pub worker: Pubkey,
     pub task_hash: [u8; 32],
     pub max_cost: u64,
     pub deadline: i64,
@@ -826,6 +898,7 @@ pub struct TaskSettledEvent {
     pub owner: Pubkey,
     pub agent: Pubkey,
     pub task_hash: [u8; 32],
+    pub recipient: Pubkey,
     pub charged_lamports: u64,
     pub settled_at: i64,
 }
@@ -882,6 +955,10 @@ pub enum ApertureError {
     MissingReceipt,
     #[msg("Payment recipient must be rent-exempt before it can receive a charge")]
     PaymentRecipientNotRentExempt,
+    #[msg("Payment recipient cannot be the channel account")]
+    InvalidPaymentRecipient,
+    #[msg("Worker public key or payment account is invalid")]
+    InvalidWorker,
 }
 
 #[cfg(test)]
@@ -1050,6 +1127,33 @@ mod tests {
     }
 
     #[test]
+    fn pinned_worker_is_paid_and_survives_settlement_without_account_migration() {
+        let mut p = passport();
+        p.reserved = 100;
+        let (mut channel, mut receipt) = task(&p);
+        let worker = Pubkey::new_unique();
+        bind_task_worker(&mut channel, worker).unwrap();
+        assert_eq!(bound_task_worker(&channel).unwrap(), worker);
+        assert_eq!(channel.last_charged, WORKER_PAYOUT_BOUND);
+
+        settle_task_state(&mut channel, Some(&mut p), &mut receipt, [2; 32], 105).unwrap();
+        assert_eq!(channel.agent, worker);
+        assert_eq!(channel.last_task_hash, [2; 32]);
+        assert_eq!(channel.last_charged, 50);
+        assert_eq!(8 + ChannelState::INIT_SPACE, 225);
+        assert_eq!(8 + TaskReceipt::INIT_SPACE, 186);
+    }
+
+    #[test]
+    fn invalid_worker_keys_cannot_be_bound_to_a_task() {
+        let p = passport();
+        let (mut channel, _) = task(&p);
+        assert!(bind_task_worker(&mut channel, Pubkey::default()).is_err());
+        assert!(bind_task_worker(&mut channel, crate::ID).is_err());
+        assert_eq!(channel.last_charged, 0);
+    }
+
+    #[test]
     fn settled_receipt_retry_cannot_modify_a_newer_task() {
         let mut p = passport();
         p.reserved = 100;
@@ -1119,30 +1223,30 @@ mod tests {
             task_hash: [2; 32],
             source_hash: [3; 32],
             agent: Pubkey::new_unique(),
+            worker: Pubkey::new_unique(),
             rate: 10,
             max_cost: 100,
             max_runtime: 10,
         }
         .data();
-        assert_eq!(data.len(), 124);
+        assert_eq!(data.len(), 156);
         assert_eq!(&data[8..40], &[2; 32]);
         assert_eq!(&data[40..72], &[3; 32]);
-        assert_eq!(&data[104..112], &10u64.to_le_bytes());
+        assert_eq!(&data[136..144], &10u64.to_le_bytes());
         let accounts = crate::accounts::StartTask {
             config: Pubkey::new_unique(),
             channel: Pubkey::new_unique(),
             oracle: Pubkey::new_unique(),
-            treasury: Pubkey::new_unique(),
             passport: None,
             receipt: Pubkey::new_unique(),
             system_program: system_program::ID,
         }
         .to_account_metas(None);
-        assert_eq!(accounts.len(), 7);
+        assert_eq!(accounts.len(), 6);
         assert!(accounts[2].is_signer && accounts[2].is_writable);
-        assert_eq!(accounts[4].pubkey, crate::ID);
-        assert!(!accounts[4].is_writable);
-        assert!(accounts[5].is_writable);
+        assert_eq!(accounts[3].pubkey, crate::ID);
+        assert!(!accounts[3].is_writable);
+        assert!(accounts[4].is_writable);
     }
 
     #[test]

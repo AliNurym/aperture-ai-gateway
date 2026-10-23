@@ -86,6 +86,7 @@ class ApertureAgentTools:
             "source_policy": analysis.get("security"),
             "complexity_score": analysis.get("complexity_score"),
             "network": quote.get("network"),
+            **({"worker_target": quote["worker_target"]} if quote.get("worker_target") else {}),
             **({"workload_sha256": quote["workload_sha256"],
                 "inputs": quote["workload"]["inputs"]} if "workload" in quote else {}),
         }
@@ -115,7 +116,7 @@ class ApertureAgentTools:
             self._started_quotes.pop(quote_id, None)
 
     def quote_python(self, source: str, max_cost_lamports: int | None = None,
-                     max_runtime_seconds: int | None = None) -> dict:
+                     max_runtime_seconds: int | None = None, worker_target: dict | None = None) -> dict:
         """Estimate a Python task. This does not execute code or spend SOL."""
         if not isinstance(source, str) or not source.strip():
             raise ValueError("source must be a non-empty Python program.")
@@ -133,10 +134,33 @@ class ApertureAgentTools:
                     "Start or let an earlier quote expire first."
                 )
             quote = self.client.quote(source, max_cost_lamports=cost,
-                                      max_runtime_seconds=runtime, max_rate_lamports=self.max_rate_lamports)
+                                      max_runtime_seconds=runtime, max_rate_lamports=self.max_rate_lamports,
+                                      **({"worker_target": worker_target} if worker_target is not None else {}))
             quote_id = quote["quote_id"]
             self._quotes[quote_id] = (source, quote)
             return self._quote_summary(quote)
+
+    def list_inference_providers(self) -> dict:
+        return {"providers": self.client.inference_providers(), "discovery": "operator_configured"}
+
+    def list_workers(self) -> dict:
+        return {"workers": self.client.workers(), "routing": "optional_signed_worker_target"}
+
+    def quote_inference(self, provider_id: str, messages: list[dict], max_tokens: int = 256,
+                        max_cost_lamports: int | None = None, max_runtime_seconds: int | None = None,
+                        worker_target: dict | None = None) -> dict:
+        cost = self._requested_limit(max_cost_lamports, self.max_cost_lamports, "max_cost_lamports")
+        runtime = self._requested_limit(max_runtime_seconds, self.max_runtime_seconds, "max_runtime_seconds")
+        with self._lock:
+            self._expire_quotes()
+            if len(self._quotes) >= self.max_pending_quotes:
+                raise RuntimeError("Too many unused Aperture quotes are pending.")
+            quote = self.client.quote_inference(provider_id, messages, max_tokens=max_tokens,
+                max_cost_lamports=cost, max_runtime_seconds=runtime, max_rate_lamports=self.max_rate_lamports,
+                **({"worker_target": worker_target} if worker_target is not None else {}))
+            from .jobs import inference_source
+            self._quotes[quote["quote_id"]] = (inference_source(quote["workload"]["parameters"]), quote)
+            return {**self._quote_summary(quote), "offer": quote["workload"]["parameters"]["offer"]}
 
     def start_python_task(self, quote_id: str) -> dict:
         """Start the exact quoted source within the configured owner-delegated limits."""
@@ -318,7 +342,8 @@ class ApertureAgentTools:
             return self.client.release_object(reference)
 
     def quote_compute_job(self, source: str, inputs: list[dict], parameters: dict | None = None,
-                          max_cost_lamports: int | None = None, max_runtime_seconds: int | None = None):
+                          max_cost_lamports: int | None = None, max_runtime_seconds: int | None = None,
+                          worker_target: dict | None = None):
         validate_source(source)
         workload_manifest(source, inputs, parameters)
         cost = self._requested_limit(max_cost_lamports, self.max_cost_lamports, "max_cost_lamports")
@@ -328,7 +353,8 @@ class ApertureAgentTools:
             if len(self._quotes) >= self.max_pending_quotes:
                 raise RuntimeError("Too many unused compute quotes are pending.")
             quote = self.client.quote_job(source, inputs=inputs, parameters=parameters,
-                max_cost_lamports=cost, max_runtime_seconds=runtime, max_rate_lamports=self.max_rate_lamports)
+                max_cost_lamports=cost, max_runtime_seconds=runtime, max_rate_lamports=self.max_rate_lamports,
+                **({"worker_target": worker_target} if worker_target is not None else {}))
             self._quotes[quote["quote_id"]] = (source, quote)
             return self._quote_summary(quote)
 

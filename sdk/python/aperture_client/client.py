@@ -25,7 +25,7 @@ from solders.keypair import Keypair
 from solders.message import Message
 from solders.pubkey import Pubkey
 from solders.transaction import VersionedTransaction
-from .jobs import MAX_INPUT_BYTES, NAME, object_reference, workload_manifest
+from .jobs import MAX_INPUT_BYTES, NAME, object_reference, workload_manifest, inference_source
 from .retries import retry_throttled
 
 QUOTE_KEYS = (
@@ -90,12 +90,15 @@ def canonical_quote_message(quote):
     if "workload" in quote:
         spec = quote["workload"]
         require(isinstance(spec, dict) and set(spec) == {"version", "runtime", "source_sha256", "inputs", "parameters"}
-                and spec["version"] == 1 and spec["runtime"] == "python"
+                and spec["version"] == 1 and spec["runtime"] in {"python", "inference.chat"}
                 and spec["source_sha256"] == quote["code_sha256"],
                 "Invalid job manifest in quote")
         require(quote.get("workload_sha256") == sha256(canonical(spec)), "Job manifest digest differs")
         # Validate descriptor, name, byte and parameter bounds independently.
-        rebuilt = workload_manifest("", spec["inputs"], spec["parameters"])
+        source = inference_source(spec["parameters"]) if spec["runtime"] == "inference.chat" else ""
+        if spec["runtime"] == "inference.chat":
+            require(sha256(source) == quote["code_sha256"], "Inference request differs from its source digest")
+        rebuilt = workload_manifest(source, spec["inputs"], spec["parameters"])
         rebuilt["source_sha256"] = quote["code_sha256"]
         require(rebuilt == spec, "Job manifest is not canonical")
         bound["workload_sha256"] = quote["workload_sha256"]
@@ -112,6 +115,17 @@ def canonical_quote_message(quote):
                 "Quote has invalid workflow binding")
         bound["workflow"] = binding
         version = 4
+    if "worker_target" in quote:
+        target = quote["worker_target"]
+        require(isinstance(target, dict) and set(target) == {"node_id", "worker_pubkey"}
+                and isinstance(target["node_id"], str) and 1 <= len(target["node_id"]) <= 64
+                and all(33 <= ord(c) <= 126 for c in target["node_id"]), "Invalid selected worker identity")
+        try:
+            Pubkey.from_string(target["worker_pubkey"])
+        except Exception as error:
+            raise IntegrityError("Invalid selected worker signing key") from error
+        bound["worker_target"] = target
+        version = 5
     return f"Aperture execution authorization v{version}\naudience:aperture-gateway\naction:execute\n" + canonical(bound)
 
 
@@ -190,7 +204,7 @@ def verify_signature(public_key, signature, message):
 
 
 def verify_quote(quote, *, owner, agent, code, max_cost_lamports, max_runtime_seconds,
-                 max_rate_lamports, program_id, gateway_pubkey, network, treasury, now=None, workload=None, workflow=None):
+                 max_rate_lamports, program_id, gateway_pubkey, network, treasury, now=None, workload=None, workflow=None, worker_target=None):
     """Reconstruct the signed payload, binding source, environment and caller bounds."""
     now = int(time.time()) if now is None else now
     expected = {
@@ -203,6 +217,7 @@ def verify_quote(quote, *, owner, agent, code, max_cost_lamports, max_runtime_se
         require(quote.get(key) == value, f"Quote changed {key}")
     require(quote.get("workload") == workload, "Quote changed job inputs or parameters")
     require(quote.get("workflow") == workflow, "Quote changed its assigned workflow step")
+    require(quote.get("worker_target") == worker_target, "Quote changed the selected worker")
     require(type(quote.get("expires_at")) is int and now < quote["expires_at"] <= now + 120, "Quote expired or expiry is implausible")
     require(type(quote.get("rate_lamports")) is int and 0 < quote["rate_lamports"] <= max_rate_lamports, "Quote rate exceeds caller policy")
     require(type(quote.get("passport_version")) is int and quote["passport_version"] >= 0, "Missing delegation version")
@@ -249,6 +264,11 @@ def verify_receipt(receipt, *, quote, task_id, full_log):
     }
     for key, value in expected.items():
         require(receipt.get(key) == value, f"Receipt changed {key}")
+    require(receipt.get("worker_target") == quote.get("worker_target"), "Receipt changed the selected worker route")
+    if quote.get("worker_target") and receipt.get("worker_id") is not None:
+        require(receipt["worker_id"] == quote["worker_target"]["node_id"]
+                and receipt.get("worker_pubkey") == quote["worker_target"]["worker_pubkey"],
+                "Result came from a different worker than the one approved")
     artifacts = receipt.get("artifacts", [])
     if "workload" in quote:
         require(receipt.get("workload_sha256") == quote["workload_sha256"],
@@ -327,23 +347,52 @@ class ApertureClient:
         require(response.status_code < 300, "Gateway redirects are not supported; configure its final URL")
         return response
 
-    def quote(self, code, *, max_cost_lamports=100_000, max_runtime_seconds=30, max_rate_lamports=25_000):
+    def quote(self, code, *, max_cost_lamports=100_000, max_runtime_seconds=30, max_rate_lamports=25_000, worker_target=None):
         validate_source(code)
         if self.network == "devnet":
             self.verify_protocol_config()
         quote = self.request("POST", "/quotes", json={"wallet": self.owner, "agent_pubkey": self.agent, "code": code,
-            "max_cost_lamports": max_cost_lamports, "max_runtime_seconds": max_runtime_seconds}).json()
+            "max_cost_lamports": max_cost_lamports, "max_runtime_seconds": max_runtime_seconds,
+            **({"worker_target": worker_target} if worker_target is not None else {})}).json()
         verify_quote(quote, owner=self.owner, agent=self.agent, code=code, max_cost_lamports=max_cost_lamports,
             max_runtime_seconds=max_runtime_seconds, max_rate_lamports=max_rate_lamports, program_id=self.program_id,
-            gateway_pubkey=self.gateway_pubkey, network=self.network, treasury=self.treasury)
+            gateway_pubkey=self.gateway_pubkey, network=self.network, treasury=self.treasury, worker_target=worker_target)
         return quote
+
+    def workers(self):
+        """Registered workers, heartbeat status and durable, aggregate earnings."""
+        return self.request("GET", "/workers").json()["workers"]
+
+    def inference_providers(self):
+        """Operator-configured model offers; no decentralized discovery claim."""
+        return self.request("GET", "/inference/providers").json()["providers"]
+
+    def quote_inference(self, provider_id, messages, *, max_tokens=256,
+                        max_cost_lamports=100_000, max_runtime_seconds=30, max_rate_lamports=25_000, worker_target=None):
+        offers = [item for item in self.inference_providers() if item.get("id") == provider_id]
+        require(len(offers) == 1, "Inference provider is not configured")
+        offer = {key: value for key, value in offers[0].items() if key != "available_workers"}
+        require(type(max_tokens) is int and 1 <= max_tokens <= offer["max_output_tokens"], "Invalid output token limit")
+        require(0 < offer["rate_lamports_sec"] <= max_rate_lamports, "Provider rate exceeds caller policy")
+        parameters = {"inference": {"provider_id": provider_id, "messages": messages, "max_tokens": max_tokens}, "offer": offer}
+        code = inference_source(parameters)
+        return self.quote_job(code, parameters=parameters, max_cost_lamports=max_cost_lamports,
+                              max_runtime_seconds=max_runtime_seconds, max_rate_lamports=max_rate_lamports, worker_target=worker_target)
+
+    def execute_inference(self, quote, *, max_rate_lamports=25_000):
+        """Submit the same signed inference authorization on uncertain admission."""
+        spec = quote.get("workload", {})
+        require(spec.get("runtime") == "inference.chat", "Expected an inference quote")
+        parameters = spec["parameters"]
+        return self.execute_job(quote, inference_source(parameters), parameters=parameters,
+                                max_rate_lamports=max_rate_lamports)
 
     def execute(self, quote, code, *, max_rate_lamports=25_000, inputs=None, parameters=None):
         spec = workload_manifest(code, inputs or [], parameters) if inputs is not None or parameters is not None else None
         message = verify_quote(quote, owner=self.owner, agent=self.agent, code=code,
             max_cost_lamports=quote["max_cost_lamports"], max_runtime_seconds=quote["max_runtime_seconds"],
             max_rate_lamports=max_rate_lamports, program_id=self.program_id, gateway_pubkey=self.gateway_pubkey,
-            network=self.network, treasury=self.treasury, workload=spec, workflow=getattr(self, "workflow_binding", None))
+            network=self.network, treasury=self.treasury, workload=spec, workflow=getattr(self, "workflow_binding", None), worker_target=quote.get("worker_target"))
         payload = {"quote_id": quote["quote_id"], "wallet": self.owner, "agent_pubkey": self.agent,
                    "code": code, "message": message, "signature": list(bytes(self.key.sign_message(message.encode("utf-8"))))}
         if spec is not None:
@@ -510,7 +559,7 @@ class ApertureClient:
         return result
 
     def quote_job(self, code, *, inputs=(), parameters=None, max_cost_lamports=100_000,
-                  max_runtime_seconds=30, max_rate_lamports=25_000):
+                  max_runtime_seconds=30, max_rate_lamports=25_000, worker_target=None):
         validate_source(code)
         spec = workload_manifest(code, inputs, parameters)
         if self.network == "devnet":
@@ -518,12 +567,13 @@ class ApertureClient:
         quote = self.request("POST", "/quotes", json={"code": code, "wallet": self.owner,
             "agent_pubkey": self.agent, "job_version": 1, "inputs": spec["inputs"], "parameters": spec["parameters"],
             "max_cost_lamports": max_cost_lamports, "max_runtime_seconds": max_runtime_seconds,
+            **({"worker_target": worker_target} if worker_target is not None else {}),
             **({"workflow": self.workflow_binding} if getattr(self, "workflow_binding", None) else {})}).json()
         verify_quote(quote, owner=self.owner, agent=self.agent, code=code,
             max_cost_lamports=max_cost_lamports, max_runtime_seconds=max_runtime_seconds,
             max_rate_lamports=max_rate_lamports, program_id=self.program_id,
             gateway_pubkey=self.gateway_pubkey, network=self.network, treasury=self.treasury, workload=spec,
-            workflow=getattr(self, "workflow_binding", None))
+            workflow=getattr(self, "workflow_binding", None), worker_target=worker_target)
         return quote
 
     def execute_job(self, quote, code, *, inputs=(), parameters=None, max_rate_lamports=25_000):
@@ -807,7 +857,55 @@ class ApertureClient:
         status = self.rpc("getSignatureStatuses", [[receipt["settlement_signature"]], {"searchTransactionHistory": True}])["value"][0]
         require(status is not None and status.get("err") is None and status.get("confirmationStatus") in {"confirmed", "finalized"},
                 "Devnet settlement transaction has not confirmed successfully")
-        return {"address": str(address), "charged_lamports": charged}
+        worker_key = receipt.get("worker_pubkey")
+        require(worker_key and receipt.get("payout_destination") == worker_key
+                and receipt.get("worker_paid_lamports") == charged,
+                "Gateway receipt does not attribute the full task charge to its worker")
+        worker_attestation = receipt.get("worker_receipt") or {}
+        require(worker_attestation.get("worker_pubkey") == worker_key,
+                "Gateway worker key differs from the signed worker receipt")
+
+        transaction = self.rpc("getTransaction", [receipt["settlement_signature"], {
+            "encoding": "json", "commitment": "confirmed", "maxSupportedTransactionVersion": 0,
+        }])
+        require(isinstance(transaction, dict) and isinstance(transaction.get("meta"), dict)
+                and transaction["meta"].get("err") is None
+                and isinstance(transaction["meta"].get("logMessages"), list),
+                "Settlement transaction logs are unavailable or unsuccessful")
+        event_discriminator = hashlib.sha256(b"event:TaskSettledEvent").digest()[:8]
+        settled_event = None
+        logs = transaction["meta"]["logMessages"]
+        for index, line in enumerate(logs):
+            if not isinstance(line, str) or not line.startswith("Program data: "):
+                continue
+            try:
+                event = base64.b64decode(line[len("Program data: "):], validate=True)
+            except (ValueError, TypeError):
+                continue
+            if len(event) != 152 or event[:8] != event_discriminator:
+                continue
+            invocation = next((entry for entry in reversed(logs[:index])
+                               if isinstance(entry, str) and entry.startswith("Program ") and " invoke [" in entry), None)
+            if invocation != f"Program {self.program_id} invoke [1]" or "Program log: Instruction: StopTask" not in logs[:index]:
+                continue
+            settled_event = {
+                "owner": str(Pubkey.from_bytes(event[8:40])),
+                "agent": str(Pubkey.from_bytes(event[40:72])),
+                "task_hash": event[72:104].hex(),
+                "recipient": str(Pubkey.from_bytes(event[104:136])),
+                "charged_lamports": struct.unpack("<Q", event[136:144])[0],
+            }
+            break
+        require(settled_event is not None
+                and settled_event["owner"] == self.owner
+                and settled_event["agent"] == self.agent
+                and settled_event["task_hash"] == receipt["task_hash"]
+                and settled_event["recipient"] == worker_key
+                and settled_event["recipient"] == receipt["payout_destination"]
+                and settled_event["charged_lamports"] == charged,
+                "On-chain settlement event does not prove full payment to the assigned worker")
+        return {"address": str(address), "charged_lamports": charged,
+                "payout_destination": settled_event["recipient"]}
 
     def fund_channel(self, owner_keypair, lamports):
         require(self.network == "devnet" and str(owner_keypair.pubkey()) == self.owner, "Owner Devnet key required")
@@ -869,7 +967,9 @@ class ApertureClient:
                 and type(policy["total_budget_lamports"]) is int and policy["max_cost_lamports"] <= policy["total_budget_lamports"] <= 100_000_000_000
                 and type(policy["expires_at"]) is int and policy["expires_at"] > 0
                 and type(policy["version"]) is int and policy["version"] > 0
-                and policy["capabilities"] == ["python.execute"], "Passport policy bounds are invalid")
+                and isinstance(policy["capabilities"], list) and 1 <= len(policy["capabilities"]) <= 2
+                and len(set(policy["capabilities"])) == len(policy["capabilities"])
+                and set(policy["capabilities"]) <= {"python.execute", "inference.chat"}, "Passport policy bounds are invalid")
         require(isinstance(policy["metadata_hash"], str)
                 and policy["metadata_hash"] == sha256(canonical({key: value for key, value in policy.items() if key != "metadata_hash"})),
                 "Passport metadata hash differs")
@@ -910,12 +1010,12 @@ class ApertureClient:
                     and item.get("remaining_lamports") is None, "Allowance status is invalid")
 
     def passport(self, owner_keypair, *, action="register", name="Risk analysis agent", max_cost_lamports=100_000,
-                 max_runtime_seconds=30, total_budget_lamports=1_000_000, expires_at=None):
+                 max_runtime_seconds=30, total_budget_lamports=1_000_000, expires_at=None, capabilities=None):
         require(str(owner_keypair.pubkey()) == self.owner, "Only the configured owner issues delegation")
         expires_at = expires_at or int(time.time()) + 86400
         policy = {"owner": self.owner, "agent_pubkey": self.agent, "name": name, "max_cost_lamports": max_cost_lamports,
             "max_runtime_seconds": max_runtime_seconds, "total_budget_lamports": total_budget_lamports,
-            "expires_at": expires_at, "capabilities": ["python.execute"]}
+            "expires_at": expires_at, "capabilities": ["python.execute"] if capabilities is None else list(capabilities)}
         challenge = self.request("POST", "/agents/challenge", json={"action": action, **policy}).json()
         actual = challenge["passport"]
         for key, value in {**policy, "program_id": self.program_id, "network": self.network}.items():

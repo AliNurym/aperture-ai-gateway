@@ -1,20 +1,22 @@
 # Aperture: Colosseum submission draft
 
-Prepared 2026-09-27. This is application text and recording guidance. It does not assert that videos, profiles, registration, interviews, or a live deployment are complete.
+Prepared 2026-10-22. This is draft application text and recording guidance; it does not assert that a form, video, profile, interview, or live deployment is complete.
+
+**Event status checked 2026-10-22:** the official Crypto World's Fair page lists product submissions due October 12, 2026, and Colosseum now lists the event as judging underway. Use this copy for an already-submitted entry or another side track only after checking that track's own window and requirements. [Official event page](https://colosseum.com/worldsfair) · [Colosseum hackathon status](https://colosseum.com/hackathon?year=fall2026).
 
 ## One-line description
 
-**Aperture gives autonomous agents an owner-approved compute allowance, a quote before dispatch, and an attributable task and payment receipt on Solana.**
+**An early Solana AI inference gateway and compute marketplace, routing owner-approved model requests and Python workloads through spend-bounded tasks.**
 
 ## Problem and audience
 
-A developer lets an agent run short evaluation or analysis jobs. A funded wallet proves it can pay; it does not establish whose permission it used, which workload was approved, or which allowance the task consumed. The developer needs to prevent silent budget expansion and retain an explanation of each result and charge.
+A developer wants one place to route model requests and compute jobs while keeping an agent's authority bounded. A funded wallet proves it can pay; it does not establish whose permission it used, which request or workload was approved, or which allowance the task consumed. The developer needs a visible capacity route, a quote before dispatch, and evidence for each result and charge.
 
-Initial audience: Solana agent developers running repeated bounded Python jobs. Start with workload support actually demonstrated by the worker. CPU examples must not be presented as GPU inference or an established provider marketplace.
+Initial audience: Solana AI developers routing model requests and repeatable compute or data jobs through agents. The MVP joins CPU workers and operator-configured model offers in one gateway. Updated contract source sends 100% of confirmed Devnet task charges to the assigned worker, but a deployment and live payout remain unverified. The directory is not permissionless, and upstream model vendors are paid outside Aperture. Do not present the CPU worker as GPU capacity.
 
 ## Product workflow and Solana role
 
-Target workflow: owner-issued agent policy → signed workload-bound quote with cost/runtime limits → agent acceptance → authenticated bounded execution → attributable result and settlement receipt. KYA means wallet-owner-issued compute permission; it does not mean verified legal identity or a certified model.
+Target workflow: browse worker and model capacity → owner-issued agent policy → signed request-bound quote with cost/runtime limits → authenticated bounded execution → attributable result and settlement receipt. KYA means wallet-owner-issued compute permission; it does not mean verified legal identity or a certified model.
 
 The intended live program makes owner-controlled agent status/revocation readable onchain and enforces an accepted task payment cap in a funded channel. Independent clients can inspect authority and settlement. Worker output observation remains offchain; a gateway receipt is not proof of correct computation.
 

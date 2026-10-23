@@ -4,7 +4,6 @@ Keeps the gateway and worker running for interactive use. This is trusted local
 CPU execution, not Docker isolation or a Solana payment demonstration.
 """
 import argparse
-import importlib.util
 import json
 import os
 import secrets
@@ -17,6 +16,7 @@ from pathlib import Path
 
 import requests
 from solders.keypair import Keypair
+from preview_sources import approved_sources
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -134,22 +134,8 @@ def main():
     approved.mkdir(parents=True, exist_ok=True)
     args.database.resolve().parent.mkdir(parents=True, exist_ok=True)
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-    source = subprocess.check_output([node, "--input-type=module", "-e",
-        "import {WORKLOADS} from './src/utils/workloads.js'; import {MERGE_SOURCE} from './src/utils/workflowSources.js'; console.log(JSON.stringify([...WORKLOADS.map(item=>({id:item.id,code:item.code})),{id:'workflow-report',code:MERGE_SOURCE}]));"],
-        cwd=ROOT / "frontend", text=True, encoding="utf-8", creationflags=flags)
-    for item in json.loads(source):
-        (approved / (item["id"] + ".py")).write_text(item["code"], encoding="utf-8", newline="")
-    spec = importlib.util.spec_from_file_location("batch_pipeline", ROOT / "examples" / "batch_data_workflow.py")
-    pipeline = importlib.util.module_from_spec(spec)
-    sys.path.insert(0, str(ROOT / "sdk" / "python"))
-    spec.loader.exec_module(pipeline)
-    for name, code in (("batch", pipeline.BATCH_SOURCE), ("merge", pipeline.MERGE_SOURCE)):
+    for name, code in approved_sources(ROOT, node).items():
         (approved / (name + ".py")).write_text(code, encoding="utf-8", newline="")
-    # Retained v1 journals still bind their exact reviewed source hashes.
-    # Only this versioned catalog is carried forward, never arbitrary state files.
-    legacy = json.loads((ROOT / "backend" / "workloads" / "csv_legacy_sources.json").read_text(encoding="utf-8"))
-    for name, code in legacy.items():
-        (approved / ("legacy-" + name + ".py")).write_text(code, encoding="utf-8", newline="")
     worker_secret = secrets.token_urlsafe(40)
     oracle_path = state / "oracle.json"
     if oracle_path.exists():

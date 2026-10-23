@@ -34,6 +34,7 @@ parser.add_argument("--gateway", default=None, help="Gateway URL; defaults to GA
 parser.add_argument("--token", default=None, help="Prefer APERTURE_WORKER_TOKEN in the environment")
 parser.add_argument("--allow-unsafe-local-execution", action="store_true", help="Execute trusted development workloads directly on the host")
 parser.add_argument("--trusted-source-directory", type=Path, default=None, help="Limit trusted local execution to exact UTF-8 .py files reviewed before startup")
+parser.add_argument("--inference-only", action="store_true", help="Run configured inference adapters without Python task execution")
 args, _ = parser.parse_known_args()
 API_URL = (args.gateway or os.getenv("GATEWAY_API_URL") or "http://127.0.0.1:8000").rstrip("/")
 NODE_ID = args.node_id or os.getenv("APERTURE_NODE_ID") or f"NODE-CPU-{socket.gethostname()}"
@@ -98,6 +99,8 @@ def detect_hardware():
 
 
 GPU_NAME, VRAM_TOTAL, TFLOPS = detect_hardware()
+if args.inference_only:
+    GPU_NAME = "Inference adapter (provider hardware unverified)"
 
 
 def register_heartbeat(stop_event, executor=None):
@@ -108,9 +111,11 @@ def register_heartbeat(stop_event, executor=None):
                 "vram_used": None, "gpu_temp": None, "gpu_util": None,
                 "power_watts": None, "tflops": 0.0, "status": current_status,
                 "worker_pubkey": WORKER_IDENTITY.pubkey if WORKER_IDENTITY else None,
-                "execution_mode": "trusted_local" if ALLOW_UNSAFE_LOCAL_EXECUTION else "docker",
-                "source_policy": "exact_hash_allowlist" if ALLOW_UNSAFE_LOCAL_EXECUTION and executor and executor.approved_hashes is not None else "operator_trusted" if ALLOW_UNSAFE_LOCAL_EXECUTION else "gateway_ast",
+                "execution_mode": "inference_proxy" if args.inference_only else "trusted_local" if ALLOW_UNSAFE_LOCAL_EXECUTION else "docker",
+                "source_policy": "configured_provider" if args.inference_only else "exact_hash_allowlist" if ALLOW_UNSAFE_LOCAL_EXECUTION and executor and executor.approved_hashes is not None else "operator_trusted" if ALLOW_UNSAFE_LOCAL_EXECUTION else "gateway_ast",
                 "approved_source_count": len(executor.approved_hashes) if ALLOW_UNSAFE_LOCAL_EXECUTION and executor and executor.approved_hashes is not None else None,
+                "runtimes": ["inference.chat"] if args.inference_only else ["python"],
+                "inference_offers": [provider.offer() for provider in executor.providers.values()] if args.inference_only else [],
             }, headers=worker_headers(), timeout=4, allow_redirects=False)
             if response.status_code == 200:
                 registration_ready.set()
@@ -216,7 +221,7 @@ def execute_task(task, executor, state_root=STATE_ROOT, http=requests):
                 if len(chunk) > room:
                     raise ValueError("Job log limit exceeded.")
 
-            frames = ResultFrames(append_log) if "workload" in task else None
+            frames = ResultFrames(append_log) if task.get("workload", {}).get("runtime") == "python" else None
 
             def read_output():
                 try:
@@ -375,9 +380,13 @@ def main():
     if not worker_token_is_configured(WORKER_TOKEN):
         raise SystemExit("Set APERTURE_WORKER_TOKEN in backend/.worker.env (or the worker environment) to a unique 16+ character secret; example values are rejected.")
     approved_sources = args.trusted_source_directory or os.getenv("APERTURE_TRUSTED_SOURCE_DIRECTORY")
-    executor = TrustedLocalExecutor(Path(approved_sources) if approved_sources else None) if ALLOW_UNSAFE_LOCAL_EXECUTION else DockerSandbox(
-        SANDBOX_IMAGE, STATE_ROOT, os.getenv("APERTURE_SANDBOX_HOST_ROOT"),
-    )
+    if args.inference_only:
+        from inference_executor import InferenceExecutor
+        executor = InferenceExecutor()
+    else:
+        executor = TrustedLocalExecutor(Path(approved_sources) if approved_sources else None) if ALLOW_UNSAFE_LOCAL_EXECUTION else DockerSandbox(
+            SANDBOX_IMAGE, STATE_ROOT, os.getenv("APERTURE_SANDBOX_HOST_ROOT"),
+        )
     executor.preflight()
     instance_lock = WorkerInstanceLock(STATE_ROOT)
     journal = WorkerJournal(STATE_ROOT)

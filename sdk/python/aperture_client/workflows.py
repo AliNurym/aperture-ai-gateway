@@ -4,12 +4,12 @@ import os
 import re
 import sqlite3
 import time
-from pathlib import Path
 
 from .client import (AdmissionUncertainError, Task, canonical, require, sha256,
                      validate_source, verify_receipt, verify_recovered_quote)
 from .jobs import NAME, object_reference, workload_manifest
 from .retries import retry_throttled
+from .local_paths import durable_path
 
 STEP_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 
@@ -86,7 +86,7 @@ class WorkflowRunner:
     Uncertain admissions retain their quote instead of silently creating a new job.
     """
     def __init__(self, client, journal_path, *, max_rate_lamports=25_000):
-        self.client, self.path = client, Path(journal_path)
+        self.client, self.path = client, durable_path(journal_path)
         require(type(max_rate_lamports) is int and 0 < max_rate_lamports <= 1_000_000_000,
                 "Workflow rate ceiling must be between 1 and 1,000,000,000")
         self.max_rate = max_rate_lamports

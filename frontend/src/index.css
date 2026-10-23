@@ -1,4 +1,12 @@
 /* Shared foundation and wallet surfaces for the Aperture workspace. */
+@font-face {
+  font-family: Roboto;
+  src: url('/Roboto-Variable.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;

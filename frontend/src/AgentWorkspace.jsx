@@ -119,9 +119,14 @@ export default function AgentWorkspace({ context, owner, signMessage, plan, disa
       <datalist id="workflow-agent-options">{passports.map(item => <option value={item.agent_pubkey} key={item.agent_pubkey}>{item.name}</option>)}</datalist>
       <button className="console-button secondary" onClick={loadAgents} disabled={!canOperate}><Icon name="shield" size={16} />Load my agents</button>
       <button className="console-text-button" type="button" onClick={() => {
-        setAgent('7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU');
-        setNotice('Demo agent key loaded (autonomous financial worker). Assign inputs or start host observation.');
-      }}><Icon name="spark" size={15} />Demo agent</button>
+        const registered = passports[0];
+        if (!registered) {
+          setNotice('No registered agent is loaded. Load your agents or issue a passport in Agents first.');
+          return;
+        }
+        setAgent(registered.agent_pubkey);
+        setNotice('Selected ' + registered.name + '. Assign inputs only after its host is ready.');
+      }}><Icon name="spark" size={15} />Select registered agent</button>
     </div>
     <div className="workflow-hero-actions">
       <button className={'console-button ' + (currentAssigned ? 'secondary' : 'primary')} onClick={handoff} disabled={!canOperate || !agent || agent === owner || !plan || Boolean(currentAssigned)}><Icon name="upload" size={16} />{currentAssigned ? 'Files assigned' : busy ? 'Authorizing…' : 'Assign selected files'}</button>

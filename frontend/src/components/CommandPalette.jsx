@@ -17,10 +17,20 @@ export default function CommandPalette({
 
   const COMMANDS = [
     {
+      id: 'nav-provider', category: 'Navigation', title: 'Provide Compute',
+      subtitle: 'Worker activity, drain/resume admissions and executor earnings',
+      icon: 'chip', action: () => { onNavigate('provider'); onClose(); },
+    },
+    {
+      id: 'nav-inference', category: 'Navigation', title: 'Open Model Inference',
+      subtitle: 'Configured providers, signed prompts, spending limits and receipts',
+      icon: 'spark', action: () => { onNavigate('inference'); onClose(); },
+    },
+    {
       id: 'nav-overview',
       category: 'Navigation',
-      title: 'Go to Workspace Overview',
-      subtitle: 'Worker status, illustrative workflow preview, bounded data workflow',
+      title: 'Open Aperture Network Overview',
+      subtitle: 'Launch model, CPU, and data workloads through one task flow',
       icon: 'grid',
       shortcut: 'Alt+1',
       action: () => { onNavigate('overview'); onClose(); },
@@ -37,8 +47,8 @@ export default function CommandPalette({
     {
       id: 'nav-studio',
       category: 'Navigation',
-      title: 'Open Compute Studio',
-      subtitle: 'Python editor, live streaming log terminal, tariffs',
+      title: 'Open Python Compute',
+      subtitle: 'Review Python source, task quote, limits, and worker result',
       icon: 'code',
       shortcut: 'Alt+3',
       action: () => { onNavigate('studio'); onClose(); },
@@ -64,8 +74,8 @@ export default function CommandPalette({
     {
       id: 'nav-network',
       category: 'Navigation',
-      title: 'Inspect Worker Network',
-      subtitle: 'The available capacity and node states behind your workloads',
+      title: 'Browse Compute Market',
+      subtitle: 'Live CPU workers and configured AI model offers',
       icon: 'network',
       shortcut: 'Alt+6',
       action: () => { onNavigate('network'); onClose(); },

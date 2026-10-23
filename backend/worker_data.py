@@ -15,9 +15,17 @@ def prepare_job(task, directory, *, http, api_url, headers):
     spec = task["workload"]
     encoded = json.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
     if (hashlib.sha256(encoded.encode()).hexdigest() != task.get("workload_sha256")
-            or spec.get("version") != 1 or spec.get("runtime") != "python"
+            or spec.get("version") != 1 or spec.get("runtime") not in {"python", "inference.chat"}
             or spec.get("source_sha256") != task.get("source_hash", task.get("code_sha256"))):
         raise ValueError("Job manifest does not match its admission.")
+    if spec["runtime"] == "inference.chat":
+        from inference import validate_request
+        if spec.get("inputs") != []:
+            raise ValueError("Inference jobs cannot include file inputs.")
+        validate_request(task["code"], spec["parameters"])
+        (directory / "job.json").write_text(encoded, encoding="utf-8")
+        (directory / "execution.json").write_text(json.dumps({"deadline": task["execution_deadline"]}), encoding="utf-8")
+        return
     inputs = spec.get("inputs")
     if not isinstance(inputs, list):
         raise ValueError("Invalid bounded job inputs.")

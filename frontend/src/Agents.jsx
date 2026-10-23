@@ -10,7 +10,7 @@ import './Agents.css';
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 const localDate = value => new Date(value - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-const defaults = () => ({ agent_pubkey: '', name: 'Research agent', maxCost: '0.001', maxRuntime: '30', totalBudget: '0.01', expires: localDate(Date.now() + 7 * 86400000) });
+const defaults = () => ({ agent_pubkey: '', name: 'Research agent', maxCost: '0.001', maxRuntime: '30', totalBudget: '0.01', expires: localDate(Date.now() + 7 * 86400000), capabilities: ['python.execute'] });
 const formatSol = value => (value / 1e9).toFixed(9).replace(/\.?0+$/, '');
 const bytesEqual = (left, right) => left.length === right.length && left.every((value, index) => value === right[index]);
 const decodeBase64 = value => Uint8Array.from(atob(value), character => character.charCodeAt(0));
@@ -42,7 +42,7 @@ async function verifyAgentChallenge(challenge, selectedPolicy, expectedNetwork) 
       || passport.agent_pubkey !== selectedPolicy.agent_pubkey || passport.program_id !== APERTURE_PROGRAM_ID
       || passport.network !== expectedNetwork) throw new Error('The returned passport belongs to a different owner, agent, program or network.');
   if (['name', 'max_cost_lamports', 'max_runtime_seconds', 'total_budget_lamports', 'expires_at'].some(key => passport[key] !== selectedPolicy[key])
-      || !Array.isArray(passport.capabilities) || passport.capabilities.length !== 1 || passport.capabilities[0] !== 'python.execute'
+      || canonicalJson(passport.capabilities) !== canonicalJson(selectedPolicy.capabilities)
       || !Number.isSafeInteger(passport.version) || passport.version < 1) throw new Error('The returned delegation limits differ from your selected policy.');
   const { metadata_hash: metadataHash, ...metadata } = passport;
   if (await sha256Hex(canonicalJson(metadata)) !== metadataHash) throw new Error('The passport metadata hash does not match its policy.');
@@ -134,9 +134,10 @@ export default function Agents() {
         action, owner, agent_pubkey: agent, name: source.name.trim(),
         max_cost_lamports: lamports(source.maxCost), max_runtime_seconds: Number(source.maxRuntime),
         total_budget_lamports: lamports(source.totalBudget),
-        expires_at: Math.floor(new Date(source.expires).getTime() / 1000), capabilities: ['python.execute'],
+        expires_at: Math.floor(new Date(source.expires).getTime() / 1000), capabilities: source.capabilities,
       };
       if (!policy.name || !Number.isInteger(policy.max_runtime_seconds) || policy.max_runtime_seconds < 1 || policy.max_runtime_seconds > 180) throw new Error('Name and a whole runtime from 1 to 180 seconds are required.');
+      if (!policy.capabilities.length) throw new Error('Select at least one task capability.');
       if (policy.total_budget_lamports < policy.max_cost_lamports) throw new Error('Total allowance must cover at least one maximum-cost task.');
       if (!Number.isFinite(policy.expires_at) || policy.expires_at <= Date.now() / 1000) throw new Error('Choose a future expiration.');
       const { data: health } = await axios.get(API_URL + '/health', { timeout: 10000 });
@@ -185,6 +186,7 @@ export default function Agents() {
     finally { setBusy(false); }
   };
   const fieldsFrom = agent => ({
+    capabilities: agent.capabilities,
     agent_pubkey: agent.agent_pubkey, name: agent.name,
     maxCost: String(agent.max_cost_lamports / 1e9), maxRuntime: String(agent.max_runtime_seconds),
     totalBudget: String(agent.total_budget_lamports / 1e9),
@@ -245,10 +247,11 @@ export default function Agents() {
           </div>
           <p id="agent-key-help" className="agents-field-help">Keep the private key in your SDK environment.</p>
           <label>Name<input name="name" value={form.name} onChange={updateField} disabled={busy} maxLength={80} required /></label>
-          <div className="agents-fields"><label>Max cost per task · SOL<input name="maxCost" type="number" min="0.000000001" max="1" step="0.000001" value={form.maxCost} onChange={updateField} disabled={busy} required /></label><label>Max runtime · seconds<input name="maxRuntime" type="number" min="1" max="180" step="1" value={form.maxRuntime} onChange={updateField} disabled={busy} required /></label></div>
-          <label>Total spending allowance · SOL<input name="totalBudget" type="number" min="0.000000001" max="100" step="0.001" value={form.totalBudget} onChange={updateField} disabled={busy} required /></label>
+          <div className="agents-fields"><label>Max cost per task · SOL<input name="maxCost" type="number" min="0.000000001" max="1" step="0.000000001" value={form.maxCost} onChange={updateField} disabled={busy} required /></label><label>Max runtime · seconds<input name="maxRuntime" type="number" min="1" max="180" step="1" value={form.maxRuntime} onChange={updateField} disabled={busy} required /></label></div>
+          <label>Total spending allowance · SOL<input name="totalBudget" type="number" min="0.000000001" max="100" step="0.000000001" value={form.totalBudget} onChange={updateField} disabled={busy} required /></label>
           <label>Expiration · your local time<input name="expires" type="datetime-local" value={form.expires} onChange={updateField} disabled={busy} required /></label>
-          <p className="agents-signing-note">Allows Python CPU execution. In Devnet mode, your wallet also confirms an on-chain policy transaction.</p>
+          <fieldset disabled={busy}><legend>Allowed tasks</legend>{[['python.execute', 'Python CPU compute'], ['inference.chat', 'Model inference']].map(([capability, label]) => <label key={capability}><input type="checkbox" checked={form.capabilities.includes(capability)} onChange={event => setForm(previous => ({ ...previous, capabilities: event.target.checked ? [...previous.capabilities, capability] : previous.capabilities.filter(item => item !== capability) }))} />{label}</label>)}</fieldset>
+          <p className="agents-signing-note">Only the selected capabilities are authorized. In Devnet mode, your wallet also confirms an on-chain policy transaction.</p>
           <button className="console-button primary" disabled={busy} aria-busy={busy}><Icon name={busy ? 'refresh' : 'shield'} spinning={busy} size={17} />{busy ? 'Authorizing…' : editing ? 'Sign policy update' : 'Sign & issue passport'}</button>
           {editing && <button className="console-text-button" type="button" disabled={busy} onClick={() => { setEditing(false); setForm(defaults()); }}>Cancel update</button>}
         </form>
@@ -262,6 +265,7 @@ export default function Agents() {
             <dl>
               <div><dt>Cost per task</dt><dd>{agent.max_cost_lamports / 1e9} SOL</dd></div>
               <div><dt>Runtime</dt><dd>{agent.max_runtime_seconds}s</dd></div>
+              <div><dt>Capabilities</dt><dd>{agent.capabilities.join(', ')}</dd></div>
               <div><dt>Total allowance</dt><dd>{formatSol(agent.total_budget_lamports)} SOL</dd></div>
               <div><dt>Spent</dt><dd>{agent.allowance_status === 'available' ? `${formatSol(agent.spent_lamports)} SOL` : agent.allowance_status === 'requires_signature' ? 'Sign to load' : 'Unavailable'}</dd></div>
               <div><dt>Reserved by active tasks</dt><dd>{agent.allowance_status === 'available' ? `${formatSol(agent.reserved_lamports)} SOL` : agent.allowance_status === 'requires_signature' ? 'Sign to load' : 'Unavailable'}</dd></div>

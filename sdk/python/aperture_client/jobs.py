@@ -7,6 +7,12 @@ NAME = re.compile(r"^(?!(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$))[A-Za-z0-
 OBJECT = re.compile(r"^obj-[0-9a-f]{32}$")
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
 MAX_INPUT_BYTES = 64 * 1024 * 1024
+INFERENCE_PREFIX = "# Aperture inference request v1\n# sha256:"
+
+
+def inference_source(parameters):
+    encoded = json.dumps(parameters, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    return INFERENCE_PREFIX + hashlib.sha256(encoded.encode()).hexdigest() + "\npass\n"
 
 
 def object_reference(item):
@@ -30,5 +36,10 @@ def workload_manifest(code, inputs=(), parameters=None):
     encoded = json.dumps(parameters, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     if len(encoded.encode("utf-8")) > 32_000:
         raise ValueError("Job parameters exceed 32,000 UTF-8 bytes.")
-    return {"version": 1, "runtime": "python", "source_sha256": hashlib.sha256(code.encode()).hexdigest(),
+    runtime = "python"
+    if code.startswith(INFERENCE_PREFIX):
+        if inputs or code != inference_source(parameters) or set(parameters) != {"inference", "offer"}:
+            raise ValueError("Inference parameters differ from their bound source.")
+        runtime = "inference.chat"
+    return {"version": 1, "runtime": runtime, "source_sha256": hashlib.sha256(code.encode()).hexdigest(),
             "inputs": inputs, "parameters": json.loads(encoded)}

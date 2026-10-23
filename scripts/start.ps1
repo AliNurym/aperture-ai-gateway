@@ -83,7 +83,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Backend dependency installation failed.' }
     }
     if ($Service -eq 'Preview') {
-        & $venvPython -X utf8 (Join-Path $projectRoot 'scripts\preview_workflows.py') --frontend --temporary-key --supervise
+        & $venvPython -X utf8 (Join-Path $projectRoot 'scripts\inference_preview.py')
     } elseif ($Service -eq 'Backend') {
         & $venvPython -m uvicorn main:app --host 127.0.0.1 --port 8000
     } else {

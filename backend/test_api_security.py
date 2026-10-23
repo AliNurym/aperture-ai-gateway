@@ -273,7 +273,13 @@ class GatewayApiSecurityTests(unittest.TestCase):
             'started_at': started_at,
             'deadline': started_at + job['effective_runtime_seconds'],
         }
+        self.chain.get_channel_state.return_value = {
+            'balance_lamports': 1_000_000_000, 'effective_balance_lamports': 1_000_000_000,
+            'burn_rate_lamports': 0, 'task_hash': job['task_hash'],
+            'executor_pubkey': str(self.worker.pubkey()), 'worker_payout_bound': True,
+        }
         task = self.claim()
+        self.assertEqual(self.chain.prepare_start_task.await_args.args[-1], str(self.worker.pubkey()))
         self.chain.stop_task.return_value = None
         response = self.client.post('/submit_result', headers=self.headers, json=self.result(task))
         self.assertEqual(response.status_code, 202)
@@ -285,6 +291,9 @@ class GatewayApiSecurityTests(unittest.TestCase):
         self.chain.stop_task.return_value = {'signature': 'retry-confirmed', 'charged_lamports': 1000, 'evidence': 'confirmed_task_receipt'}
         asyncio.run(self.core.recover_once())
         self.assertEqual(self.store.get('jobs', task['task_id'])['state'], 'completed')
+        last_settlement = self.chain.stop_task.await_args
+        self.assertEqual(last_settlement.kwargs['worker_pubkey'], str(self.worker.pubkey()))
+        self.assertTrue(last_settlement.kwargs['worker_payout_bound'])
 
     def test_canonical_receipt_is_signed_and_worker_attestation_retained(self):
         admitted = self.admit()

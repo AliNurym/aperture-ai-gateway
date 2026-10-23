@@ -174,7 +174,7 @@ class SolanaClient:
         }
 
     async def initialize_protocol_config(self, treasury_address: str) -> str | None:
-        """Initializes the immutable oracle/treasury config once; never changes an existing payout address."""
+        """Initializes the immutable protocol config once; never changes its treasury identity key."""
         try:
             expected_authority = self._configured_protocol_authority()
             if self.ai_signer.pubkey() != expected_authority:
@@ -225,6 +225,9 @@ class SolanaClient:
         stored_user = Pubkey.from_bytes(data[8:40])
         if stored_user != user_pubkey:
             return None
+        return self._decode_channel_state_data(data, channel_pda)
+
+    def _decode_channel_state_data(self, data, channel_pda=None):
         balance = struct.unpack('<Q', data[72:80])[0]
         rate = struct.unpack('<Q', data[80:88])[0]
         last_update = struct.unpack('<q', data[88:96])[0]
@@ -232,6 +235,11 @@ class SolanaClient:
         elapsed = max(0, min(int(time.time()), deadline) - last_update) if rate else 0
         max_cost = struct.unpack('<Q', data[161:169])[0]
         accrued = min(balance, max_cost, elapsed * rate)
+        active = rate > 0
+        last_task_hash = data[185:217]
+        stored_last_charge = struct.unpack('<Q', data[217:225])[0]
+        worker_payout_bound = active and stored_last_charge == 0xFFFFFFFFFFFFFFFF
+        channel_agent = Pubkey.from_bytes(data[97:129])
         return {
             "channel_pda": channel_pda,
             "oracle": Pubkey.from_bytes(data[40:72]),
@@ -239,13 +247,16 @@ class SolanaClient:
             "effective_balance_lamports": balance - accrued,
             "burn_rate_lamports": rate,
             "last_update_time": last_update,
-            "agent_pubkey": str(Pubkey.from_bytes(data[97:129])),
+            "agent_pubkey": str(channel_agent) if active else None,
+            "executor_pubkey": str(Pubkey.from_bytes(last_task_hash)) if worker_payout_bound else None,
+            "last_worker_pubkey": str(channel_agent) if not active and channel_agent != Pubkey.default() else None,
             "task_hash": data[129:161].hex(),
             "task_max_cost_lamports": max_cost,
             "task_deadline": deadline,
             "task_started_at": struct.unpack('<q', data[177:185])[0],
-            "last_task_hash": data[185:217].hex(),
-            "last_charged_lamports": struct.unpack('<Q', data[217:225])[0],
+            "last_task_hash": None if active else last_task_hash.hex(),
+            "last_charged_lamports": None if active else stored_last_charge,
+            "worker_payout_bound": worker_payout_bound,
         }
 
     def get_agent_pda(self, agent):
@@ -321,33 +332,59 @@ class SolanaClient:
         return {'program_id': str(self.program_id), 'kind': action, 'data': list(data), 'data_base64': base64.b64encode(data).decode('ascii'), 'accounts': [
             {'pubkey': str(account.pubkey), 'is_signer': account.is_signer, 'is_writable': account.is_writable} for account in accounts]}
 
-    async def _build_task_instruction(self, name, owner, task_hash, agent, extra=b''):
+    def _task_instruction_accounts(self, name, owner, agent, channel, receipt, config, worker_pubkey=None):
+        passport = self.get_agent_pda(agent) if agent != owner else self.program_id
+        if name == 'start_task':
+            accounts = [
+                AccountMeta(config['config_pda'], False, False), AccountMeta(channel, False, True),
+                AccountMeta(self.ai_signer.pubkey(), True, True),
+                AccountMeta(passport, False, agent != owner), AccountMeta(receipt, False, True),
+                AccountMeta(SYSTEM_PROGRAM_ID, False, False),
+            ]
+        elif name == 'stop_task':
+            if not worker_pubkey:
+                raise ValueError('A registered worker key is required for task settlement.')
+            worker = Pubkey.from_string(worker_pubkey)
+            accounts = [
+                AccountMeta(config['config_pda'], False, False), AccountMeta(channel, False, True),
+                AccountMeta(self.ai_signer.pubkey(), True, False), AccountMeta(config['treasury'], False, True),
+                AccountMeta(worker, False, True), AccountMeta(passport, False, agent != owner),
+                AccountMeta(receipt, False, True),
+            ]
+        else:
+            raise ValueError('Unsupported task instruction.')
+        return accounts
+
+    async def _build_task_instruction(self, name, owner, task_hash, agent, extra=b'', worker_pubkey=None):
         config = await self.get_protocol_config()
         if not config:
             raise RuntimeError('Compatible v2 protocol config is required.')
         channel, _ = self.get_channel_pda(Pubkey.from_string(owner))
-        passport = self.get_agent_pda(agent) if agent != owner else self.program_id
         receipt = self.get_task_receipt_pda(task_hash)
-        accounts = [
-            AccountMeta(config['config_pda'], False, False), AccountMeta(channel, False, True),
-            AccountMeta(self.ai_signer.pubkey(), True, name == 'start_task'), AccountMeta(config['treasury'], False, True),
-            AccountMeta(passport, False, agent != owner), AccountMeta(receipt, False, True)]
-        if name == 'start_task':
-            accounts.append(AccountMeta(SYSTEM_PROGRAM_ID, False, False))
+        accounts = self._task_instruction_accounts(name, owner, agent, channel, receipt, config, worker_pubkey)
         return Instruction(self.program_id, get_anchor_discriminator('global', name) + bytes.fromhex(task_hash) + extra, accounts)
 
-    async def _task_instruction(self, name, owner, task_hash, agent, extra=b''):
-        return await self._send_and_confirm(await self._build_task_instruction(name, owner, task_hash, agent, extra))
+    async def _task_instruction(self, name, owner, task_hash, agent, extra=b'', worker_pubkey=None):
+        return await self._send_and_confirm(await self._build_task_instruction(
+            name, owner, task_hash, agent, extra, worker_pubkey=worker_pubkey))
 
-    async def prepare_start_task(self, owner, task_hash, source_hash, agent, rate, max_cost, max_runtime):
+    async def prepare_start_task(self, owner, task_hash, source_hash, agent, rate, max_cost, max_runtime, worker_pubkey):
         await self.verify_devnet_cluster()
-        extra = bytes.fromhex(source_hash) + bytes(Pubkey.from_string(agent)) + struct.pack('<QQI', rate, max_cost, max_runtime)
+        worker = Pubkey.from_string(worker_pubkey)
+        if worker in (Pubkey.default(), self.program_id):
+            raise ValueError('The task worker key is invalid.')
+        extra = self._start_task_extra(source_hash, agent, worker, rate, max_cost, max_runtime)
         instruction = await self._build_task_instruction('start_task', owner, task_hash, agent, extra)
         latest = await self.client.get_latest_blockhash()
         message = Message.new_with_blockhash([instruction], self.ai_signer.pubkey(), latest.value.blockhash)
         transaction = VersionedTransaction(message, [self.ai_signer])
         return {'transaction': base64.b64encode(bytes(transaction)).decode('ascii'),
                 'signature': str(transaction.signatures[0]), 'last_valid_block_height': latest.value.last_valid_block_height}
+
+    @staticmethod
+    def _start_task_extra(source_hash, agent, worker, rate, max_cost, max_runtime):
+        return (bytes.fromhex(source_hash) + bytes(Pubkey.from_string(agent)) + bytes(worker)
+                + struct.pack('<QQI', rate, max_cost, max_runtime))
 
     async def send_prepared_start(self, prepared):
         await self.verify_devnet_cluster()
@@ -364,17 +401,21 @@ class SolanaClient:
             raise RuntimeError('Task start transaction was not confirmed successfully.')
         return prepared['signature']
 
-    async def start_task(self, owner, task_hash, source_hash, agent, rate, max_cost, max_runtime):
-        prepared = await self.prepare_start_task(owner, task_hash, source_hash, agent, rate, max_cost, max_runtime)
+    async def start_task(self, owner, task_hash, source_hash, agent, rate, max_cost, max_runtime, worker_pubkey):
+        prepared = await self.prepare_start_task(owner, task_hash, source_hash, agent, rate, max_cost, max_runtime, worker_pubkey)
         return await self.send_prepared_start(prepared)
 
-    async def stop_task(self, owner, task_hash, agent, start_intent=None):
+    async def stop_task(self, owner, task_hash, agent, start_intent=None, worker_pubkey=None,
+                        worker_payout_bound=False):
         receipt = await self.get_task_receipt(task_hash)
         if receipt:
             if receipt['owner'] != owner or receipt['agent_pubkey'] != agent:
                 raise ValueError('Task receipt ownership does not match this execution.')
             if receipt['settled']:
-                return await self._receipt_settlement(receipt)
+                settlement = await self._receipt_settlement(receipt)
+                if worker_payout_bound and worker_pubkey:
+                    settlement.update(worker_pubkey=worker_pubkey, payout_destination=worker_pubkey)
+                return settlement
         if not receipt:
             if not start_intent:
                 return None
@@ -396,11 +437,22 @@ class SolanaClient:
         # Never stop another task/channel session after a delayed retry.
         if state['task_hash'] != task_hash:
             return None
-        signature = await self._task_instruction('stop_task', owner, task_hash, agent)
+        if state.get('worker_payout_bound'):
+            pinned_worker = state.get('executor_pubkey')
+            if not pinned_worker or (worker_pubkey and pinned_worker != worker_pubkey):
+                raise ValueError('Active task is pinned to a different worker key.')
+            worker_pubkey = pinned_worker
+        elif not worker_pubkey:
+            worker_pubkey = str((await self.get_protocol_config())['treasury'])
+        signature = await self._task_instruction('stop_task', owner, task_hash, agent,
+                                                 worker_pubkey=worker_pubkey)
         final = await self.get_task_receipt(task_hash)
         if not final or not final['settled'] or final['owner'] != owner:
             return None
-        return {'signature': signature, 'charged_lamports': final['charged_lamports'], 'evidence': 'confirmed_task_receipt', 'receipt_pda': final['receipt_pda']}
+        return {'signature': signature, 'charged_lamports': final['charged_lamports'],
+                'evidence': 'confirmed_task_receipt', 'receipt_pda': final['receipt_pda'],
+                'payout_destination': worker_pubkey,
+                'worker_pubkey': worker_pubkey if worker_payout_bound or state.get('worker_payout_bound') else None}
 
     async def get_channel_balance(self, user_pubkey_str: str) -> int:
         """

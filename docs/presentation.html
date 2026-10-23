@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#fef7ff">
-  <meta name="description" content="Aperture: контролируемые вычисления для AI-агентов. Семь слайдов о продукте, проверенном CSV-сценарии и протоколе Solana.">
-  <title>Aperture | Вычисления для AI-агентов</title>
+  <meta name="description" content="Aperture: единый gateway для AI-инференса, CPU compute и workflows с разрешениями владельца и опциональным расчётом Solana Devnet.">
+  <title>Aperture | AI inference и compute для агентов</title>
   <style>
     @font-face { font-family:Roboto; src:url('Roboto-Variable.ttf') format('truetype'); font-style:normal; font-weight:100 900; font-display:swap; }
     :root { color-scheme:light; --md-primary:#6750a4; --md-on-primary:#fff; --md-primary-container:#eaddff; --md-on-primary-container:#21005d; --md-surface:#fef7ff; --md-surface-container-low:#f7f2fa; --md-surface-container:#f3edf7; --md-surface-container-high:#ece6f0; --md-on-surface:#1d1b20; --md-on-surface-variant:#49454f; --md-outline:#79747e; --md-outline-variant:#cac4d0; --md-tertiary:#7d5260; --md-tertiary-container:#ffd8e4; --purple:var(--md-primary); --deep:var(--md-on-primary-container); --lavender:var(--md-primary-container); --ink:var(--md-on-surface); --muted:var(--md-on-surface-variant); --line:var(--md-outline-variant); --mint:#386a20; --paper:var(--md-surface); --stage:var(--md-surface-container); font-family:Roboto,"Segoe UI",Arial,sans-serif; }
@@ -269,39 +269,39 @@
 </head>
 <body>
   <header class="toolbar">
-    <div><a class="wordmark" href="#slide-1" aria-label="Aperture, первый слайд">APERTURE</a><span class="toolbar-sub" id="chapter-title">Вычисления для AI-агентов</span></div>
-    <div class="toolbar-right"><span class="mode">Локальный CPU MVP</span><button class="quiet-button" id="btn-timer" aria-label="Запустить таймер питча" title="Клик — пуск/пауза [T], двойной клик — сброс [R]" aria-pressed="false"><span id="timer" class="timer">0:00</span></button><button class="quiet-button" id="btn-theme" aria-label="Переключить тему оформления" title="Переключить тему [D]">Тема</button><button class="quiet-button" id="btn-help" aria-label="Справка по горячим клавишам" title="Горячие клавиши [?]">Справка [?]</button><button class="quiet-button" id="btn-print" title="Печать / PDF [P]">Печать / PDF</button></div>
+    <div><a class="wordmark" href="#slide-1" aria-label="Aperture, первый слайд">APERTURE</a><span class="toolbar-sub" id="chapter-title">AI inference и compute для агентов</span></div>
+    <div class="toolbar-right"><span class="mode">Единый gateway MVP</span><button class="quiet-button" id="btn-timer" aria-label="Запустить таймер питча" title="Клик — пуск/пауза [T], двойной клик — сброс [R]" aria-pressed="false"><span id="timer" class="timer">0:00</span></button><button class="quiet-button" id="btn-theme" aria-label="Переключить тему оформления" title="Переключить тему [D]">Тема</button><button class="quiet-button" id="btn-help" aria-label="Справка по горячим клавишам" title="Горячие клавиши [?]">Справка [?]</button><button class="quiet-button" id="btn-print" title="Печать / PDF [P]">Печать / PDF</button></div>
   </header>
   <main class="viewport" aria-label="Презентация Aperture">
     <div class="canvas" id="canvas">
       <section class="slide cover active" id="slide-1" aria-labelledby="title-1" data-timing="0:00–0:15">
-        <header class="slide-header cover-brand"><img src="aperture-mark-v3.png" alt="" width="44" height="44"><p class="eyebrow">APERTURE</p><span class="cover-category">CPU MVP / Solana protocol</span></header>
+        <header class="slide-header cover-brand"><img src="aperture-mark-v3.png" alt="" width="44" height="44"><p class="eyebrow">APERTURE</p><span class="cover-category">AI compute network / Solana protocol</span></header>
         <div class="body cover-layout">
-          <div class="cover-copy"><h1 id="title-1">Безопасный compute<br> <span class="accent">для AI-агентов</span></h1><p>Разрешение владельца, лимит расходов Solana и проверенные файлы результата.</p><div class="cover-capabilities"><span>CPU Sandbox (512 MiB)</span><span>Лимит бюджета</span><span>Восстановление при сбое</span><span>19 MCP-инструментов</span></div></div>
+          <div class="cover-copy"><h1 id="title-1">AI-инференс<br> <span class="accent">и compute marketplace</span></h1><p>Модельные маршруты и compute workers с лимитами владельца и опциональным Solana Devnet settlement.</p><div class="cover-capabilities"><span>Model inference</span><span>Compute workers</span><span>Лимиты задач</span><span>Восстановление workflow</span></div></div>
           <div class="cover-route" aria-label="Участники рабочего процесса">
             <div class="route-title">От задания к файлам</div>
             <div class="route-step"><span class="route-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="4"/><path d="m11 12 8 8m-3-3 3-3m-6 0 3-3"/></svg></span><div><h3>Владелец</h3><p>Разрешение и бюджет</p></div></div>
             <div class="route-step"><span class="route-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M7 9h10M7 13h7"/></svg></span><div><h3>AI-агент</h3><p>План задания</p></div></div>
-            <div class="route-step"><span class="route-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4"/><rect x="10" y="10" width="4" height="4"/></svg></span><div><h3>Aperture</h3><p>Выполнение CPU-задач</p></div></div>
+            <div class="route-step"><span class="route-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4"/><rect x="10" y="10" width="4" height="4"/></svg></span><div><h3>Aperture</h3><p>Модели, workers и limits</p></div></div>
             <div class="route-step"><span class="route-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M8 13h8M8 17h6"/></svg></span><div><h3>Результат</h3><p>JSON и CSV с проверкой хэшей</p></div></div>
           </div>
         </div>
-        <footer class="slide-footer"><span>CPU MVP с платёжным протоколом Solana</span><span class="folio">01 / 07</span></footer>
+        <footer class="slide-footer"><span>Inference + CPU MVP · optional Solana Devnet settlement</span><span class="folio">01 / 07</span></footer>
       </section>
 
       <section class="slide" id="slide-2" aria-labelledby="title-2" data-timing="0:15–0:30" hidden>
         <header class="slide-header"><p class="eyebrow">Задача владельца</p><h2 id="title-2">Делегирование вместо прямого скрипта</h2><p class="subtitle">Скрипт в руках агента рискует бюджетом и сервером. Aperture связывает лимиты, журнал и файлы.</p></header>
         <div class="body split">
           <div class="request"><div><div class="small-label">КЛЮЧЕВОЙ СЦЕНАРИЙ</div><p class="quote">«Собери итоговый отчёт по моим CSV: уложись в лимит бюджета и заверши цепочку при сбоях»</p></div><div class="file-line">Вход: внутренние данные<br>Выход: сводный JSON и CSV</div></div>
-          <div class="requirements"><div class="requirement"><span class="num">01</span><div><h3>Данные вне контекста LLM</h3><p>Файлы обрабатываются в изолированной среде, а не летят в промпт.</p></div></div><div class="requirement"><span class="num">02</span><div><h3>Потолок бюджета Solana</h3><p>Hard cap расходов: агент не спишет больше разрешённого лимита.</p></div></div><div class="requirement"><span class="num">03</span><div><h3>Восстановление без доплат</h3><p>Журнал шлюза продолжает шаги после сбоя без повторной оплаты.</p></div></div><div class="requirement"><span class="num">04</span><div><h3>Проверяемый результат</h3><p>Файлы связаны с кодом и подписанной квитанцией.</p></div></div></div>
+          <div class="requirements"><div class="requirement"><span class="num">01</span><div><h3>Данные вне контекста LLM</h3><p>Worker получает выбранные входы; содержимое не копируется в prompt автоматически.</p></div></div><div class="requirement"><span class="num">02</span><div><h3>Предел расходов</h3><p>Gateway проверяет подписанный лимит до dispatch; on-chain расчёт требует настроенного Devnet-канала.</p></div></div><div class="requirement"><span class="num">03</span><div><h3>Восстановление workflow</h3><p>Журнал продолжает принятые шаги после сбоя без повторной отправки.</p></div></div><div class="requirement"><span class="num">04</span><div><h3>Проверяемый результат</h3><p>Подписи и хэши связывают результат с конкретной задачей.</p></div></div></div>
         </div>
         <footer class="slide-footer"><span>Первый сценарий продукта: CSV-аналитика через отдельного агента</span><span class="folio">02 / 07</span></footer>
       </section>
 
       <section class="slide" id="slide-3" aria-labelledby="title-3" data-timing="0:30–0:50" hidden>
         <header class="slide-header"><p class="eyebrow">Путь задания</p><h2 id="title-3">Одна цепочка под контролем владельца</h2><p class="subtitle">Код, входные файлы и лимиты связаны с конкретным разрешением.</p></header>
-        <div class="body"><ol class="flow"><li><div class="flow-number">01</div><h3>Передать данные</h3><p>Владелец загружает CSV и назначает ссылки выбранному агенту.</p></li><li><div class="flow-number">02</div><h3>Одобрить план</h3><p>Владелец проверяет шаги и общий потолок бюджета цепочки.</p></li><li><div class="flow-number">03</div><h3>Выполнить шаги</h3><p>Шлюз проверяет разрешения. Worker считает, журнал сохраняет прогресс.</p></li><li><div class="flow-number">04</div><h3>Получить отчёт</h3><p>Клиент проверяет подписи и хэши скачанных файлов.</p></li></ol><div class="budget-band"><div><strong>500 000</strong><span>lamports на всю цепочку</span></div><div><strong>100 000</strong><span>lamports на один шаг</span></div><div class="budget-description">Потолки из локального примера.<br>Фактический платёж в OFF_CHAIN: 0.</div></div></div>
-        <footer class="slide-footer"><span>Одобрение бюджета цепочки выполняется один раз. Другие авторизации выполняются отдельно.</span><span class="folio">03 / 07</span></footer>
+        <div class="body"><ol class="flow"><li><div class="flow-number">01</div><h3>Выбрать маршрут</h3><p>Model offer, Python worker или data workflow.</p></li><li><div class="flow-number">02</div><h3>Проверить задачу</h3><p>Владелец утверждает источник или prompt и лимит расходов.</p></li><li><div class="flow-number">03</div><h3>Выполнить шаги</h3><p>Gateway проверяет разрешение; worker выполняет, журнал сохраняет прогресс.</p></li><li><div class="flow-number">04</div><h3>Проверить результат</h3><p>Клиент сверяет подписи, settlement и хэши файлов.</p></li></ol><div class="budget-band"><div><strong>500 000</strong><span>lamports · примерный cap workflow</span></div><div><strong>100 000</strong><span>lamports · примерный cap шага</span></div><div class="budget-description">Примеры из локального сценария.<br>Фактический платёж в OFF_CHAIN: 0.</div></div></div>
+        <footer class="slide-footer"><span>В browser flow каждый шаг подписывается отдельно; SDK/MCP может передать известный план в рамках общей политики.</span><span class="folio">03 / 07</span></footer>
       </section>
 
       <section class="slide proof-slide" id="slide-4" aria-labelledby="title-4" data-timing="0:50–1:15" hidden>
@@ -317,8 +317,8 @@
       </section>
 
       <section class="slide" id="slide-6" aria-labelledby="title-6" data-timing="1:35–1:50" hidden>
-        <header class="slide-header"><p class="eyebrow">Интеграция</p><h2 id="title-6">19 инструментов для вашего агента</h2><p class="subtitle">Модель остаётся в выбранном AI-хосте. Aperture предоставляет вычисления.</p></header>
-        <div class="body split integration"><div class="integration-copy"><h3>Вычисления и файлы</h3><p>Загрузка входов, котировка и получение проверенных файлов.</p><h3>Работа после перезапуска</h3><p>История задач, подключение к принятым заданиям и восстановление цепочек.</p><h3>Выбранный AI-хост</h3><p>MCP предоставляет инструменты. Модель и ключ агента остаются в вашей среде.</p><div class="channel-list"><span>Console</span><span>Python SDK</span><span>MCP</span></div></div><div class="code-block"><div class="code-label">aperture_client / синхронный Python SDK</div><pre><code><span class="comment"># Настроены client, source и csv_input</span>
+        <header class="slide-header"><p class="eyebrow">Интеграция</p><h2 id="title-6">MCP и Python SDK для агента</h2><p class="subtitle">Один task gateway для моделей, compute и файлов результата.</p></header>
+        <div class="body split integration"><div class="integration-copy"><h3>Модели и вычисления</h3><p>Настроенные оператором model offers и CPU workers проходят общие разрешения задач.</p><h3>Работа после перезапуска</h3><p>История задач, подключение к принятым заданиям и восстановление цепочек.</p><h3>Выбранный AI-хост</h3><p>MCP предоставляет инструменты. Модель и ключ агента остаются в вашей среде.</p><div class="channel-list"><span>Console</span><span>Python SDK</span><span>MCP</span></div></div><div class="code-block"><div class="code-label">aperture_client / синхронный Python SDK</div><pre><code><span class="comment"># Настроены client, source и csv_input</span>
 quote = client.<span class="code-accent">quote_job</span>(
     source, inputs=[csv_input],
     max_cost_lamports=100_000,
@@ -332,8 +332,8 @@ report = client.<span class="code-accent">download_artifact</span>(
       </section>
 
       <section class="slide finale" id="slide-7" aria-labelledby="title-7" data-timing="1:50–2:00" hidden>
-        <header class="slide-header"><p class="eyebrow">Статус проекта</p><h2 id="title-7">CPU MVP и следующие этапы</h2></header>
-        <div class="body"><div class="roadmap"><div class="roadmap-phase"><div class="phase-label">РЕАЛИЗОВАНО</div><h3>CPU-пайплайн</h3><p>Console, gateway и worker.</p><p>SDK и 19 MCP-инструментов.</p><p>CSV-цепочки и восстановление.</p></div><div class="roadmap-phase"><div class="phase-label">СЛЕДУЮЩИЙ ЭТАП</div><h3>Пилоты и проверка</h3><p>Пилоты на реальных экспортах.</p><p>Проверка Docker и Devnet.</p><p>Контрактный аудит до Mainnet.</p></div><div class="roadmap-phase"><div class="phase-label">НАПРАВЛЕНИЕ РАЗВИТИЯ</div><h3>Новые исполнители</h3><p>Независимые операторы.</p><p>GPU-задачи и инференс.</p><p>Mainnet после аудита.</p></div></div><div class="invitation"><div><h3>Первый пилот: ваш CSV-отчёт через агента</h3><p>Локальный запуск: <code>start_preview.bat</code></p></div><a href="https://github.com/AliNurym/aperture-ai-gateway" target="_blank" rel="noopener noreferrer">Открыть репозиторий</a></div></div>
+        <header class="slide-header"><p class="eyebrow">Статус проекта</p><h2 id="title-7">MVP: модели и compute</h2></header>
+        <div class="body"><div class="roadmap"><div class="roadmap-phase"><div class="phase-label">РЕАЛИЗОВАНО</div><h3>Единый gateway</h3><p>Model offers и CPU workers.</p><p>SDK/MCP и signed task receipts.</p><p>CSV workflows и recovery.</p></div><div class="roadmap-phase"><div class="phase-label">СЛЕДУЮЩИЙ ЭТАП</div><h3>Пилоты и проверка</h3><p>Проверить повторное использование.</p><p>Онбординг независимых провайдеров.</p><p>Аудит до Mainnet.</p></div><div class="roadmap-phase"><div class="phase-label">ДАЛЬШЕ ПОСЛЕ ПРОВЕРКИ</div><h3>Расширение сети</h3><p>Открытое обнаружение capacity.</p><p>Выплаты операторам.</p><p>GPU и Mainnet после аудита.</p></div></div><div class="invitation"><div><h3>Пилот: model request + CSV workflow</h3><p>Локальный запуск: <code>start_preview.bat</code></p></div><a href="https://github.com/AliNurym/aperture-ai-gateway" target="_blank" rel="noopener noreferrer">Открыть репозиторий</a></div></div>
         <footer class="slide-footer"><span>В preview выполняется доверенный локальный код. Результаты и логи нужно выбирать с учётом приватности данных.</span><span class="folio">07 / 07</span></footer>
       </section>
     </div>
@@ -362,16 +362,16 @@ report = client.<span class="code-accent">download_artifact</span>(
   <script id="speaker-data" type="application/json">
     [
       {
-            "speech": "Aperture помогает AI-агентам выполнять CPU-задачи в пределах строгого разрешения владельца. Зачем это нужно вместо обычного скрипта? Обычному скрипту нельзя доверить кредитную карту и сервер: агент может упасть на середине или уйти в бесконечный платный цикл. Aperture держит данные вне контекста LLM, фиксирует потолок расходов в Solana и возобновляет работу после сбоев без повторных затрат. Сегодня это CPU MVP с Python SDK, девятнадцатью MCP-инструментами и платёжным протоколом Solana.",
-            "source": "README.md; sdk/python/aperture_client/mcp_server.py. Возврат данных в LLM зависит от выбранных результатов и логов. Дизайн: Google Material 3; цветовые роли primary / primary-container / surface-container / on-surface; локальный Roboto из google/fonts (Roboto-OFL.txt). Типографика увеличена для презентации. Схема показывает участников CSV-сценария."
+            "speech": "AI-агенты всё чаще выбирают модели и запускают вычисления. Aperture объединяет model inference, Python compute и data workflows в одном gateway. Владелец заранее задаёт разрешение и предел расходов, а агент получает подписанные сведения о результате. Сегодняшний MVP соединяет CPU workers и model offers, настроенные оператором.",
+            "source": "README.md; backend/inference.py; frontend/src/ComputeMarket.jsx. Model offers настраивает оператор; CPU workers доступны через gateway. Возврат данных в LLM зависит от выбранных результатов и логов. Дизайн и схема сохранены из исходной версии."
       },
       {
-            "speech": "Наш ключевой сценарий: владелец поручает агенту аналитику по CSV. Ему важно ограничить доступ и расходы, продолжить работу после сбоя и получить файлы, целостность которых можно проверить. Эти четыре требования Aperture объединяет в одном контролируемом процессе: данные изолированы, бюджет ограничен, а сбой не приводит к потере денег или повторным шагам.",
+            "speech": "Наш ключевой сценарий: владелец поручает агенту аналитику по CSV. Ему важно ограничить доступ и расходы, продолжить работу после сбоя и проверить целостность файлов. Aperture связывает эти шаги в одном процессе: выбранные CSV не добавляются в prompt автоматически, расходы ограничены подписанными условиями, а принятые задачи можно восстановить без слепой повторной отправки. Gateway и worker обрабатывают выбранные данные и остаются частью доверенной среды.",
             "source": "docs/mvp-evidence.md; backend/owner_workspace.py; backend/artifact_store.py; sdk/python/aperture_client/workflows.py. Пример запроса иллюстрирует сценарий, а не подтверждённый клиентский кейс."
       },
       {
-            "speech": "Владелец загружает данные и назначает их агенту. Затем одобряет известный план и общий потолок бюджета. Шлюз проверяет разрешение перед запуском каждого шага, worker выполняет расчёт, а журнал сохраняет прогресс. Для бюджета всей цепочки достаточно одного одобрения. Загрузка, паспорт и другие операции имеют отдельные авторизации.",
-            "source": "backend/workflow_inbox.py; frontend/src/utils/workflowPlan.js; sdk/python/aperture_client/assigned_workflows.py. Потолки 500 000 и 100 000 lamports взяты из локальной проверки от 05.10.2026. В ней платежей не было."
+            "speech": "У владельца есть три маршрута: запрос к настроенной модели, Python compute или data workflow. Перед dispatch он проверяет запрос и его предел расходов. В browser flow каждый шаг workflow подписывается отдельно; принятые задания сохраняются в журнале для восстановления.",
+            "source": "frontend/src/WorkflowRun.jsx; backend/workflow_inbox.py; frontend/src/utils/workflowPlan.js; sdk/python/aperture_client/assigned_workflows.py. Значения 500 000 и 100 000 lamports — примерные caps; фактический платёж в OFF_CHAIN равен нулю."
       },
       {
             "speech": "Мы проверили этот путь на семнадцати тысячах синтетических строк. Прервали выполнение после принятия первой задачи, затем восстановили его с прежним журналом. Завершились ровно пять задач, без дубликатов. Все три файла совпали с прямым расчётом Python. Полный сценарий занял около восьми секунд на одном компьютере. Это локальный результат без Docker и платежей Solana.",
@@ -382,12 +382,12 @@ report = client.<span class="code-accent">download_artifact</span>(
             "source": "programs/src/lib.rs; backend/gateway.py; sdk/python/aperture_client/client.py; scripts/devnet.py status; presentation-evidence.json: devnet_execution. Сохранённый запуск списал 3 200 lamports и создал on-chain TaskReceipt; execution mode — trusted-local без Docker. Два публичных Devnet RPC подтвердили совпадающий genesis hash и finalized-транзакцию на слоте 504877196. Read-only preflight подтвердил программу и ProtocolConfig v2. Статический пример в Solana getGenesisHash docs отличается; перед записью перепроверить, не перезапускался ли Devnet."
       },
       {
-            "speech": "Мы ориентируемся на разработчиков агентной аналитики: повторяемые CSV-отчёты и задания между процессами. Агент использует MCP или Python SDK. Выбранный AI-хост предоставляет модель, Aperture выполняет задачи и возвращает проверяемые файлы. Здесь показаны реальные методы синхронного SDK после настройки клиента.",
-            "source": "sdk/python/aperture_client/client.py: quote_job, execute_job, wait, download_artifact. Фрагмент требует настроенного client, проверенного source и csv_input, полученного при upload_input. source должен создавать report.json. Научные, финансовые и производительные гарантии из этого примера не следуют."
+            "speech": "Разработчики подключают агента через MCP или Python SDK. Gateway направляет запрос к настроенному model offer или worker и применяет разрешение задачи. Провайдер получает одобренный prompt. Обновлённый Devnet source направляет worker 100% подтверждённой оплаты задачи; redeploy и live-проверка ещё не выполнены. Внешний model API оплачивается отдельно.",
+            "source": "sdk/python/aperture_client/client.py: quote_job, execute_job, wait, download_artifact; docs/inference.md. Python SDK фрагмент требует настроенного client, проверенного source и csv_input. Провайдеры inference задаются оператором; request rate bills elapsed time, not tokens."
       },
       {
-            "speech": "Локальный CPU MVP работает. Следующий этап: пилоты, проверка среды и аудит. GPU и Mainnet остаются планами. Начать можно с CSV-отчёта через агента.",
-            "source": "README.md; docs/mvp-evidence.md; presentation-evidence.json. На 05.10.2026 прошли 178 тестов, 2 Docker-теста пропущены. Проверены build и lint. Это не измерение покрытия. Пилоты, аудит, GPU и Mainnet указаны как планы без обещанных сроков или подтверждённых партнёров."
+            "speech": "Сегодняшний MVP объединяет модельные запросы, CPU-задачи и восстанавливаемые workflows. Следующий этап — пилоты, проверка независимых провайдеров и аудит. Permissionless discovery, прямые выплаты upstream-провайдерам, GPU и Mainnet требуют отдельной реализации и проверки.",
+            "source": "README.md; docs/inference.md; docs/mvp-evidence.md; backend/inference.py; frontend/src/ComputeMarket.jsx. Local inference uses operator-configured endpoints; OFF_CHAIN has no payment. Updated Devnet source routes 100% of a confirmed task charge to its assigned worker; deployment and live payout remain unverified. Independent provider discovery, upstream vendor payments and GPU jobs are not implemented."
       }
 ]
   </script>

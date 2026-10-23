@@ -34,6 +34,7 @@ jobs:
         with:
           node-version: "20"
       - run: pip install -r backend/requirements.txt -e "sdk[mcp]"
+      - run: python scripts/check_inference_preview.py
       - run: python scripts/demo_workflow.py --rows 1000 --output .aperture/ci/workflow
       - run: python scripts/demo_workflow.py --rows 17000 --owner-handoff --regional-csv --console-workflow --compare-local --output .aperture/ci/assigned-workflow
       - run: python scripts/check_workflow_cancel.py --output .aperture/ci/cancellation

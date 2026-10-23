@@ -61,6 +61,8 @@ print(json.dumps({"seed": 42, "scenarios_per_portfolio": scenarios, "ranking": r
   },
 ];
 
+export const DEFAULT_STUDIO_WORKLOAD = WORKLOADS.find(sample => sample.id === 'math') || WORKLOADS[0];
+
 // Client input limits only. Source policy and quotes are evaluated by the gateway.
 export const MAX_SOURCE_BYTES = 32000;
 

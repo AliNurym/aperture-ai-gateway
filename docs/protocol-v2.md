@@ -16,10 +16,9 @@ initializing v2 at the same program address cannot overwrite it. Use a new
 program ID for v2, deploy a compatible build, initialize its config, and verify
 program owner, version, oracle and treasury before enabling live quotes.
 Close/refund active v1 channels through their original program before moving
-funds. Do not point a new gateway at an old deployment.
-Fund the configured treasury to its rent-exempt minimum before enabling tasks.
-`start_task` rejects an unfunded treasury, and settlement rejects a charge that
-would leave its recipient below the current rent-exempt minimum.
+funds. Do not point a new gateway at an old deployment. The configured treasury
+remains pinned for deployment identity and legacy recovery; new task starts do
+not require it to be funded or rent-exempt.
 
 ## Build toolchain
 
@@ -45,12 +44,24 @@ deployment.
 | --- | --- | --- | ---: |
 | ProtocolConfig | ["config"] | authority, oracle, treasury (Pubkey each), bump (u8), version (u16, value 2) | 107 |
 | AgentPassport | ["agent", agent_pubkey] | owner, agent, metadata hash ([u8;32] each), max cost (u64), max runtime (u32), valid-until (i64), total/spent/reserved budget (u64 each), revoked (bool), revoked-at (i64), bump (u8) | 158 |
-| ChannelState | ["channel", owner] | user and oracle (Pubkey), balance and burn rate (u64), last update (i64), bump (u8), active agent (Pubkey), active task hash ([u8;32]), task cap (u64), deadline/start (i64 each), last task hash ([u8;32]), last charge (u64) | 225 |
+| ChannelState | ["channel", owner] | user and oracle (Pubkey), balance and burn rate (u64), last update (i64), bump (u8), active agent or last paid worker (Pubkey), active task hash ([u8;32]), task cap (u64), deadline/start (i64 each), last task hash or pinned worker ([u8;32]), last charge or worker-binding marker (u64) | 225 |
 | TaskReceipt | ["task", task_hash] | owner and agent (Pubkey each), task/source hashes ([u8;32] each), rate/cap (u64 each), start/deadline/settled-at (i64 each), charged (u64), settled (bool), bump (u8) | 186 |
 
 The v2 channel retains the old 97-byte serialized prefix, but its full size is
 different. Parsers must verify program owner, discriminator, exact length, and
-version where present before reading offsets.
+version where present before reading offsets. A new task temporarily stores
+the assigned worker key in `last_task_hash` and `u64::MAX` in `last_charged`;
+settlement restores the task hash/charge and retains the worker in `agent`.
+Account sizes remain unchanged, so existing channel and receipt PDAs do not
+need reallocation. A legacy active task without the marker stays recoverable:
+the oracle supplies its registered worker at stop, while owner-driven close
+uses the prior treasury fallback because no worker was pinned on-chain.
+
+Program/IDL ABI version 0.5.0 adds a worker key to `start_task`; it is separate
+from the owner-nominated agent used for passport permissions. New settlement
+transfers the entire bounded charge to that worker account, with no treasury
+share. The event records the recipient. This is source-level behavior until a
+compatible program is deployed and a live payout is independently verified.
 
 ## Agent passport
 
@@ -152,15 +163,21 @@ while their job records are retained.
   system program].
 - update_agent takes the same policy arguments and uses [passport writable,
   owner signer]; revoke_agent takes no policy and uses the same accounts.
-- start_task(task_hash, source_hash, agent, rate, max_cost, max_runtime) uses
-  [config, channel writable, oracle signer+writable, treasury writable,
-  optional passport writable, receipt writable/init, system program]. Direct
-  owner execution omits passport using the program-ID sentinel in the manual
-  client path.
+- start_task(task_hash, source_hash, agent, worker, rate, max_cost, max_runtime)
+  uses [config, channel writable, oracle signer+writable, optional passport
+  writable, receipt writable/init, system program]. Direct owner execution
+  omits passport using the program-ID sentinel in the manual client path.
 - stop_task(task_hash) uses [config, channel writable, oracle signer,
-  treasury writable, optional passport writable, receipt writable].
+  treasury writable, worker recipient writable, optional passport writable,
+  receipt writable]. The treasury is pinned for compatibility; the charge goes
+  to the worker account committed at task start.
 - close_channel is owner-signed and takes the config, channel, owner,
-  treasury, optional passport, and optional receipt needed for active settle.
+  treasury, worker, optional passport, and optional receipt needed for active
+  settle. Bound tasks pay the worker; legacy unbound active tasks use the
+  treasury recovery path.
+
+`TaskStartedEvent` includes the selected worker. `TaskSettledEvent` includes
+the actual recipient and exact charged lamports.
 
 Check the deployed generated IDL and every client account flag when changing
 Anchor versions or the Rust accounts structs. The backend hand-builds Anchor

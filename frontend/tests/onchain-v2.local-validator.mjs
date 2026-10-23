@@ -18,6 +18,9 @@ const owner = Keypair.fromSeed(new Uint8Array(32).fill(8));
 const agent = Keypair.fromSeed(new Uint8Array(32).fill(9));
 const treasury = Keypair.fromSeed(new Uint8Array(32).fill(10));
 const wrongOracle = Keypair.fromSeed(new Uint8Array(32).fill(11));
+const worker = Keypair.fromSeed(new Uint8Array(32).fill(12));
+const wrongWorker = Keypair.fromSeed(new Uint8Array(32).fill(13));
+const closeWorker = Keypair.fromSeed(new Uint8Array(32).fill(14));
 const system = SystemProgram.programId;
 const discriminator = name => createHash('sha256').update(name).digest().subarray(0, 8);
 const hash = value => createHash('sha256').update(value).digest();
@@ -145,22 +148,29 @@ try {
   const sourceHash = hash('print deterministic test');
   const receipt = seeds('task', taskHash);
   const startAccounts = oracle => [
-    [config], [channel, false, true], [oracle, true, true], [treasury.publicKey, false, true],
+    [config], [channel, false, true], [oracle, true, true],
     [passport, false, true], [receipt, false, true], [system],
   ];
-  const startData = [taskHash, sourceHash, agent.publicKey.toBuffer(), u64(10_000), u64(100_000), u32(10)];
-  await expectRejected(send(ix('start_task', startData, startAccounts(authority.publicKey)), [authority]), 'unfunded treasury');
-  await airdrop(treasury.publicKey);
+  const startData = [taskHash, sourceHash, agent.publicKey.toBuffer(), worker.publicKey.toBuffer(),
+    u64(10_000), u64(100_000), u32(10)];
+  const treasuryBefore = await connection.getBalance(treasury.publicKey, 'processed');
   await expectRejected(send(ix('start_task', [
-    taskHash, sourceHash, agent.publicKey.toBuffer(), u64(10_000), u64(100_000), u32(11),
+    taskHash, sourceHash, agent.publicKey.toBuffer(), worker.publicKey.toBuffer(),
+    u64(10_000), u64(100_000), u32(11),
   ], startAccounts(authority.publicKey)), [authority]), 'runtime above affordable task budget');
   await expectRejected(send(ix('start_task', startData, startAccounts(wrongOracle.publicKey)), [wrongOracle]), 'wrong oracle start');
   await expectRejected(send(ix('start_task', [
-    taskHash, sourceHash, agent.publicKey.toBuffer(), u64(25_001), u64(100_000), u32(20),
+    taskHash, sourceHash, agent.publicKey.toBuffer(), worker.publicKey.toBuffer(),
+    u64(25_001), u64(100_000), u32(20),
   ], startAccounts(authority.publicKey)), [authority]), 'rate above program maximum');
   await expectRejected(send(ix('start_task', [
-    taskHash, sourceHash, agent.publicKey.toBuffer(), u64(10_000), u64(500_001), u32(20),
+    taskHash, sourceHash, agent.publicKey.toBuffer(), worker.publicKey.toBuffer(),
+    u64(10_000), u64(500_001), u32(20),
   ], startAccounts(authority.publicKey)), [authority]), 'cost above passport maximum');
+  await expectRejected(send(ix('start_task', [
+    taskHash, sourceHash, agent.publicKey.toBuffer(), Buffer.alloc(32),
+    u64(10_000), u64(100_000), u32(10),
+  ], startAccounts(authority.publicKey)), [authority]), 'invalid worker key');
   await send(ix('start_task', startData, startAccounts(authority.publicKey)), [authority]);
 
   let channelAccount = await connection.getAccountInfo(channel);
@@ -172,26 +182,35 @@ try {
   assert.equal(channelAccount.data.readBigUInt64LE(80), 10_000n);
   assert.equal(passportAccount.data.readBigUInt64LE(140), 100_000n);
   assert.equal(receiptAccount.data[184], 0);
+  assert.deepEqual(channelAccount.data.subarray(185, 217), worker.publicKey.toBuffer());
+  assert.equal(channelAccount.data.readBigUInt64LE(217), 0xFFFFFFFFFFFFFFFFn);
 
   await new Promise(resolve => setTimeout(resolve, 1100));
-  const stop = ix('stop_task', [taskHash], [
+  const stop = destination => ix('stop_task', [taskHash], [
     [config], [channel, false, true], [authority.publicKey, true], [treasury.publicKey, false, true],
-    [passport, false, true], [receipt, false, true],
+    [destination, false, true], [passport, false, true], [receipt, false, true],
   ]);
-  await send(stop, [authority]);
+  await expectRejected(send(stop(wrongWorker.publicKey), [authority]), 'worker payout redirection');
+  const workerBalanceBefore = await connection.getBalance(worker.publicKey, 'processed');
+  await send(stop(worker.publicKey), [authority]);
   receiptAccount = await connection.getAccountInfo(receipt);
   channelAccount = await connection.getAccountInfo(channel);
   passportAccount = await connection.getAccountInfo(passport);
   const charged = receiptAccount.data.readBigUInt64LE(176);
+  const workerBalanceAfter = await connection.getBalance(worker.publicKey, 'processed');
   assert.equal(receiptAccount.data[184], 1);
   assert(charged > 0n && charged <= 100_000n);
+  assert.equal(BigInt(workerBalanceAfter - workerBalanceBefore), charged, 'full task charge reaches the pinned worker');
+  assert.equal(await connection.getBalance(treasury.publicKey, 'processed'), treasuryBefore,
+    'task settlement does not pay the configured treasury');
   assert.equal(channelAccount.data.readBigUInt64LE(80), 0n);
   assert.equal(channelAccount.data.readBigUInt64LE(217), charged);
+  assert.deepEqual(channelAccount.data.subarray(97, 129), worker.publicKey.toBuffer());
   assert.equal(passportAccount.data.readBigUInt64LE(140), 0n);
   assert.equal(passportAccount.data.readBigUInt64LE(132), charged);
 
   const balanceAfterSettlement = channelAccount.data.readBigUInt64LE(72);
-  await send(stop, [authority]);
+  await send(stop(worker.publicKey), [authority]);
   channelAccount = await connection.getAccountInfo(channel);
   assert.equal(channelAccount.data.readBigUInt64LE(72), balanceAfterSettlement, 'duplicate settlement charged again');
   await expectRejected(send(ix('start_task', startData, startAccounts(authority.publicKey)), [authority]), 'task-hash replay');
@@ -199,31 +218,41 @@ try {
   await send(ix('revoke_agent', [], [[passport, false, true], [owner.publicKey, true]]), [owner]);
   const revokedTask = hash('revoked task');
   await expectRejected(send(ix('start_task', [
-    revokedTask, sourceHash, agent.publicKey.toBuffer(), u64(10_000), u64(100_000), u32(10),
-  ], [...startAccounts(authority.publicKey).slice(0, 4), [passport, false, true], [seeds('task', revokedTask), false, true], [system]]), [authority]), 'revoked agent');
+    revokedTask, sourceHash, agent.publicKey.toBuffer(), worker.publicKey.toBuffer(),
+    u64(10_000), u64(100_000), u32(10),
+  ], [...startAccounts(authority.publicKey).slice(0, 3), [passport, false, true],
+    [seeds('task', revokedTask), false, true], [system]]), [authority]), 'revoked agent');
 
   const ownerTaskHash = hash('owner closes active channel');
   const ownerReceipt = seeds('task', ownerTaskHash);
   await send(ix('start_task', [
-    ownerTaskHash, sourceHash, owner.publicKey.toBuffer(), u64(10_000), u64(100_000), u32(10),
+    ownerTaskHash, sourceHash, owner.publicKey.toBuffer(), closeWorker.publicKey.toBuffer(),
+    u64(10_000), u64(100_000), u32(10),
   ], [
-    [config], [channel, false, true], [authority.publicKey, true, true], [treasury.publicKey, false, true],
+    [config], [channel, false, true], [authority.publicKey, true, true],
     [programId], [ownerReceipt, false, true], [system],
   ]), [authority]);
+  const closeWorkerBefore = await connection.getBalance(closeWorker.publicKey, 'processed');
+  await new Promise(resolve => setTimeout(resolve, 1100));
   await send(ix('close_channel', [], [
     [config], [channel, false, true], [owner.publicKey, true, true], [treasury.publicKey, false, true],
-    [programId], [ownerReceipt, false, true],
+    [closeWorker.publicKey, false, true], [programId], [ownerReceipt, false, true],
   ]), [owner]);
   assert.equal(await connection.getAccountInfo(channel), null);
   const closedReceipt = await connection.getAccountInfo(ownerReceipt);
   assert(closedReceipt, 'task receipt was closed together with the channel');
   assert.equal(closedReceipt.data[184], 1);
-  assert(closedReceipt.data.readBigUInt64LE(176) <= 100_000n);
+  const closeCharge = closedReceipt.data.readBigUInt64LE(176);
+  assert(closeCharge > 0n && closeCharge <= 100_000n);
+  assert.equal(BigInt(await connection.getBalance(closeWorker.publicKey, 'processed') - closeWorkerBefore), closeCharge,
+    'owner close sends the full active task charge to its pinned worker');
+  assert.equal(await connection.getBalance(treasury.publicKey, 'processed'), treasuryBefore);
 
   console.log(JSON.stringify({
     program_id: programId.toBase58(), initialized_version: 2,
     delegated_task_charge_lamports: charged.toString(),
-    checks: ['pinned config authority', 'register/open/start/stop', 'wrong oracle rejection',
+    checks: ['pinned config authority', 'register/open/start/stop', 'full charge paid to pinned worker',
+      'wrong worker payout rejected', 'treasury receives no task charge', 'wrong oracle rejection',
       'rate and passport caps', 'replay rejection', 'duplicate settlement', 'revocation admission',
       'owner close with persistent settled receipt'],
   }, null, 2));

@@ -103,11 +103,6 @@ def initialize():
         print('Compatible configuration already exists; it was preserved.')
         return
     treasury = Pubkey.from_string(public['treasury'])
-    balance = client.rpc('getBalance', [str(treasury), {'commitment': 'confirmed'}])['value']
-    minimum = client.rpc('getMinimumBalanceForRentExemption', [0])
-    if balance < minimum:
-        funding = transfer(TransferParams(from_pubkey=gateway.pubkey(), to_pubkey=treasury, lamports=minimum - balance))
-        print('Treasury rent funding:', client.send_instruction(funding, gateway), flush=True)
     data = hashlib.sha256(b'global:initialize_config').digest()[:8] + bytes(treasury)
     accounts = [AccountMeta(config, False, True), AccountMeta(gateway.pubkey(), True, True),
                 AccountMeta(Pubkey.from_string('11111111111111111111111111111111'), False, False)]

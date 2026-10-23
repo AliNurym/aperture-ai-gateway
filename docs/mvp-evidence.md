@@ -27,7 +27,8 @@ the final reports must match byte for byte.
 
 The second uses the actual MCP stdio transport. It closes the first agent-host
 process after an admission, restarts with the retained journal and finishes the
-same three-step chain. All 19 tools are advertised; the approved inbox returns
+same three-step chain. All 22 current MCP tools are advertised, including
+inference discovery and bounded model requests; the approved inbox returns
 compact metadata rather than full plans. SDK/MCP result bytes must match and
 synthetic storage must be released.
 

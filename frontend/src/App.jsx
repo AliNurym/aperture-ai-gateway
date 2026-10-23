@@ -6,16 +6,22 @@ import Dashboard from "./Dashboard";
 const Agents = lazy(() => import("./Agents"));
 const Workflows = lazy(() => import("./Workflows"));
 const Storage = lazy(() => import("./Storage"));
+const Inference = lazy(() => import("./Inference"));
+const ComputeMarket = lazy(() => import("./ComputeMarket"));
+const ProviderWorkspace = lazy(() => import("./ProviderWorkspace"));
 import Icon from "./components/Icon";
 import CommandBlock from "./components/CommandBlock";
 import LiveDemoShowcase from "./components/LiveDemoShowcase";
 import ProofVerifierModal from "./components/ProofVerifierModal";
 import CommandPalette from "./components/CommandPalette";
-import { WORKLOADS } from "./utils/workloads";
+import { DEFAULT_STUDIO_WORKLOAD, WORKLOADS } from "./utils/workloads";
+import { activeModelWorkerCount, buildSentinelPrompt, publicInferenceProviders } from "./utils/inference";
 import { installNavigationIndicator, installPressFeedback, syncNavigationIndicator } from "./utils/motion";
 import logo from "./assets/aperture-mark-v3.png";
 import "./Console.css";
 import "./Motion.css";
+import "./Workspace.css";
+import WorkspaceModes from "./components/WorkspaceModes";
 
 const API_URL = (
   import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
@@ -26,35 +32,34 @@ const PAGES = [
     label: "Overview",
     shortLabel: "Home",
     icon: "grid",
-    group: "workspaces",
-    title: "Workspace overview",
-    subtitle: "Your workloads, available capacity and recent results.",
-  },
-  {
-    id: "workflows",
-    label: "Agent workflows",
-    shortLabel: "Flows",
-    icon: "network",
-    group: "workspaces",
-    badge: "Primary",
-    title: "Agent workflows",
-    subtitle: "Delegate data pipelines, enforce spending caps, and recover after failures.",
+    group: "dispatch",
+    title: "AI inference & compute marketplace",
+    subtitle: "Route model requests and compute through one owner-controlled gateway.",
   },
   {
     id: "studio",
     label: "Compute Studio",
     shortLabel: "Studio",
     icon: "code",
-    group: "workspaces",
+    group: "dispatch",
     title: "Compute Studio",
-    subtitle: "Prepare your source, review the limits, inspect the result.",
+    subtitle: "Prepare, review and run a bounded workload.",
+  },
+  {
+    id: "workflows",
+    label: "Agent workflows",
+    shortLabel: "Flows",
+    icon: "network",
+    group: "dispatch",
+    title: "Agent workflows",
+    subtitle: "Delegate data pipelines, enforce spending caps, and recover after failures.",
   },
   {
     id: "storage",
     label: "Files & results",
     shortLabel: "Files",
     icon: "download",
-    group: "infrastructure",
+    group: "control",
     title: "Files & results",
     subtitle: "Inspect your retained data and make room for the next workload.",
   },
@@ -63,32 +68,61 @@ const PAGES = [
     label: "Agent passports",
     shortLabel: "Agents",
     icon: "shield",
-    group: "infrastructure",
-    title: "Agent passports",
+    group: "control",
+    title: "Agent permissions",
     subtitle: "Set permissions and spending limits for each agent.",
   },
   {
     id: "network",
     label: "Worker network",
-    shortLabel: "Workers",
+    shortLabel: "Network",
     icon: "network",
-    group: "infrastructure",
+    group: "network",
     title: "Worker network",
-    subtitle: "The available capacity behind your workloads.",
+    subtitle: "Browse active workers and the model offers they can serve.",
+  },
+  {
+    id: "provider",
+    label: "Provide compute",
+    shortLabel: "Provider",
+    icon: "chip",
+    group: "network",
+    title: "Provide compute",
+    subtitle: "Manage your worker, finish active work, and track its earnings.",
   },
   {
     id: "guide",
     label: "Getting started",
     shortLabel: "Guide",
     icon: "book",
-    group: "infrastructure",
+    group: "guide",
     title: "Getting started",
     subtitle: "Connect execution and prepare your first workload.",
   },
 ];
+const NAV_GROUPS = [
+  { id: "dispatch", label: "Workspace" },
+  { id: "control", label: "Resources" },
+  { id: "network", label: "Network" },
+  { id: "guide", label: "" },
+];
+const SENTINEL_DRAFT_KEY = "aperture-sentinel-draft-v1";
+function readSentinelDraft() {
+  try {
+    const draft = JSON.parse(sessionStorage.getItem(SENTINEL_DRAFT_KEY) || "null");
+    return draft && typeof draft.id === "string" && typeof draft.source === "string"
+      && typeof draft.prompt === "string" ? draft : null;
+  } catch {
+    return null;
+  }
+}
+function clearSentinelDraft() {
+  try { sessionStorage.removeItem(SENTINEL_DRAFT_KEY); } catch { /* Tab storage may be unavailable. */ }
+}
 function currentPage() {
   const id = window.location.hash.slice(1);
-  return PAGES.some((page) => page.id === id) ? id : "overview";
+  if (id === "inference" || id === "sentinel") return "studio";
+  return PAGES.some((page) => page.id === id) ? id : "studio";
 }
 function readHistory() {
   try {
@@ -109,11 +143,20 @@ export default function App() {
   const { connected, wallet } = useWallet();
   const { setVisible: chooseWallet } = useWalletModal();
   const [page, setPage] = useState(currentPage);
+  const [studioMode, setStudioMode] = useState(() => window.location.hash.slice(1) === "inference" ? "inference" : "python");
+  const [inferenceVisited, setInferenceVisited] = useState(() => ["inference", "sentinel"].includes(window.location.hash.slice(1)));
   const [showReceiptGuide, setShowReceiptGuide] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [studioBusy, setStudioBusy] = useState(false);
   const [workflowBusy, setWorkflowBusy] = useState(false);
-  const busy = studioBusy || workflowBusy;
+  const [inferenceBusy, setInferenceBusy] = useState(false);
+  const [preferredProviderId, setPreferredProviderId] = useState("");
+  const [workerTarget, setWorkerTarget] = useState(null);
+  const [sentinelDraft, setSentinelDraft] = useState(readSentinelDraft);
+  const [sentinelResult, setSentinelResult] = useState(null);
+  const [sentinelLaunchError, setSentinelLaunchError] = useState("");
+  const busy = studioBusy || workflowBusy || inferenceBusy;
+  const [studioSource, setStudioSource] = useState(() => readSentinelDraft()?.source || DEFAULT_STUDIO_WORKLOAD.code);
   const [selection, setSelection] = useState(null);
   const [releasedObject, setReleasedObject] = useState(null);
   const [history, setHistory] = useState(readHistory);
@@ -122,21 +165,22 @@ export default function App() {
     nodes: [],
     stats: null,
     health: null,
+    providers: [],
     updated: null,
   });
   const [refreshing, setRefreshing] = useState(false);
   const [theme, setTheme] = useState(() => {
     try {
-      return localStorage.getItem('aperture-theme') || 'dark';
+      return localStorage.getItem('aperture-theme-v2') || 'light';
     } catch {
-      return 'dark';
+      return 'light';
     }
   });
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     document.documentElement.classList.toggle('dark-theme', theme === 'dark');
-    try { localStorage.setItem('aperture-theme', theme); } catch {}
+    try { localStorage.setItem('aperture-theme-v2', theme); } catch {}
   }, [theme]);
 
   const toggleTheme = () => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
@@ -158,13 +202,66 @@ export default function App() {
   const focusContent = useRef(false);
   const activePage = PAGES.find((item) => item.id === page);
 
-  const navigate = useCallback((id) => {
+  const navigate = useCallback((target) => {
+    const inferenceMode = target === "inference";
+    const sentinelMode = target === "sentinel";
+    const id = inferenceMode || sentinelMode ? "studio" : target;
+    if (target === "studio" || inferenceMode) {
+      setSentinelDraft(null);
+      clearSentinelDraft();
+    }
+    if (inferenceMode) setInferenceVisited(true);
+    if (id === "studio") setStudioMode(inferenceMode ? "inference" : "python");
     if (id !== page)
       focusContent.current = !navRef.current?.contains(document.activeElement);
-    window.location.assign("#" + id);
+    window.location.assign("#" + (sentinelMode ? "sentinel" : inferenceMode ? "inference" : id));
     setPage(id);
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [page]);
+  const openFunding = useCallback(() => {
+    navigate("studio");
+    requestAnimationFrame(() => {
+      const panel = document.getElementById("studio-payment-channel");
+      panel?.scrollIntoView({ block: "center", behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+      panel?.focus({ preventScroll: true });
+    });
+  }, [navigate]);
+  const openInferenceProvider = useCallback((providerId) => {
+    setInferenceVisited(true);
+    setSentinelDraft(null);
+    setPreferredProviderId(providerId);
+    navigate("inference");
+  }, [navigate]);
+  const openGeneralInference = useCallback(() => {
+    setInferenceVisited(true);
+    setSentinelDraft(null);
+    clearSentinelDraft();
+    setPreferredProviderId("");
+    navigate("inference");
+  }, [navigate]);
+  const openSentinelReview = useCallback(({ source, prompt }) => {
+    setInferenceVisited(true);
+    setPreferredProviderId("");
+    setSentinelResult(null);
+    setSentinelLaunchError("");
+    const draft = { id: crypto.randomUUID(), source, prompt };
+    try { sessionStorage.setItem(SENTINEL_DRAFT_KEY, JSON.stringify(draft)); } catch { /* The review can continue in this tab. */ }
+    setSentinelDraft(draft);
+    navigate("sentinel");
+  }, [navigate]);
+  const openSentinelFromOverview = useCallback(() => {
+    try {
+      openSentinelReview({ source: studioSource, prompt: buildSentinelPrompt(studioSource) });
+    } catch (error) {
+      setSentinelLaunchError(error.message);
+    }
+  }, [openSentinelReview, studioSource]);
+  const returnToStudio = useCallback(() => {
+    setSentinelDraft(null);
+    clearSentinelDraft();
+    navigate("studio");
+  }, [navigate]);
+  const recordSentinelResult = useCallback((result) => setSentinelResult(result), []);
 
   useEffect(() => installPressFeedback(appRef.current), []);
   useEffect(() => {
@@ -202,6 +299,25 @@ export default function App() {
   }, [navigate]);
   useEffect(() => {
     const onHash = () => {
+      const hashPage = window.location.hash.slice(1);
+      if (hashPage === "inference") {
+        setStudioMode("inference");
+        setInferenceVisited(true);
+        setSentinelDraft(null);
+        clearSentinelDraft();
+      }
+      else if (hashPage === "sentinel") {
+        setStudioMode("python");
+        setInferenceVisited(true);
+        const draft = readSentinelDraft();
+        setSentinelDraft(draft);
+        if (draft) setStudioSource(draft.source);
+      }
+      else if (hashPage === "studio") {
+        setStudioMode("python");
+        setSentinelDraft(null);
+        clearSentinelDraft();
+      }
       const nextPage = currentPage();
       if (nextPage !== previousPage.current)
         focusContent.current = !navRef.current?.contains(document.activeElement);
@@ -219,16 +335,18 @@ export default function App() {
   }, [page]);
   useLayoutEffect(() => installNavigationIndicator(navRef.current), []);
   const refresh = useCallback(async () => {
+    const started = performance.now();
     refreshController.current?.abort();
     const controller = new AbortController();
     refreshController.current = controller;
     setRefreshing(true);
     try {
       const config = { timeout: 8000, signal: controller.signal };
-      const [health, nodes, stats] = await Promise.all([
+      const [health, nodes, stats, modelCatalog] = await Promise.all([
         axios.get(API_URL + "/health", config),
         axios.get(API_URL + "/active_nodes", config),
         axios.get(API_URL + "/stats", config),
+        axios.get(API_URL + "/inference/providers", config).catch(() => ({ data: { providers: [] } })),
       ]);
       if (!controller.signal.aborted)
         setTelemetry({
@@ -236,7 +354,9 @@ export default function App() {
           health: health.data,
           nodes: Array.isArray(nodes.data) ? nodes.data : [],
           stats: stats.data,
+          providers: publicInferenceProviders(modelCatalog.data?.providers),
           updated: new Date(),
+          refreshDurationMs: Math.round(performance.now() - started),
         });
     } catch {
       if (!controller.signal.aborted)
@@ -287,7 +407,7 @@ export default function App() {
         : "Gateway offline";
 
   return (
-    <div className="console-app" ref={appRef}>
+    <div className="console-app aperture-workspace" ref={appRef}>
       <a
         href="#main-content"
         className="console-skip"
@@ -306,7 +426,7 @@ export default function App() {
         >
           <img src={logo} alt="" width="44" height="44" />
           <span>
-            Aperture<span>COMPUTE WORKSPACE</span>
+            Aperture<span>SOLANA AI INFERENCE GATEWAY</span>
           </span>
         </button>
         <nav
@@ -314,66 +434,51 @@ export default function App() {
           ref={navRef}
         >
           <span className="console-nav-indicator" aria-hidden="true" />
-          <div className="console-nav-label">WORKSPACES</div>
-          {PAGES.filter((item) => item.group === "workspaces").map((item) => (
-            <button
-              key={item.id}
-              className={
-                "console-nav-item " + (page === item.id ? "selected" : "")
-              }
-              aria-current={page === item.id ? "page" : undefined}
-              aria-label={item.label}
-              title={item.label}
-              onClick={() => navigate(item.id)}
-            >
-              <Icon name={item.icon} />
-              <span className="console-nav-full">{item.label}</span>
-              <span className="console-nav-short" aria-hidden="true">{item.shortLabel}</span>
-              {item.badge && <span className="console-nav-badge">{item.badge}</span>}
-              {(item.id === "studio" && studioBusy || item.id === "workflows" && workflowBusy) && (
-                <i className="console-running-dot" />
-              )}
-            </button>
-          ))}
-          <div className="console-nav-label" style={{ marginTop: "20px" }}>INFRASTRUCTURE</div>
-          {PAGES.filter((item) => item.group === "infrastructure").map((item) => (
-            <button
-              key={item.id}
-              className={
-                "console-nav-item " + (page === item.id ? "selected" : "")
-              }
-              aria-current={page === item.id ? "page" : undefined}
-              aria-label={item.label}
-              title={item.label}
-              onClick={() => navigate(item.id)}
-            >
-              <Icon name={item.icon} />
-              <span className="console-nav-full">{item.label}</span>
-              <span className="console-nav-short" aria-hidden="true">{item.shortLabel}</span>
-            </button>
+          {NAV_GROUPS.map((group) => (
+            <div className="console-nav-group" key={group.id}>
+              <div className="console-nav-label">{group.label}</div>
+              {PAGES.filter((item) => item.group === group.id).map((item) => (
+                <button
+                  key={item.id}
+                  className={"console-nav-item " + (page === item.id ? "selected" : "")}
+                  aria-current={page === item.id ? "page" : undefined}
+                  aria-label={item.label}
+                  title={item.label}
+                  onClick={() => navigate(item.id)}
+                >
+                  <Icon name={item.icon} />
+                  <span className="console-nav-full">{item.label}</span>
+                  <span className="console-nav-short" aria-hidden="true">{item.shortLabel}</span>
+                  {item.badge && <span className="console-nav-badge">{item.badge}</span>}
+                  {(item.id === "studio" && (studioBusy || inferenceBusy) || item.id === "workflows" && workflowBusy) && (
+                    <i className="console-running-dot" />
+                  )}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="console-sidebar-bottom">
           <div className="console-devnet">
             <span className={"console-dot " + (gatewayReady ? "ready" : "muted")} />
-            {telemetry.health?.environment === 'production' ? 'Production workspace' : 'Development workspace'}
+            {telemetry.health?.demo_mode ? 'OFF_CHAIN preview' : telemetry.health?.environment === 'production' ? 'Production · Solana' : 'Development workspace'}
           </div>
-          <span className="console-version">Python CPU · Aperture</span>
+          <span className="console-version">{telemetry.providers.length ? 'Model + compute marketplace' : 'Compute gateway · connect Gemini'}</span>
         </div>
       </aside>
       <div className="console-body">
         <header className="console-topbar">
           <div className="console-breadcrumb">
             <img className="console-mobile-mark" src={logo} alt="" width="26" height="26" />
-            <span className="console-breadcrumb-root">Workspace</span><span aria-hidden="true">/</span><strong key={page}>{activePage.label}</strong>
+            <span className="console-breadcrumb-root">Aperture</span><span aria-hidden="true">/</span><strong key={page}>{activePage.label}</strong>
           </div>
           <div className="console-top-actions">
-            <div className="console-hud-badge" title={"Live Gateway Connection (" + (online ? "online :8000" : "offline") + ") · Network: " + (telemetry.health?.demo_mode ? "Off-chain" : "Devnet")}>
+            <div className="console-hud-badge" title={"Gateway: " + API_URL + " · Network: " + (telemetry.health?.demo_mode ? "Off-chain" : "Devnet")}>
               <span className={"console-hud-dot " + (gatewayReady ? "ready" : online ? "warning" : "muted")} />
               <span className="console-hud-label">Gateway</span>
-              <span className="console-hud-sep">:8000</span>
+              <span className="console-hud-sep">{new URL(API_URL, window.location.origin).port ? ':' + new URL(API_URL, window.location.origin).port : new URL(API_URL, window.location.origin).hostname}</span>
               <span className="console-hud-badge-tag">{online ? (telemetry.health?.demo_mode ? "Off-chain" : "Devnet") : "offline"}</span>
-              {online && <span className="console-hud-meta">18ms</span>}
+              {online && Number.isFinite(telemetry.refreshDurationMs) && <span className="console-hud-meta" title="Measured refresh duration for health, worker and statistics requests">{telemetry.refreshDurationMs}ms</span>}
             </div>
             <button
               className="console-search-trigger"
@@ -382,7 +487,7 @@ export default function App() {
               aria-label="Search commands"
             >
               <Icon name="search" size={14} />
-              <span>Search or jump to...</span>
+              <span>Search</span>
               <kbd>Ctrl K</kbd>
             </button>
             <button
@@ -417,7 +522,7 @@ export default function App() {
           </div>
         </header>
         <main id="main-content" tabIndex={-1} className="console-main">
-          <div key={page} className="console-page-stage">
+          <div data-page={page} className={"console-page-stage" + (page === "studio" ? " is-studio-page" : "")}>
             <div className="console-page-heading">
               <div className="console-heading-copy">
                 <h1>{activePage.title}</h1>
@@ -441,74 +546,71 @@ export default function App() {
             </button>
           </div>
 
-          {wallet?.adapter.name === 'Temporary key' && <div className="console-tip"><Icon name="shield" size={19} /><p>Temporary development key. Its private key exists only in this tab and is lost on reload or disconnect. Use an external wallet for persistent assets.</p></div>}
+          {wallet?.adapter.name === 'Temporary key' && <aside className="console-session-notice"><Icon name="shield" size={15} /><p>Temporary signing key · this tab only</p><details><summary>Key details</summary><p>The private key is lost on reload or disconnect. Use an external wallet for persistent assets.</p></details></aside>}
+          {(page === "studio" || page === "workflows") && <WorkspaceModes mode={page === "workflows" ? "workflows" : studioMode}
+            onPython={() => navigate("studio")} onInference={openGeneralInference} onWorkflows={() => navigate("workflows")} inferenceBusy={inferenceBusy} />}
           {page === "overview" && (
             <>
-              <section className="console-hero">
-                <div className="console-hero-copy">
-                  <span className="console-eyebrow">
-                    <Icon name="chip" size={14} />
-                    DELEGATED AGENT COMPUTE · CPU MVP
-                  </span>
-                  <h2>
-                    Safe compute
-                    <br />
-                    <span>for AI agents.</span>
-                  </h2>
-                  <p>
-                    Delegate heavy data tasks to autonomous agents with strict Solana spending caps,
-                    zero duplicate tasks on crash, and signed output artifacts.
-                  </p>
-                  <div className="console-hero-caps">
-                    <span className="console-cap-chip"><Icon name="shield" size={13} /> 512 MiB CPU Sandbox</span>
-                    <span className="console-cap-chip"><Icon name="wallet" size={13} /> Solana Spend Cap</span>
-                    <span className="console-cap-chip"><Icon name="refresh" size={13} /> Crash Resilient Journal</span>
-                    <span className="console-cap-chip"><Icon name="code" size={13} /> 19 MCP Tools</span>
-                  </div>
-                  <div className="console-hero-actions">
-                    <button
-                      className="console-button primary"
-                      onClick={() => navigate("workflows")}
-                    >
-                      Build an agent workflow
-                      <Icon name="arrow" size={18} />
+              <section className="console-dispatch" aria-label="Workload dispatch">
+                <div className="console-dispatch-main">
+                  <span className="console-eyebrow"><Icon name="activity" size={14} /> SOLANA · AI INFERENCE + COMPUTE</span>
+                  <h2>Choose a model or worker.<br /><span>Approve each request.</span></h2>
+                  <p>Browse configured model routes and live workers, set a spending ceiling, then inspect the signed result. Python jobs and recoverable agent workflows use the same gateway.</p>
+                  <div className="console-dispatch-paths" aria-label="Available workload types">
+                    <button className="console-dispatch-path" onClick={openSentinelFromOverview}>
+                      <span className="console-dispatch-icon"><Icon name="shield" size={19} /></span>
+                      <span className="console-dispatch-copy"><strong>AI Sentinel → compute</strong><small>Review the current Python source, then approve a separate worker quote</small></span>
+                      <span className="console-dispatch-count">Review + run</span>
+                      <Icon name="arrow" size={17} />
                     </button>
-                    <button
-                      className="console-button secondary"
-                      onClick={() => navigate("studio")}
-                    >
-                      Compute Studio
+                    <button className="console-dispatch-path" onClick={openGeneralInference}>
+                      <span className="console-dispatch-icon"><Icon name="spark" size={19} /></span>
+                      <span className="console-dispatch-copy"><strong>Model inference</strong><small>Prompt · configured provider · elapsed-time quote</small></span>
+                      <span className="console-dispatch-count">{online ? `${telemetry.providers.length} offers` : "—"}</span>
+                      <Icon name="arrow" size={17} />
+                    </button>
+                    <button className="console-dispatch-path" onClick={() => navigate("workflows")}>
+                      <span className="console-dispatch-icon"><Icon name="network" size={19} /></span>
+                      <span className="console-dispatch-copy"><strong>Agent workflow</strong><small>Partitioned data · durable recovery · signed files</small></span>
+                      <span className="console-dispatch-count">Multi-step</span>
+                      <Icon name="arrow" size={17} />
+                    </button>
+                    <button className="console-dispatch-path" onClick={() => navigate("studio")}>
+                      <span className="console-dispatch-icon"><Icon name="code" size={19} /></span>
+                      <span className="console-dispatch-copy"><strong>Python compute</strong><small>Reviewed source · worker quote · hard limits</small></span>
+                      <span className="console-dispatch-count">{online ? `${telemetry.nodes.filter(node => (node.runtimes || ["python"]).includes("python")).length} workers` : "—"}</span>
+                      <Icon name="arrow" size={17} />
                     </button>
                   </div>
+                  {sentinelLaunchError && <p className="console-footnote" role="alert">{sentinelLaunchError}</p>}
+                  <button className="console-text-button console-dispatch-market-link" onClick={() => navigate("network")}>
+                    Browse the AI and compute market <Icon name="arrow" size={16} />
+                  </button>
                 </div>
-                <div className="console-orbit" aria-hidden="true">
-                  <div className="console-orbit-ring one" />
-                  <div className="console-orbit-ring two" />
-                  <div className="console-orbit-core">
-                    <img src={logo} alt="" width="92" height="92" />
-                  </div>
-                  <div className="console-orbit-tile code">
-                    <Icon name="code" size={26} />
-                    <span>CSV dataset → journal</span>
-                  </div>
-                  <div className="console-orbit-tile result">
-                    <span className="console-result-icon">
-                      <Icon name="check" size={18} />
-                    </span>
-                    <span>
-                      Verified report<small>0 duplicate tasks · signed receipt</small>
-                    </span>
-                  </div>
-                  <div className="console-orbit-dot" />
+                <div className="console-dispatch-visual" aria-hidden="true">
+                  <div className="dispatch-ring dispatch-ring-outer" />
+                  <div className="dispatch-ring dispatch-ring-inner" />
+                  <div className="dispatch-center"><img src={logo} alt="" /></div>
+                  <span className="dispatch-orbit-label dispatch-label-model"><Icon name="spark" size={13} /> MODEL</span>
+                  <span className="dispatch-orbit-label dispatch-label-compute"><Icon name="chip" size={13} /> CPU</span>
+                  <span className="dispatch-orbit-label dispatch-label-proof"><Icon name="shield" size={13} /> RECEIPT</span>
                 </div>
               </section>
 
               <LiveDemoShowcase
+                gatewayOnline={online}
+                gatewayHealth={telemetry.health}
+                workerCount={online ? telemetry.nodes.filter(node => (node.runtimes || ["python"]).includes("python")).length : 0}
+                modelWorkerCount={online ? activeModelWorkerCount(telemetry.nodes, telemetry.providers) : 0}
+                modelOfferCount={online ? telemetry.providers.length : 0}
+                onOpenMarket={() => navigate("network")}
                 onOpenStudio={(presetId) => {
-                  const sample = WORKLOADS.find(w => w.id === presetId) || WORKLOADS[0];
+    const sample = WORKLOADS.find(w => w.id === presetId) || DEFAULT_STUDIO_WORKLOAD;
                   openSample(sample);
                 }}
+                onOpenInference={openGeneralInference}
                 onOpenWorkflows={() => navigate("workflows")}
+                onOpenReceiptGuide={() => setShowReceiptGuide(true)}
               />
               <section
                 className="console-metrics"
@@ -531,9 +633,9 @@ export default function App() {
                   ],
                   [
                     "shield",
-                    "Input handling",
-                    "Task-scoped",
-                    "Owner-authorized · SHA-256 checked",
+                    "Model offers",
+                    online ? telemetry.providers.length : "—",
+                    online ? "Operator-configured · live route" : "Gateway unavailable",
                   ],
                   [
                     "wallet",
@@ -638,55 +740,6 @@ export default function App() {
                   )}
                 </section>
               </div>
-              <section className="console-panel console-pipeline" aria-label="Aperture computation pipeline">
-                <div className="console-section-heading">
-                  <div>
-                    <span className="console-eyebrow">
-                      <Icon name="spark" size={14} />
-                      BOUNDED DATA WORKFLOW
-                    </span>
-                    <h2>Keep datasets out of the agent prompt.</h2>
-                    <p>Approve the source, inputs and spending limit before a worker runs. Docker mode uses a network-disabled container; the local preview runs reviewed Python on the host. Receipts bind task details and result hashes, but do not prove faithful computation.</p>
-                  </div>
-                </div>
-                <div className="pipeline-steps">
-                  <div className="pipeline-step">
-                    <div className="pipeline-step-badge">1</div>
-                    <div className="pipeline-step-content">
-                      <strong>Staged Inputs</strong>
-                      <p>Owner-authorized CSV / JSON objects with SHA-256 checks</p>
-                      <span className="pipeline-pill">Up to 64 MiB</span>
-                    </div>
-                  </div>
-                  <div className="pipeline-connector"><Icon name="arrow" size={16} /></div>
-                  <div className="pipeline-step">
-                    <div className="pipeline-step-badge">2</div>
-                    <div className="pipeline-step-content">
-                      <strong>Owner Approval</strong>
-                      <p>Review the quoted tariff, source and runtime cap</p>
-                      <span className="pipeline-pill">Ed25519 Sign</span>
-                    </div>
-                  </div>
-                  <div className="pipeline-connector"><Icon name="arrow" size={16} /></div>
-                  <div className="pipeline-step">
-                    <div className="pipeline-step-badge">3</div>
-                    <div className="pipeline-step-content">
-                      <strong>Configured Worker</strong>
-                      <p>Execution mode is recorded with the task receipt</p>
-                      <span className="pipeline-pill">Docker or trusted local</span>
-                    </div>
-                  </div>
-                  <div className="pipeline-connector"><Icon name="arrow" size={16} /></div>
-                  <div className="pipeline-step">
-                    <div className="pipeline-step-badge">4</div>
-                    <div className="pipeline-step-content">
-                      <strong>Verified Results</strong>
-                      <p>Receipt signatures and result hashes are checked</p>
-                      <span className="pipeline-pill">report.json · CSV</span>
-                    </div>
-                  </div>
-                </div>
-              </section>
               {!gatewayReady && <div className="console-setup-nudge">
                 <Icon name="chip" size={18} />
                 <p>{online && activeWorkerCount === 0 ? "Connect a worker when you are ready to execute." : "Connect your execution stack to run workloads."} You can prepare source in Studio now.</p>
@@ -696,41 +749,51 @@ export default function App() {
           )}
 
           <section
-            className="console-studio"
+            className={"console-studio studio-mode-" + studioMode}
             hidden={page !== "studio"}
-            aria-label="Compute workspace"
+            aria-label="Compute Studio"
           >
-            <div className="console-mode-bar">
-              <span className="console-execution-label"><Icon name="chip" size={17} />Python CPU</span>
-              <p>
-                {online
-                  ? activeWorkerCount === 0
-                    ? "No worker connected. You can prepare source and review a quote."
-                    : telemetry.health?.demo_mode
-                    ? "Signed worker results. No on-chain payment."
-                    : connected
-                      ? "Review price and limits, then sign the exact workload."
-                      : "Connect your wallet to authorize a workload and Devnet payment."
-                  : "Gateway offline. You can still prepare your source."}
-              </p>
+            <div className="console-studio-body">
+              <div id="studio-python-panel" className="console-studio-panel" role="region" aria-labelledby="studio-python-tab" hidden={studioMode !== "python"}>
+                <Dashboard
+                  code={studioSource}
+                  onCodeChange={setStudioSource}
+                  gatewayHealth={telemetry.health}
+                  gatewayOnline={online}
+                  workerCount={online ? telemetry.nodes.filter(node => (node.runtimes || ['python']).includes('python') && node.accepting_tasks !== false).length : 0}
+                  workers={online ? telemetry.nodes.filter(node => (node.runtimes || ['python']).includes('python')) : []}
+                  workerTarget={workerTarget}
+                  onWorkerTargetChange={setWorkerTarget}
+                  reviewedSourcesOnly={online && telemetry.nodes.some(node => (node.runtimes || ['python']).includes('python')) && telemetry.nodes.filter(node => (node.runtimes || ['python']).includes('python')).every(node => node.source_policy === 'exact_hash_allowlist')}
+                  selection={selection}
+                  releasedObject={releasedObject}
+                  externalBusy={workflowBusy || inferenceBusy}
+                  onBusyChange={setStudioBusy}
+                  onRecord={recordRun}
+                  onSentinelReview={openSentinelReview}
+                  sentinelResult={sentinelDraft ? null : sentinelResult}
+                  sentinelAvailable={telemetry.providers.some(provider => provider.protocol === "gemini_generate_content" && activeModelWorkerCount(telemetry.nodes, [provider]) > 0)}
+                  sentinelPanel={sentinelDraft ? (<section className="console-studio-sentinel" aria-label="AI Sentinel review">
+                <Suspense fallback={<div className="console-panel" style={{ padding: "2.5rem", textAlign: "center" }}>Opening AI Sentinel…</div>}>
+                  <Inference key={sentinelDraft.id} apiUrl={API_URL} gatewayHealth={telemetry.health} sentinelDraft={sentinelDraft} onSentinelResult={recordSentinelResult} onReturnToStudio={returnToStudio} onOpenFunding={openFunding} onOpenSetup={() => navigate("guide")} externalBusy={studioBusy || workflowBusy} onBusyChange={setInferenceBusy} onRecord={recordRun} />
+                </Suspense>
+              </section>) : null}
+                  sentinelPanelOpen={Boolean(sentinelDraft)}
+                />
+              </div>
+
+              {inferenceVisited && !sentinelDraft && <div id="studio-inference-panel" className="console-studio-panel" role="region" aria-labelledby="studio-inference-tab" hidden={studioMode !== "inference"}>
+                <Suspense fallback={<div className="console-panel" style={{ padding: "2.5rem", textAlign: "center" }}>Loading model workspace…</div>}>
+                  <Inference key={preferredProviderId || "general-inference"} apiUrl={API_URL} gatewayHealth={telemetry.health} preferredProviderId={preferredProviderId} onSentinelResult={recordSentinelResult} onOpenFunding={openFunding} onOpenSetup={() => navigate("guide")} externalBusy={studioBusy || workflowBusy} onBusyChange={setInferenceBusy} onRecord={recordRun} />
+                </Suspense>
+              </div>}
             </div>
-            <Dashboard
-              gatewayHealth={telemetry.health}
-              gatewayOnline={online}
-              workerCount={activeWorkerCount}
-              reviewedSourcesOnly={online && telemetry.nodes.length > 0 && telemetry.nodes.every(node => node.source_policy === 'exact_hash_allowlist')}
-              selection={selection}
-              releasedObject={releasedObject}
-              externalBusy={workflowBusy}
-              onBusyChange={setStudioBusy}
-              onRecord={recordRun}
-            />
           </section>
 
           <Suspense fallback={<div className="console-panel" style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-dim, #888)' }}>Loading workspace module…</div>}>
             {visitedPages.has("workflows") && (
               <section className="console-workflows" hidden={page !== "workflows"} aria-label="Agent workflows">
-                <Workflows apiUrl={API_URL} gatewayHealth={telemetry.health} gatewayOnline={online} externalBusy={studioBusy} onBusyChange={setWorkflowBusy} onRecord={recordRun} releasedObject={releasedObject} onOpenStudio={openSample} />
+                <Workflows apiUrl={API_URL} gatewayHealth={telemetry.health} gatewayOnline={online} externalBusy={studioBusy || inferenceBusy} onBusyChange={setWorkflowBusy} onRecord={recordRun} releasedObject={releasedObject} onOpenStudio={openSample} onOpenFunding={openFunding} />
               </section>
             )}
 
@@ -748,104 +811,63 @@ export default function App() {
           </Suspense>
 
           {page === "network" && (
-            <>
-              {online && activeWorkerCount > 0 && <div className="console-network-banner">
-                <span className="console-sample-icon tone-0">
-                  <Icon name="network" size={28} />
-                </span>
-                <div>
-                  <h2>
-                    {activeWorkerCount} {activeWorkerCount === 1 ? "worker" : "workers"} online
-                  </h2>
-                  <p>
-                    Authenticated capacity for your Python workloads.
-                  </p>
-                </div>
-                <button
-                  className="console-button secondary"
-                  onClick={refresh}
-                  disabled={refreshing}
-                  aria-busy={refreshing}
-                >
-                  <Icon name="refresh" spinning={refreshing} size={17} />
-                  Refresh
-                </button>
-              </div>}
-              {online && telemetry.nodes.length > 0 ? (
-                <div className="console-worker-grid">
-                  {telemetry.nodes.map((node) => (
-                    <article
-                      className="console-panel console-worker"
-                      key={node.node_id}
-                    >
-                      <div className="console-worker-title">
-                        <Icon name="chip" size={26} />
-                        <span className="console-tag">{node.status}</span>
-                      </div>
-                      <h3>{node.gpu_name || "Python CPU worker"}</h3>
-                      <p className="console-monospace">{node.node_id}</p>
-                      <details className="console-disclosure console-worker-details"><summary>Worker details</summary>
-                      <dl>
-                        <div>
-                          <dt>Signing identity</dt>
-                          <dd title={node.worker_pubkey}>{node.worker_pubkey ? `${node.worker_pubkey.slice(0, 6)}…${node.worker_pubkey.slice(-6)}` : "Not reported"}</dd>
-                        </div>
-                        <div>
-                          <dt>Last heartbeat</dt>
-                          <dd>{Number.isFinite(node.last_seen) ? new Date(node.last_seen * 1000).toLocaleTimeString() : "Not reported"}</dd>
-                        </div>
-                        <div>
-                          <dt>Execution</dt>
-                          <dd>{node.execution_mode === "docker" ? "Docker container" : node.execution_mode === "trusted_local" ? "Trusted local process" : "Not reported"}</dd>
-                        </div>
-                        <div>
-                          <dt>Source approval</dt>
-                          <dd>{node.source_policy === "exact_hash_allowlist" ? `${node.approved_source_count} reviewed files` : node.source_policy === "gateway_ast" ? "Gateway source policy" : node.source_policy === "operator_trusted" ? "Operator trusted code" : "Not reported"}</dd>
-                        </div>
-                      </dl>
-                      </details>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <section className="console-panel console-empty console-network-empty">
-                  <span className="console-empty-icon">
-                    <Icon name="chip" size={36} />
-                  </span>
-                  <h2>
-                    {online
-                      ? "Connect your first worker"
-                      : "Connect your execution stack"}
-                  </h2>
-                  <p>
-                    {online ? "Your gateway is online. Start an authenticated worker to make execution available." : "Start the gateway and an authenticated worker to make execution available."}
-                  </p>
-                  <button
-                    className="console-button primary"
-                    onClick={() => navigate("guide")}
-                  >
-                    Set up execution
-                    <Icon name="arrow" size={17} />
-                  </button>
-                </section>
-              )}
-              <p className="console-footnote">
-                {telemetry.updated
-                  ? "Last successful update: " +
-                    telemetry.updated.toLocaleTimeString() +
-                    ". "
-                  : ""}
-                Availability refreshes every 15 seconds. Worker identities and
-                states come from authenticated heartbeats.
-              </p>
-            </>
+            <Suspense fallback={<div className="console-panel" style={{ padding: "2rem" }}>Loading capacity directory…</div>}>
+              <ComputeMarket
+                apiUrl={API_URL}
+                online={online}
+                health={telemetry.health}
+                nodes={telemetry.nodes}
+                updated={telemetry.updated}
+                refreshing={refreshing}
+                onRefresh={refresh}
+                onOpenInference={openInferenceProvider}
+                onOpenStudio={node => { if (!busy) { setWorkerTarget(node ? { node_id: node.node_id, worker_pubkey: node.worker_pubkey } : null); navigate("studio"); } }}
+                busy={busy}
+                onOpenProvider={() => navigate("provider")}
+                onOpenWorkflows={() => navigate("workflows")}
+                onOpenGuide={() => navigate("guide")}
+              />
+            </Suspense>
           )}
+
+          {page === "provider" && <Suspense fallback={<div className="console-panel" style={{ padding: '2rem' }}>Loading operator workspace…</div>}><ProviderWorkspace apiUrl={API_URL} health={telemetry.health} onOpenGuide={() => navigate('guide')} onOpenNetwork={() => navigate('network')} /></Suspense>}
 
           {page === "guide" && (
             <div className="console-guide">
+              <section className="console-panel console-capacity-setup" aria-labelledby="capacity-setup-title">
+                <div className="console-section-heading">
+                  <div>
+                    <span className="console-eyebrow">CAPACITY OPERATORS</span>
+                    <h2 id="capacity-setup-title">Connect this gateway to real compute capacity.</h2>
+                    <p>The original Gemini review and Python compute now share the same gateway, workspace and approval rules.</p>
+                  </div>
+                  <Icon name="network" size={22} />
+                </div>
+                <div className="console-capacity-options">
+                  <article>
+                    <h3>Reconnect AI Sentinel with Gemini</h3>
+                    <p>The original code review now uses the current Gemini API. The source is sent only after you review the prompt and sign its bounded request.</p>
+                    <CommandBlock label="Set Gemini key for this preview" command={"$env:GEMINI_API_KEY = '<Google AI Studio API key>'"}>
+                      <p>The key stays in the inference worker environment. Do not add it to frontend files, the provider catalog or browser storage.</p>
+                    </CommandBlock>
+                    <CommandBlock label="Run the unified Gemini + Python preview" command={'.\\start_preview.bat'}>
+                      <p>It runs Gemini and Python through one gateway in OFF_CHAIN preview mode. Owner signatures are exercised; no Solana payment is made.</p>
+                    </CommandBlock>
+                  </article>
+                  <article>
+                    <h3>Connect Gemini to your gateway</h3>
+                    <p>Copy the Gemini offer, point the gateway and inference worker to it, and expose the API key to the worker only.</p>
+                    <CommandBlock label="Create the Gemini offer file" command={'Copy-Item backend\\inference-providers.gemini.example.json backend\\inference-providers.json -NoClobber'} />
+                    <CommandBlock label="Start an inference-only worker" command={'backend\\venv\\Scripts\\python.exe backend\\worker.py --inference-only'}>
+                      <p>Set the same absolute <code>APERTURE_INFERENCE_CONFIG</code> path in the gateway environment and <code>backend/.worker.env</code>, then restart both. Keep provider credentials in the worker environment, never in the offer file or browser.</p>
+                    </CommandBlock>
+                  </article>
+                </div>
+                <p className="console-footnote">Offers appear after an authenticated worker heartbeat matches the gateway configuration. Discovery is operator-configured. Updated source routes the full confirmed Devnet task charge to the assigned worker; deployment and live payout are not yet verified.</p>
+              </section>
               <section className="console-panel console-guide-intro">
                 <div>
-                  <span className="console-eyebrow">YOUR FIRST USEFUL RESULT</span>
+                  <span className="console-eyebrow">YOUR FIRST USEFUL WORKFLOW</span>
                   <h2>Turn data into a report.</h2>
                   <p>Add CSV batches, approve a bounded chain and open verified category totals. Start with your own data or two small example batches.</p>
                   <button className="console-button primary" onClick={() => navigate("workflows")}>Build an agent workflow<Icon name="arrow" size={17} /></button>
@@ -858,6 +880,12 @@ export default function App() {
                     ["Use the result", "Open a verified JSON report or CSV table and download its files."],
                   ].map(([title, detail], index) => <li className="console-guide-step" key={title}><span>{index + 1}</span><div><h3>{title}</h3><p>{detail}</p></div></li>)}
                 </ol>
+              </section>
+              <section className="console-panel console-setup">
+                <div className="console-section-heading"><div><span className="console-eyebrow">PROVIDE COMPUTE</span><h2>Operate your connected worker</h2><p>Inspect assigned tasks and actual earnings. Drain new admissions while current work finishes.</p></div><Icon name="chip" size={22} /></div>
+                <CommandBlock label="Inspect the local preview worker" command={'backend\\venv\\Scripts\\python.exe scripts\\worker_control.py status --credential-file .aperture\\inference-preview\\worker-access.json'} />
+                <p>For the browser workspace, open the local <code>.aperture/inference-preview/worker-access.json</code> file and use its <code>worker_id</code> and <code>worker_token</code>. For a separately configured worker, use its ID and credential from <code>backend/.worker.env</code>.</p>
+                <button className="console-button secondary" onClick={() => navigate('provider')}>Open provider workspace<Icon name="arrow" size={16} /></button>
               </section>
               <section className="console-panel console-setup">
                 <div className="console-section-heading"><div><h2>Start your local workspace</h2><p>One Windows launcher starts the console, gateway and reviewed CPU worker.</p></div><Icon name="network" /></div>

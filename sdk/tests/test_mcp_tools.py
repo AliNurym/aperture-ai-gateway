@@ -180,7 +180,8 @@ class MCPServerRegistrationTests(unittest.IsolatedAsyncioTestCase):
              "get_python_task", "cancel_python_task", "upload_compute_input", "quote_compute_job",
              "start_compute_job", "read_compute_artifact", "get_compute_storage", "release_compute_object",
              "prepare_compute_workflow", "start_compute_workflow", "get_compute_workflow", "cancel_compute_workflow",
-             "get_assigned_workflows", "start_assigned_workflow", "get_assigned_workflow_progress"},
+             "get_assigned_workflows", "start_assigned_workflow", "get_assigned_workflow_progress",
+             "list_inference_providers", "quote_inference", "start_inference_task", "list_workers"},
         )
         self.assertFalse(quote.is_error)
         self.assertIn("quote-1", repr(quote.structured_content) + repr(quote.content))

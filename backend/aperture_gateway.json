@@ -1,5 +1,5 @@
 {
-  "version": "0.4.0",
+  "version": "0.5.0",
   "name": "aperture_gateway",
   "instructions": [
     {
@@ -252,6 +252,10 @@
           "type": "publicKey"
         },
         {
+          "name": "worker",
+          "type": "publicKey"
+        },
+        {
           "name": "rate",
           "type": "u64"
         },
@@ -279,11 +283,6 @@
           "name": "oracle",
           "isMut": true,
           "isSigner": true
-        },
-        {
-          "name": "treasury",
-          "isMut": true,
-          "isSigner": false
         },
         {
           "name": "passport",
@@ -338,6 +337,11 @@
           "isSigner": false
         },
         {
+          "name": "worker",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
           "name": "passport",
           "isMut": true,
           "isSigner": false,
@@ -371,6 +375,11 @@
         },
         {
           "name": "treasury",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "worker",
           "isMut": true,
           "isSigner": false
         },
@@ -631,6 +640,11 @@
           "index": false
         },
         {
+          "name": "worker",
+          "type": "publicKey",
+          "index": false
+        },
+        {
           "name": "taskHash",
           "type": {
             "array": [
@@ -678,6 +692,11 @@
               32
             ]
           },
+          "index": false
+        },
+        {
+          "name": "recipient",
+          "type": "publicKey",
           "index": false
         },
         {
@@ -813,6 +832,21 @@
       "code": 6023,
       "name": "MissingReceipt",
       "msg": "An active task receipt is required to close this channel"
+    },
+    {
+      "code": 6024,
+      "name": "PaymentRecipientNotRentExempt",
+      "msg": "Payment recipient must be rent-exempt before it can receive a charge"
+    },
+    {
+      "code": 6025,
+      "name": "InvalidPaymentRecipient",
+      "msg": "Payment recipient cannot be the channel account"
+    },
+    {
+      "code": 6026,
+      "name": "InvalidWorker",
+      "msg": "Worker public key or payment account is invalid"
     }
   ],
   "metadata": {

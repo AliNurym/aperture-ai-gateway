@@ -12,6 +12,7 @@ function settlementFixture({ runtimeSeconds = 3 } = {}) {
   const programId = new PublicKey(new Uint8Array(32).fill(9));
   const wallet = new PublicKey(new Uint8Array(32).fill(1));
   const agent = new PublicKey(new Uint8Array(32).fill(2));
+  const worker = new PublicKey(new Uint8Array(32).fill(3));
   const taskId = 'task-budget-boundary';
   const taskHash = sha256(taskId).toString('hex');
   const sourceHash = 'ab'.repeat(32);
@@ -38,7 +39,25 @@ function settlementFixture({ runtimeSeconds = 3 } = {}) {
     settlement_type: 'DEVNET',
     settlement_signature: 'confirmed-settlement-signature',
     charged_lamports: 4_500,
+    worker_pubkey: worker.toBase58(),
+    payout_destination: worker.toBase58(),
+    worker_paid_lamports: 4_500,
   };
+  const settledEvent = (recipient = worker) => {
+    const data = Buffer.alloc(152);
+    sha256('event:TaskSettledEvent').copy(data, 0, 0, 8);
+    wallet.toBuffer().copy(data, 8);
+    agent.toBuffer().copy(data, 40);
+    Buffer.from(taskHash, 'hex').copy(data, 72);
+    recipient.toBuffer().copy(data, 104);
+    data.writeBigUInt64LE(4_500n, 136);
+    data.writeBigInt64LE(startedAt + 3n, 144);
+    return data;
+  };
+  const transaction = recipient => ({ meta: { err: null, logMessages: [
+    `Program ${programId.toBase58()} invoke [1]`, 'Program log: Instruction: StopTask',
+    `Program data: ${settledEvent(recipient).toString('base64')}`, `Program ${programId.toBase58()} success`,
+  ] } });
   const quote = {
     network: 'devnet',
     program_id: programId.toBase58(),
@@ -54,8 +73,9 @@ function settlementFixture({ runtimeSeconds = 3 } = {}) {
     getAccountInfo: async () => ({ owner: programId, data }),
     getSignatureStatuses: async () => ({ value: [{ err: null, confirmationStatus: 'confirmed' }] }),
     getSignaturesForAddress: async () => [{ signature: receipt.settlement_signature, err: null }],
+    getTransaction: async () => transaction(worker),
   };
-  return { connection, programId, quote, receipt, receiptAddress, taskId };
+  return { connection, programId, quote, receipt, receiptAddress, taskId, worker, transaction };
 }
 
 test('accepts a confirmed on-chain deadline within the signed runtime budget', async () => {
@@ -72,5 +92,14 @@ test('rejects an on-chain deadline longer than the signed runtime budget', async
   await assert.rejects(
     verifyDevnetSettlement(fixture.connection, fixture.receipt, fixture.quote, fixture.taskId),
     /on-chain task runtime exceeds the approved quote limit/i,
+  );
+});
+
+test('rejects a settlement event that pays a different account', async () => {
+  const fixture = settlementFixture();
+  fixture.connection.getTransaction = async () => fixture.transaction(new PublicKey(new Uint8Array(32).fill(4)));
+  await assert.rejects(
+    verifyDevnetSettlement(fixture.connection, fixture.receipt, fixture.quote, fixture.taskId),
+    /settlement event does not prove full payment to the assigned worker/i,
   );
 });

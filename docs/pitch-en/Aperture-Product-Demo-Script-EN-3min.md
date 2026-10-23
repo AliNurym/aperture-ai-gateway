@@ -1,61 +1,51 @@
-# Aperture — 3-Minute Demo Cue Sheet
+# Aperture — 3-Minute Product Demo
 
-**Language:** English · **Length:** 3:00 · **Mode:** local `OFF_CHAIN` preview
+**Language:** English · **Length:** 3:00 · **Mode:** Gemini + Python in `OFF_CHAIN` preview
 
 ## Before you start
 
-- Open the running local preview: [http://127.0.0.1:3031](http://127.0.0.1:3031/), then open **Compute Studio**.
-- Connect with **Temporary key**. No external API key or account is needed.
-- Confirm the gateway and worker are ready. Keep this browser tab open.
-- Have **Agent batch risk scoring** selected before the timer starts.
+- Set `GEMINI_API_KEY` in the PowerShell session, then run `start_preview.bat`.
+- Open `http://127.0.0.1:3000/#studio` and confirm the gateway, Gemini offer, inference worker and CPU worker are ready.
+- Connect with **Temporary key**. Gemini receives a prompt only after its quote is signed. Google may charge separately for API use; Aperture preview makes no Solana payment.
+- The demo uses the remote Gemini API and does not require a local model download.
+- Prepare two small example CSV batches in Agent workflows, or upload them before recording.
 
 ## Run of show
 
-### 0:00–0:20 — Set the stakes
+### 0:00–0:20 — One workspace, three workload types
 
-**On screen:** Compute Studio; point to the selected sample.
+**On screen:** Overview, then Compute Studio with its Python and Model inference modes.
 
-**Say:** “AI agents are starting to do real work. Before an agent can spend compute, its owner needs clear limits on what may run, how long it may run, and what it may cost. Aperture puts that decision before execution.”
+**Say:** “Aperture brings the original Gemini AI Sentinel into the current compute gateway. The same workspace can review Python with a model, run bounded Python work, or build a data workflow.”
 
-### 0:20–0:45 — Review the bounds
+### 0:20–0:40 — Show live provider and worker capacity
 
-**On screen:** Set the maximum cost and runtime. Select **Review price & limits** and show the quote.
+**On screen:** Open **Worker network**. Point to the current Gemini offer and authenticated CPU and inference workers.
 
-**Say:** “For this task, the gateway shows the maximum cost and runtime up front. The quote is tied to this exact source and these limits. The worker has not received a job.”
+**Say:** “Model and compute capacity use one gateway. Offers are configured by the operator. The updated Devnet source pays the assigned worker the full confirmed task charge; deployment and live payout verification remain ahead. Upstream model API bills are separate.”
 
-### 0:45–1:05 — Show the guardrail
+### 0:40–1:55 — AI Sentinel, then separately approve compute
 
-**On screen:** Select **Policy rejection**, review it, and pause on the rejection. Then reselect **Agent batch risk scoring**.
+**On screen:** In Compute Studio, keep the Python source visible and select **Request AI Sentinel code review**. A right-side review drawer opens over the editor. Review the exact prompt, Gemini provider, budget and runtime. Sign and wait for the real response, then inspect its receipt. Close the review drawer and confirm that the advisory report matches the current source. Select **Review compute price & limits** to show the separate quote and owner signature.
 
-**Say:** “This request falls outside policy, so Aperture rejects it before dispatch. The worker receives nothing. I’ll return to the allowed sample.”
+**Say:** “AI Sentinel sends the exact source to Gemini as untrusted input and returns an advisory report. The model does not approve or execute code. Aperture checks its source policy and prepares a separate compute quote; execution needs a second owner approval.”
 
-### 1:05–1:30 — Approve the task
+### 1:55–2:30 — Recoverable agent workflow
 
-**On screen:** Review the quote again, select **Accept quote & sign**, then approve with **Temporary key**.
+**On screen:** Open **Agent workflows**. Show the plan, inputs, per-step approvals and saved progress.
 
-**Say:** “I check the new quote and approve the exact task and spending limits. This is a local run; it does not call an external AI service.”
+**Say:** “The same gateway also runs data workflows. Each step has its own source, inputs and spending limit, and accepted work can be recovered without blindly submitting it twice.”
 
-### 1:30–2:05 — Watch it run
+### 2:30–3:00 — Read the evidence and name its limits
 
-**On screen:** Keep the run status and output visible until completion.
+**On screen:** Show the actual task receipt and leave `OFF_CHAIN` visible.
 
-**Say:** “The local CPU worker is now running the fixed-seed Python sample. The output is produced by the worker, rather than being a sample animation.”
-
-### 2:05–2:35 — Inspect the evidence
-
-**On screen:** Show the result, then open **Inspect receipt evidence**. Point to verification, source and output hashes, and the execution boundary.
-
-**Say:** “The run returns a signed receipt. Here I can inspect the reported source and output hashes, worker identity, and execution boundary. That gives the owner evidence tied to this task.”
-
-### 2:35–3:00 — Close clearly
-
-**On screen:** Leave the receipt and `OFF_CHAIN` status visible.
-
-**Say:** “This preview uses a trusted local worker. `OFF_CHAIN` means there is no SOL payment, and this run does not demonstrate Docker isolation or prove remote computation. Aperture puts approval limits before execution and task evidence after it.”
+**Say:** “The receipt connects the reported output and task bounds to gateway and worker signatures. It does not prove model identity, answer quality, or faithful remote execution. This preview performs real work without a Solana payment; Devnet settlement needs a configured program and funded channel.”
 
 ## Keep the demo accurate
 
-- The sample uses synthetic data and a fixed seed; it is not a customer result or financial advice.
-- Compute Studio uses the connected wallet as both owner and agent. This walkthrough does not show a separate delegated agent identity.
-- The temporary key exists only in the browser session. Keep the tab open until the receipt review is complete.
-- A signed receipt binds the task evidence; it does not prove that a remote worker computed correctly.
+- The selected provider receives the approved prompt. The output-token limit is sent upstream, but token usage is not independently verified.
+- The workflow example uses synthetic CSV data. It is real upload and worker execution, not customer data.
+- The temporary key exists only in browser memory. Keep the tab open through result review.
+- The preview CPU worker executes reviewed sources on the host without a Docker boundary. Do not describe it as isolated execution.
+- A signed receipt does not establish model identity, answer quality, or faithful remote computation.

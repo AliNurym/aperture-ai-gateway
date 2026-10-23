@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Icon from './Icon';
 import './ProofVerifierModal.css';
 
@@ -24,6 +25,8 @@ export default function ProofVerifierModal({ isOpen, onClose, receipt, taskId, c
     if (!isOpen) return undefined;
 
     const previousFocus = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     closeButtonRef.current?.focus({ preventScroll: true });
 
     const handleDialogKeyDown = event => {
@@ -60,6 +63,7 @@ export default function ProofVerifierModal({ isOpen, onClose, receipt, taskId, c
     document.addEventListener('keydown', handleDialogKeyDown);
     return () => {
       document.removeEventListener('keydown', handleDialogKeyDown);
+      document.body.style.overflow = previousOverflow;
       if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
     };
   }, [isOpen]);
@@ -82,6 +86,8 @@ export default function ProofVerifierModal({ isOpen, onClose, receipt, taskId, c
     ['Task ID', actualTaskId],
     ['Gateway signer', receipt.gateway_pubkey],
     ['Worker signer', receipt.worker_receipt?.worker_pubkey || receipt.worker_pubkey],
+    ['Approved executor', receipt.worker_target?.node_id || 'Automatic worker matching'],
+    ['Assigned executor', receipt.worker_id || 'No worker assigned'],
     ['Execution status', receipt.execution_status],
     ['Execution boundary', receipt.execution_backend],
     ['Settlement type', receipt.settlement_type],
@@ -117,7 +123,7 @@ export default function ProofVerifierModal({ isOpen, onClose, receipt, taskId, c
     URL.revokeObjectURL(url);
   };
 
-  return (
+  return createPortal(
     <div className="proof-modal-backdrop" onClick={onClose}>
       <div
         ref={dialogRef}
@@ -181,6 +187,6 @@ export default function ProofVerifierModal({ isOpen, onClose, receipt, taskId, c
           <button className="console-text-button" onClick={onClose}>Close</button>
         </footer>
       </div>
-    </div>
+    </div>, document.body,
   );
 }

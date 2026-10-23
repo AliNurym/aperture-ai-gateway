@@ -2,7 +2,7 @@
 
 Compute Studio has one execution path: signed source and limits, authenticated gateway dispatch, real Python on a worker, and signed result evidence. It does not generate simulated progress or computation results.
 
-`start_demo.bat` is only a presentation launcher: it checks `/health` and opens the console. The overview simulator uses illustrative values and sends no task. Use `start_preview.bat` and the steps below when you need actual local CPU execution and a signed receipt.
+`start_demo.bat` checks `/health` and opens the console. Its interactive five-step protocol tour explains capacity discovery, owner approval, dispatch, settlement/recovery, and result evidence; worker and model counts reflect gateway state, and the tour submits no task. Use `start_preview.bat` for the unified workspace, a real local CPU workflow and signed receipt. If `GEMINI_API_KEY` is set in the launching PowerShell session, the same run also starts the authenticated Gemini worker. The preview is `OFF_CHAIN` and makes no Solana payment.
 
 ## Before the presentation
 
@@ -30,11 +30,10 @@ Compute Studio has one execution path: signed source and limits, authenticated g
 This is actual host execution of reviewed sources, without a Solana payment or a container security boundary. Use the normal Docker launcher when isolation is required.
 
 For the complete interactive workspace, run `start_preview.bat` from the
-project root. It prepares dependencies, starts the console/gateway/worker and
-pins the console to its own gateway signing key. Data and development keys stay
-in the ignored `.aperture/preview/` directory. Keep the launcher open; Ctrl+C
-stops its services without deleting state. Occupied ports cause a clear refusal
-instead of replacing a running workspace.
+project root. It prepares dependencies, starts the console/gateway/CPU worker,
+and starts the inference worker when a provider is configured. Data and
+development keys stay in the ignored `.aperture/inference-preview/` directory.
+Keep the launcher open; Ctrl+C stops its services without deleting state.
 
 Choose Temporary key in the development wallet dialog, open Agent workflows
 and select Use example data. Review and approve both batches and the final
@@ -129,7 +128,7 @@ Review `target/deploy/build-manifest.json` before deployment. The program addres
 
 Run `./scripts/deploy-devnet.ps1` for a read-only deployment review, including the build hash and a conservative funding target. After approval and sufficient Devnet funding, `./scripts/deploy-devnet.ps1 -Publish` submits the reviewed binary using the existing program key and pinned development authority. It does not replace an existing program automatically. CLI output is kept in ignored private files because a failed upload can contain buffer recovery material.
 
-After the approved deployment, run `backend/venv/Scripts/python.exe scripts/devnet.py initialize`. This reads the deployed bytes back, checks them against the build hash, funds the separate treasury's rent reserve and initializes the v2 config using the pinned authority. An existing compatible configuration is preserved. A mismatch stops initialization.
+After the approved deployment, run `backend/venv/Scripts/python.exe scripts/devnet.py initialize`. This reads the deployed bytes back, checks them against the build hash, and initializes the v2 config using the pinned authority. The treasury stays pinned in config for deployment identity and legacy recovery; new tasks do not require a funded treasury. An existing compatible configuration is preserved. A mismatch stops initialization.
 
 When only the gateway development wallet was funded, run `backend/venv/Scripts/python.exe scripts/devnet.py fund-owner` after initialization. It transfers only the amount needed to bring the configured development owner's balance to 0.05 Devnet SOL, covering the channel deposit and account rent. An already funded owner receives no transfer. It never uses mainnet.
 

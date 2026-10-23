@@ -4,9 +4,9 @@ Research date: 2026-09-27. See the [source-linked comparison](competitive-landsc
 
 ## The product
 
-**Aperture lets a wallet owner delegate a compute allowance to an agent, approve the terms of a task, and inspect the result and settlement evidence.**
+**Aperture combines an AI compute market with owner-controlled task permissions: route a model request, Python workload, or data workflow through live worker capacity, approve its limits, and inspect the signed result and settlement evidence.**
 
-The first user is a developer operating a Solana agent that repeatedly runs short analysis or evaluation jobs. The developer needs to answer four questions: which agent submitted the task, whose permission it used, how much it could spend, and what actually happened. The current workload engine is Python; GPU capacity, independent providers, and audited production security require additional evidence.
+The first user is a Solana AI developer routing model requests and repeatable analysis or data jobs through an agent. The developer needs to answer four questions: which route and agent handled the task, whose permission it used, how much it could spend, and what evidence came back. The current directory combines authenticated CPU workers and operator-configured model offers. The updated contract source routes a confirmed task charge entirely to its assigned worker; deployment and live payout evidence remain outstanding. Permissionless discovery, upstream vendor payments, GPU capacity, and audited production security require separate implementation and evidence.
 
 ## The KYA addition
 
@@ -16,11 +16,11 @@ The passport establishes wallet control and delegated permission. It does not es
 
 ## Position against existing products
 
-- **Compute:** Nosana already has containerized Solana GPU jobs, machine access, and timeouts. Akash has leases, escrow, and audited provider attributes. Golem already reserves and enforces a requestor budget. Aperture must earn adoption through a simpler delegated task workflow and measurable reliability. [Nosana Jobs API](https://learn.nosana.com/api/jobs.html), [Akash providers and leases](https://akash.network/docs/learn/core-concepts/providers-leases/), [Golem allocation](https://docs.golem.network/docs/creators/common/requestor-provider-interaction).
+- **Compute:** Nosana already has containerized Solana GPU jobs, machine access, and timeouts. Akash has leases, escrow, and audited provider attributes. Golem already reserves and enforces a requestor budget. Aperture combines model offers, CPU workers, and delegated task authorization in one early gateway; it must earn adoption through a simpler workflow and measurable reliability. [Nosana Jobs API](https://learn.nosana.com/api/jobs.html), [Akash providers and leases](https://akash.network/docs/learn/core-concepts/providers-leases/), [Golem allocation](https://docs.golem.network/docs/creators/common/requestor-provider-interaction).
 - **Payments:** x402 already supports maximum-authorized usage payments, including Solana, and signed offers/receipts. Coinbase Agentic Wallets advertises session and transaction caps. These are alternatives and potential integration points. [x402 upto](https://docs.x402.org/schemes/upto), [x402 offers and receipts](https://docs.x402.org/extensions/offer-receipt), [Coinbase Agentic Wallets](https://www.coinbase.com/developer-platform/products/agentic-wallets).
 - **Identity:** ERC-8004, Solana Agent Registry, and SATI provide identity, reputation, and validation mechanisms. Aperture's registry represents its compute permission and lifecycle; interoperability with existing identities is a future integration until tested. [ERC-8004 draft](https://eips.ethereum.org/EIPS/eip-8004), [Solana Agent Registry](https://solana.com/agent-registry/what-is-agent-registry), [SATI](https://github.com/cascade-protocol/sati).
 
-Do not claim that Aperture invented KYA, spending limits, agent identity, or receipts. Its proposed advantage is the complete developer flow: delegated compute permission, workload-bound quote acceptance, bounded execution, recoverable settlement, and attributable receipt. That advantage remains a hypothesis until users prefer it to composing existing tools.
+Do not claim that Aperture invented KYA, spending limits, agent identity, or receipts. Its proposed advantage is the joined flow: capacity discovery, delegated task permission, workload-bound quotes, bounded execution, workflow recovery, and attributable result evidence. That advantage remains a hypothesis until users prefer it to composing existing tools.
 
 ## Why Solana is part of the mechanism
 

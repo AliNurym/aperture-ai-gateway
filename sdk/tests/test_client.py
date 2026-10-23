@@ -1,7 +1,10 @@
 import hashlib
+import base64
+import struct
 import sys
 import time
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 
 from nacl.signing import SigningKey
@@ -10,7 +13,7 @@ from solders.keypair import Keypair
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "python"))
 from aperture_client import ApertureClient, IntegrityError, verify_quote, verify_receipt
-from aperture_client.client import RECEIPT_WRAPPER_KEYS, QUOTE_KEYS, canonical, sha256, verify_signature
+from aperture_client.client import RECEIPT_WRAPPER_KEYS, QUOTE_KEYS, canonical, sha256, verify_signature, canonical_quote_message
 
 
 class ClientEvidenceTests(unittest.TestCase):
@@ -45,6 +48,29 @@ class ClientEvidenceTests(unittest.TestCase):
     def test_valid_quote_is_bound_to_one_source_and_deployment(self):
         self.assertEqual(self.verify(), self.quote["message"])
 
+    def test_worker_pin_requires_caller_consent_and_matching_signed_receipt(self):
+        target = {"node_id": "worker-a", "worker_pubkey": self.worker_pubkey}
+        self.quote["worker_target"] = target
+        self.quote["message"] = canonical_quote_message(self.quote)
+        self.assertTrue(self.quote["message"].startswith("Aperture execution authorization v5\n"))
+        with self.assertRaisesRegex(IntegrityError, "selected worker"):
+            self.verify()
+        verify_quote(self.quote, owner=self.owner, agent=self.agent, code=self.code,
+            max_cost_lamports=50_000, max_runtime_seconds=20, max_rate_lamports=25_000,
+            program_id=self.quote["program_id"], gateway_pubkey=self.gateway_pubkey,
+            network="devnet", treasury=self.quote["treasury"], now=self.now, worker_target=target)
+        receipt, task = self.make_receipt()
+        def signed(change):
+            evidence = {key: value for key, value in receipt.items() if key not in RECEIPT_WRAPPER_KEYS}
+            evidence.update(worker_target=target, worker_pubkey=self.worker_pubkey)
+            evidence.update(change)
+            message = "Aperture compute receipt v1\n" + canonical(evidence)
+            return {**evidence, "gateway_pubkey": self.gateway_pubkey, "signed_message": message,
+                    "receipt_sha256": sha256(message), "gateway_signature": list(self.gateway.sign(message.encode()).signature)}
+        verify_receipt(signed({}), quote=self.quote, task_id=task, full_log="risk result\n")
+        with self.assertRaisesRegex(IntegrityError, "different worker"):
+            verify_receipt(signed({"worker_id": "substituted-worker"}), quote=self.quote, task_id=task, full_log="risk result\n")
+
     def test_rejects_tampered_budget_or_source_even_if_message_is_unchanged(self):
         for field, value in (("max_cost_lamports", 60_000), ("code_sha256", "0" * 64),
                              ("network", "off_chain"), ("effective_runtime_seconds", 19)):
@@ -68,6 +94,71 @@ class ClientEvidenceTests(unittest.TestCase):
         altered["message"] = "Aperture execution authorization v2\naudience:aperture-gateway\naction:execute\n" + canonical({key: altered[key] for key in QUOTE_KEYS})
         with self.assertRaises(IntegrityError):
             self.verify(altered)
+
+    def test_devnet_receipt_verifies_the_onchain_worker_payout_event(self):
+        task_id = "task-worker-payout-check"
+        task_hash = bytes.fromhex(sha256(task_id))
+        charged = 1_000
+        data = bytearray(186)
+        from solders.pubkey import Pubkey
+        data[:8] = hashlib.sha256(b"account:TaskReceipt").digest()[:8]
+        owner = Pubkey.from_string(self.owner)
+        agent = Pubkey.from_string(self.agent)
+        program_id = Pubkey.from_string(self.quote["program_id"])
+        worker = Pubkey.from_string(self.worker_pubkey)
+        data[8:40] = bytes(owner)
+        data[40:72] = bytes(agent)
+        data[72:104] = task_hash
+        data[104:136] = bytes.fromhex(self.quote["code_sha256"])
+        struct.pack_into("<Q", data, 136, self.quote["rate_lamports"])
+        struct.pack_into("<Q", data, 144, self.quote["max_cost_lamports"])
+        struct.pack_into("<q", data, 152, self.now)
+        struct.pack_into("<q", data, 160, self.now + 20)
+        struct.pack_into("<Q", data, 176, charged)
+        data[184] = 1
+        settled_event = bytearray(152)
+        settled_event[:8] = hashlib.sha256(b"event:TaskSettledEvent").digest()[:8]
+        settled_event[8:40] = bytes(owner)
+        settled_event[40:72] = bytes(agent)
+        settled_event[72:104] = task_hash
+        settled_event[104:136] = bytes(worker)
+        struct.pack_into("<Q", settled_event, 136, charged)
+        struct.pack_into("<q", settled_event, 144, self.now + 1)
+        signature = "confirmed-worker-payout-signature"
+        transaction = {"meta": {"err": None, "logMessages": [
+            f"Program {self.quote['program_id']} invoke [1]", "Program log: Instruction: StopTask",
+            "Program data: " + base64.b64encode(settled_event).decode("ascii"),
+        ]}}
+        client = ApertureClient(
+            "https://gateway.example", owner=self.owner, agent_keypair=Keypair.from_seed(bytes(self.agent_key)),
+            program_id=str(program_id), gateway_pubkey=self.gateway_pubkey, network="devnet",
+            treasury=self.quote["treasury"], rpc_url="https://api.devnet.solana.com",
+        )
+        client.account = lambda _address: (str(program_id), bytes(data))
+
+        def rpc(method, _params):
+            if method == "getSignaturesForAddress":
+                return [{"signature": signature, "err": None}]
+            if method == "getSignatureStatuses":
+                return {"value": [{"err": None, "confirmationStatus": "confirmed"}]}
+            if method == "getTransaction":
+                return transaction
+            raise AssertionError(method)
+
+        client.rpc = rpc
+        quote = {**self.quote, "rate_lamports": 1_500, "max_cost_lamports": 50_000,
+                 "max_runtime_seconds": 20, "effective_runtime_seconds": 20}
+        receipt = {"task_hash": task_hash.hex(), "charged_lamports": charged,
+                   "settlement_signature": signature, "worker_pubkey": str(worker),
+                   "payout_destination": str(worker), "worker_paid_lamports": charged,
+                   "worker_receipt": {"worker_pubkey": str(worker)}}
+        verified = client.verify_devnet_task_receipt(SimpleNamespace(task_id=task_id, quote=quote), receipt)
+        self.assertEqual(verified["payout_destination"], str(worker))
+
+        settled_event[104:136] = bytes([7]) * 32
+        transaction["meta"]["logMessages"][2] = "Program data: " + base64.b64encode(settled_event).decode("ascii")
+        with self.assertRaisesRegex(IntegrityError, "does not prove full payment"):
+            client.verify_devnet_task_receipt(SimpleNamespace(task_id=task_id, quote=quote), receipt)
 
     def make_receipt(self, full_log="risk result\n"):
         task_id = "task-test-123"

@@ -12,6 +12,7 @@ from ai_engine import analyze_code_ast, get_sol_price_from_pyth
 from compute_profiles import csv_profile
 from solana_client import KEYPAIR_PATH, SolanaClient
 from gateway import Gateway, SourceRequest, Utf8Request
+from inference import is_development_offer
 from security_config import load_worker_credentials
 
 load_dotenv()
@@ -234,6 +235,8 @@ class NodeInfo(Utf8Request):
     execution_mode: str = Field(default="unknown", max_length=32)
     source_policy: str = Field(default="unknown", max_length=32)
     approved_source_count: Optional[int] = Field(default=None, ge=1, le=10_000)
+    runtimes: list[str] = Field(default_factory=lambda: ["python"], max_length=2)
+    inference_offers: list[dict] = Field(default_factory=list, max_length=32)
 
 class AirdropRequest(Utf8Request):
     wallet: str = Field(min_length=32, max_length=44)
@@ -242,6 +245,24 @@ class AirdropRequest(Utf8Request):
 @app.get("/")
 def root():
     return {"protocol": "Aperture Compute", "version": "2.0.0", "status": "online", "network": "off_chain" if DEMO_MODE else "devnet", "demo_mode": DEMO_MODE}
+
+
+def public_worker_node(node):
+    offers = [offer for offer in node.get("inference_offers", []) if not is_development_offer(offer)]
+    runtimes = list(node.get("runtimes") or ["python"])
+    if not offers:
+        runtimes = [runtime for runtime in runtimes if runtime != "inference.chat"]
+    if not runtimes:
+        return None
+    from worker_market import worker_snapshot
+    return {**node, **worker_snapshot(gateway, node), "runtimes": runtimes, "inference_offers": offers}
+
+
+def public_active_workers(now=None):
+    now = time.time() if now is None else now
+    return [public for node in gateway.store.list("workers")
+            if now - node.get("last_seen", 0) < 45
+            if (public := public_worker_node(node)) is not None]
 
 @app.get("/health")
 async def health():
@@ -253,7 +274,7 @@ async def health():
         except Exception:
             pass
     configured = gateway.worker_auth_configured and gateway.store.durable_state and (DEMO_MODE or config is not None)
-    active_workers = [node for node in gateway.store.list("workers") if time.time() - node.get("last_seen", 0) < 45]
+    active_workers = public_active_workers()
     issues = []
     if not gateway.worker_auth_configured:
         issues.append("worker_authentication")
@@ -272,7 +293,9 @@ async def health():
             "program_id": str(solana_client.program_id), "data_job_version": 1,
             "active_worker_count": len(active_workers), "configuration_issues": issues,
             "protocol_version": 2, "durable_state": gateway.store.durable_state,
-            "kya": "owner-issued delegation; not legal KYC", "execution_scope": "bounded Python CPU",
+            "kya": "owner-issued delegation; not legal KYC", "execution_scope": "bounded Python CPU and configured model inference",
+            "inference_api_version": 1, "inference_provider_count": sum(
+                not provider.is_development_only for provider in gateway.inference_providers.values()),
             "compute_profiles": [csv_profile(gateway.csv_tariff)]}
 
 @app.get("/health/worker-auth")
@@ -316,18 +339,23 @@ async def register_node(info: NodeInfo, worker_id: str = Depends(require_worker)
     from agent_identity import valid_public_key
     if info.node_id != worker_id or not valid_public_key(info.worker_pubkey):
         raise HTTPException(409, "Worker identity does not match node payload.")
+    if (not set(info.runtimes) <= {"python", "inference.chat"}
+            or any(offer not in [provider.offer() for provider in gateway.inference_providers.values()]
+                   for offer in info.inference_offers)
+            or (info.inference_offers and "inference.chat" not in info.runtimes)):
+        raise HTTPException(422, "Worker inference offers must match the gateway's configured providers.")
     existing = gateway.store.get("workers", worker_id)
     if existing and existing["worker_pubkey"] != info.worker_pubkey:
         raise HTTPException(409, "Worker signing key changed; register a new worker ID.")
-    record = {**info.model_dump(), "last_seen": time.time()}
+    record = {**info.model_dump(), "last_seen": time.time(),
+              "accepting_tasks": (existing or {}).get("accepting_tasks", True)}
     gateway.store.put("workers", worker_id, record)
     nodes[worker_id] = record
     return {"status": "registered", "node_id": worker_id}
 
 @app.get("/active_nodes")
 async def active_nodes():
-    now = time.time()
-    return [node for node in gateway.store.list("workers") if now - node["last_seen"] < 45]
+    return public_active_workers()
 
 @app.get("/benchmarks")
 def get_benchmarks():
@@ -516,7 +544,7 @@ subprocess.run(["cat", "/etc/shadow"])
 def get_stats():
     """Aggregated protocol telemetry for the DePIN network."""
     now = time.time()
-    active = [n for n in gateway.store.list("workers") if now - n["last_seen"] < 45]
+    active = public_active_workers(now)
     known_temps = [n["gpu_temp"] for n in active if n.get("gpu_temp") is not None]
     known_utils = [n["gpu_util"] for n in active if n.get("gpu_util") is not None]
     avg_temp = round(sum(known_temps) / len(known_temps), 1) if known_temps else None

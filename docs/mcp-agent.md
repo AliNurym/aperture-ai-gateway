@@ -1,16 +1,18 @@
 # Connect an AI agent with MCP
 
-Aperture's local MCP server lets an MCP-compatible agent host request bounded
-Python compute from the gateway. It does not include a model or call a paid AI
-API. The host supplies the agent; Aperture supplies budgeted CPU execution and
-receipt verification.
+Aperture's local MCP server connects an MCP-compatible agent host to bounded
+Python compute, data workflows, and optional operator-configured model
+inference. The host supplies the agent; Aperture supplies the task gateway,
+execution and receipt verification. Inference is sent to the configured model
+operator after the owner-approved task is admitted and may incur separate
+provider charges.
 
-The server exposes source-only tools and data-job/workflow tools:
+The server exposes Python, inference, data-job and workflow tools:
 
 See [Agent data jobs and workflows](agent-workflows.md) for immutable files,
 batch processing, dependent steps and durable background workflow control.
 
-The current server advertises 19 tools. For a chain approved in the console,
+The current server advertises 22 tools. For a chain approved in the console,
 call `get_assigned_workflows`, `start_assigned_workflow(workflow_id)` and
 `get_assigned_workflow_progress`. The owner approves the exact CSV plan and
 total maximum once; the configured host executes it within its local ceilings
@@ -30,6 +32,20 @@ for key creation, console approval, observation, stop and recovery.
   when the task is billed on Devnet.
 - `cancel_python_task` requests cancellation; poll afterward for the final
   receipt.
+- `list_inference_providers` reads the operator-configured model offers without
+  exposing endpoint URLs or credentials.
+- `quote_inference` binds the provider, messages, output limit, budget and
+  runtime to a quote. It requires the separate `inference.chat` passport
+  capability.
+- `start_inference_task` admits that exact signed quote. The selected model
+  operator receives the messages only after admission; poll the task with
+  `get_python_task` for the verified result and receipt.
+
+Inference billing in Aperture uses the operator's elapsed-time tariff, not
+token billing. The model vendor may charge its own API usage separately. Keep
+provider credentials in the inference worker environment; they do not belong
+in the MCP host's browser-visible offer catalog. See the [inference setup and
+trust boundaries](inference.md) before enabling the `inference.chat` capability.
 
 ## Install
 

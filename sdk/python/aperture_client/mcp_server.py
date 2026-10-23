@@ -113,14 +113,19 @@ def create_mcp_server(tools: ApertureAgentTools):
 
     @server.tool(name="quote_python", title="Quote bounded Python compute")
     def quote_python(source: str, max_cost_lamports: int | None = None,
-                     max_runtime_seconds: int | None = None) -> dict:
+                     max_runtime_seconds: int | None = None, worker_target: dict | None = None) -> dict:
         """Inspect source policy and maximum charge without running the Python.
 
         Optional cost/runtime values can lower, but cannot exceed, the local
         MCP server ceilings. The exact source stays in this process for the
         short quote lifetime so start_python_task can run what was reviewed.
         """
-        return tools.quote_python(source, max_cost_lamports, max_runtime_seconds)
+        return tools.quote_python(source, max_cost_lamports, max_runtime_seconds, worker_target)
+
+    @server.tool(name="list_workers", title="List registered compute workers")
+    def list_workers() -> dict:
+        """Read capacity and public totals. Pin node_id and worker_pubkey in a quote's worker_target to require that executor."""
+        return tools.list_workers()
 
     @server.tool(name="start_python_task", title="Start quoted Python compute")
     def start_python_task(quote_id: str) -> dict:
@@ -159,6 +164,32 @@ def create_mcp_server(tools: ApertureAgentTools):
         """Request cancellation of a running task. Poll afterward for its final receipt."""
         return tools.cancel_python_task(task_id)
 
+    @server.tool(name="list_inference_providers", title="List configured inference models")
+    def list_inference_providers() -> dict:
+        """Read operator-configured model offers; this does not execute inference."""
+        return tools.list_inference_providers()
+
+    @server.tool(name="quote_inference", title="Review a bounded model inference request")
+    def quote_inference(provider_id: str, messages: list[dict], max_tokens: int = 256,
+                        max_cost_lamports: int | None = None, max_runtime_seconds: int | None = None,
+                        worker_target: dict | None = None) -> dict:
+        """Bind provider, prompt and token limit to a spending/runtime quote.
+
+        The model operator receives the messages only after task admission.
+        Pricing is elapsed time, including provider waiting; it is not token billing.
+        """
+        return tools.quote_inference(provider_id, messages, max_tokens, max_cost_lamports, max_runtime_seconds, worker_target)
+
+    @server.tool(name="start_inference_task", title="Start the exact quoted inference request")
+    def start_inference_task(quote_id: str) -> dict:
+        """Use the configured agent key and its inference.chat delegation.
+
+        Poll get_python_task for the shared, signature-verified task result.
+        list_python_tasks, resume_python_task and cancel_python_task also work
+        with inference tasks; they never start a second provider request.
+        """
+        return tools.start_python_task(quote_id)
+
     @server.tool(name="upload_compute_input", title="Stage data for an agent compute job")
     def upload_compute_input(name: str, content_base64: str) -> dict:
         """Upload up to 1 MiB of agent-provided bytes as a private immutable input.
@@ -171,7 +202,7 @@ def create_mcp_server(tools: ApertureAgentTools):
     @server.tool(name="quote_compute_job", title="Quote an agent job with data and parameters")
     def quote_compute_job(source: str, inputs: list[dict], parameters: dict | None = None,
                           max_cost_lamports: int | None = None,
-                          max_runtime_seconds: int | None = None) -> dict:
+                          max_runtime_seconds: int | None = None, worker_target: dict | None = None) -> dict:
         """Bind input hashes, parameters and source to one spend-bounded quote.
 
         Source can import aperture to read_csv/read_json and write_csv/write_json.
@@ -179,7 +210,7 @@ def create_mcp_server(tools: ApertureAgentTools):
         as inputs to a later job to build a chain without copying data into chat.
         Start using start_compute_job, then poll get_python_task.
         """
-        return tools.quote_compute_job(source, inputs, parameters, max_cost_lamports, max_runtime_seconds)
+        return tools.quote_compute_job(source, inputs, parameters, max_cost_lamports, max_runtime_seconds, worker_target)
 
     @server.tool(name="start_compute_job", title="Start the exact approved data job")
     def start_compute_job(quote_id: str) -> dict:
