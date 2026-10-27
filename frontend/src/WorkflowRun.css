@@ -60,13 +60,14 @@
 .workflow-run-step + .workflow-run-step { border-top: 1px solid var(--console-line); }
 .workflow-run-step-number { width: 30px; height: 30px; border: 1px solid #ddd0eb; border-radius: 11px; display: grid; place-items: center; color: var(--console-primary); background: var(--console-bg); flex-shrink: 0; font-size: 11px; }
 .workflow-run-step.completed .workflow-run-step-number { color: var(--console-success); background: var(--console-success-container); border-color: #dbe7dc; }
-.workflow-run-step.running .workflow-run-step-number, .workflow-run-step.admitting .workflow-run-step-number { color: #fff; background: var(--console-primary); border-color: var(--console-primary); }
+.workflow-run-step:is(.running, .admitting, .verifying) .workflow-run-step-number { color: #fff; background: var(--console-primary); border-color: var(--console-primary); }
 .workflow-run-step-content { flex: 1; min-width: 0; }
 .workflow-run-step-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .workflow-run-step-title h4 { margin: 0; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
 .workflow-run-step-content > p { color: var(--console-muted); font-size: 11px; line-height: 1.8; margin: 10px 0 0; }
 .workflow-run-step-content > p > span { display: block; font: 10px/1.8 Consolas, monospace; overflow-wrap: anywhere; margin-top: 5px; }
 .workflow-run-step-content .workflow-run-step-failure { color: var(--md-sys-color-error); }
+.workflow-run-step-content .workflow-run-step-outcome { color: var(--console-muted); }
 .workflow-run-artifacts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
 .workflow-run-artifacts .console-button { min-height: 36px; padding: 8px 13px; font-size: 11px; max-width: 100%; }
 .workflow-run-artifacts .console-button span { overflow-wrap: anywhere; min-width: 0; }

@@ -3,7 +3,7 @@ import { canonicalJson, sha256Hex } from '../utils/protocol';
 import { saveFile } from '../utils/downloadFile';
 import { WORKFLOW_STORAGE_KEY, TASK_ID, check, clone, same, workflowContext,
   validateBrowserPlan, verifyWorkflowQuote, verifyUserSignature, resolveStepManifest, workflowRequest,
-  verifyCompletedStep, downloadWorkflowArtifact, publicWorkflow } from '../utils/browserWorkflows';
+  verifyCompletedStep, downloadWorkflowArtifact, publicWorkflow, resolvedWorkflowSource } from '../utils/browserWorkflows';
 
 const ACTIVE = new Set(['admitting', 'running']);
 const STATES = new Set(['pending', 'quoted', 'admitting', 'running', 'completed', 'failed']);
@@ -121,7 +121,7 @@ export default function useBrowserWorkflow({ apiUrl, gatewayHealth, gatewayOnlin
       const saved = journal.current.steps.find(item => item.id === dependency);
       check(saved?.state === 'completed', 'A dependency has not completed successfully.');
       const approved = current.plan.steps.find(item => item.id === dependency);
-      const spec = await resolveStepManifest(journal.current, approved);
+      const spec = await resolveStepManifest(journal.current, approved, live.current.connection);
       await verifyWorkflowQuote(saved.quote, approved, spec, current.context, true);
       await verifyCompletedStep(current.context, saved, live.current.connection);
       ensureCurrent(current.id);
@@ -132,29 +132,43 @@ export default function useBrowserWorkflow({ apiUrl, gatewayHealth, gatewayOnlin
   function finishPhase() {
     const current = journal.current;
     if (current.steps.some(step => ACTIVE.has(step.state))) return;
-    if (current.steps.some(step => step.state === 'failed')) showPhase(current.stop_requested ? 'stopped' : 'failed', 'The current step did not complete; downstream approvals are withheld.');
+    if (current.steps.some(step => step.state === 'failed')) {
+      const cancelled = current.steps.some(step => step.receipt?.execution_status === 'cancelled');
+      showPhase(current.stop_requested ? 'stopped' : 'failed', cancelled
+        ? 'The current task was cancelled; downstream approvals are withheld.'
+        : 'The current step did not complete; downstream approvals are withheld.');
+    }
     else if (current.steps.every(step => step.state === 'completed' && step.verified)) showPhase('completed', 'Every step and result receipt has been verified.');
     else if (current.stop_requested) showPhase('stopped', 'This workflow is stopped. Completed results remain available.');
     else showPhase('ready', 'Review the next step before approving another wallet signature.');
     if (TERMINAL.has(phaseRef.current)) releaseLock();
   }
-  async function cancelActive(current, saved) {
+  async function cancelActive(current, saved, owner = null) {
     ensureCurrent(current.id);
-    await workflowRequest(current.context, '/stop/' + saved.task_id, { method: 'POST', token: saved.token });
-    ensureCurrent(current.id);
+    if (owner?.cancelPromise) return owner.cancelPromise;
+    const request = workflowRequest(current.context, '/stop/' + saved.task_id, { method: 'POST', token: saved.token })
+      .then(() => ensureCurrent(current.id));
+    if (owner) owner.cancelPromise = request;
+    try {
+      await request;
+      if (owner) owner.cancelled = true;
+    } catch (error) {
+      if (owner?.cancelPromise === request) owner.cancelPromise = null;
+      throw error;
+    }
   }
   function monitor(current) {
     if (monitorRef.current || !mounted.current) return;
     const saved = current.steps.find(step => step.state === 'running');
     if (!saved) { finishPhase(); return; }
-    const owner = { id: current.id, stepId: saved.id, controller: new AbortController(), cancelled: false };
+    const owner = { id: current.id, stepId: saved.id, controller: new AbortController(), cancelled: false, cancelPromise: null };
     monitorRef.current = owner;
     const tick = async () => {
       if (monitorRef.current !== owner) return;
       try {
         const latest = ensureCurrent(owner.id);
         const item = latest.steps.find(step => step.id === owner.stepId);
-        if (latest.stop_requested && !owner.cancelled) { await cancelActive(latest, item); owner.cancelled = true; }
+        if (latest.stop_requested && !owner.cancelled) await cancelActive(latest, item, owner);
         const result = await workflowRequest(latest.context, '/result/' + item.task_id,
           // JSON escapes can expand a bounded one-megabyte UTF-8 log sixfold.
           { token: item.token, signal: owner.controller.signal, maximum: 6500000 });
@@ -164,7 +178,7 @@ export default function useBrowserWorkflow({ apiUrl, gatewayHealth, gatewayOnlin
           showPhase('verifying', 'Checking the gateway, worker and settlement evidence.');
           const candidate = { ...item, receipt: result.receipt };
           const approved = latest.plan.steps.find(step => step.id === item.id);
-          await verifyWorkflowQuote(item.quote, approved, await resolveStepManifest(journal.current, approved), latest.context, true);
+          await verifyWorkflowQuote(item.quote, approved, await resolveStepManifest(journal.current, approved, live.current.connection), latest.context, true);
           await verifyCompletedStep(latest.context, candidate, live.current.connection, owner.controller.signal);
           ensureCurrent(owner.id);
           updateStep(item.id, { state: result.receipt.execution_status === 'completed' ? 'completed' : 'failed',
@@ -200,9 +214,9 @@ export default function useBrowserWorkflow({ apiUrl, gatewayHealth, gatewayOnlin
     const body = saved.signedBody;
     check(Array.isArray(body?.signature) && body.signature.length === 64
       && body.signature.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255), 'Saved admission signature is invalid.');
-    check(same(body, { quote_id: saved.quote.quote_id, code: step.source, wallet: current.context.owner,
+    check(same(body, { quote_id: saved.quote.quote_id, code: await resolvedWorkflowSource(step, spec), wallet: current.context.owner,
       agent_pubkey: current.context.owner, signature: body.signature, message: saved.quote.message,
-      job_version: 1, inputs: spec.inputs, parameters: spec.parameters }), 'Saved admission body differs from the approved plan.');
+      job_version: 1, inputs: spec.inputs, parameters: spec.parameters, ...(step.worker_target ? { worker_target: step.worker_target } : {}) }), 'Saved admission body differs from the approved plan.');
     await verifyUserSignature(current.context.owner, Uint8Array.from(body.signature), saved.quote.message);
   }
   async function restoreEvidence() {
@@ -212,7 +226,7 @@ export default function useBrowserWorkflow({ apiUrl, gatewayHealth, gatewayOnlin
     for (const saved of current.steps) {
       if (!saved.quote) continue;
       const step = current.plan.steps.find(item => item.id === saved.id);
-      const spec = await resolveStepManifest(journal.current, step);
+      const spec = await resolveStepManifest(journal.current, step, live.current.connection);
       await verifyWorkflowQuote(saved.quote, step, spec, current.context, true);
       ensureCurrent(current.id);
       if (saved.signedBody) await verifySavedAdmission(current, saved, step, spec);
@@ -297,14 +311,14 @@ export default function useBrowserWorkflow({ apiUrl, gatewayHealth, gatewayOnlin
     await acquire(current); showPhase('quoting');
     const step = nextStep(current); check(step, 'Every workflow step is already completed.');
     await verifyDependencies(current, step);
-    const spec = await resolveStepManifest(journal.current, step);
+    const spec = await resolveStepManifest(journal.current, step, live.current.connection);
     ensureCurrent(current.id, true); check(!journal.current.stop_requested, 'Workflow was stopped before approval.');
     await healthAndChannel(current, step.max_cost_lamports);
     ensureCurrent(current.id, true);
     const approved = await workflowRequest(current.context, '/quotes', { method: 'POST', body: {
-      wallet: current.context.owner, agent_pubkey: current.context.owner, code: step.source,
+      wallet: current.context.owner, agent_pubkey: current.context.owner, code: await resolvedWorkflowSource(step, spec),
       max_cost_lamports: step.max_cost_lamports, max_runtime_seconds: step.max_runtime_seconds,
-      job_version: 1, inputs: spec.inputs, parameters: spec.parameters } });
+      job_version: 1, inputs: spec.inputs, parameters: spec.parameters, ...(step.worker_target ? { worker_target: step.worker_target } : {}) } });
     await verifyWorkflowQuote(approved, step, spec, current.context);
     ensureCurrent(current.id, true); check(!journal.current.stop_requested, 'Workflow was stopped before approval.');
     updateStep(step.id, { state: 'quoted', quote: clone(approved) });
@@ -326,7 +340,7 @@ export default function useBrowserWorkflow({ apiUrl, gatewayHealth, gatewayOnlin
     check(!current.stop_requested && !current.steps.some(step => ACTIVE.has(step.state)), 'Current admission must be recovered before another signature.');
     const step = nextStep(current), saved = current.steps.find(item => item.id === step?.id);
     check(saved?.state === 'quoted', 'Review the next step before signing.');
-    const spec = await resolveStepManifest(current, step);
+    const spec = await resolveStepManifest(current, step, live.current.connection);
     await verifyDependencies(current, step);
     await verifyWorkflowQuote(saved.quote, step, spec, current.context);
     await healthAndChannel(current, step.max_cost_lamports);
@@ -338,7 +352,7 @@ export default function useBrowserWorkflow({ apiUrl, gatewayHealth, gatewayOnlin
     await verifyUserSignature(current.context.owner, signature, saved.quote.message);
     ensureCurrent(current.id, true); check(!journal.current.stop_requested, 'Workflow was stopped; no admission was submitted.');
     const signedBody = { quote_id: saved.quote.quote_id, wallet: current.context.owner, agent_pubkey: current.context.owner,
-      code: step.source, message: saved.quote.message, signature: Array.from(signature), job_version: 1,
+      code: await resolvedWorkflowSource(step, spec), message: saved.quote.message, signature: Array.from(signature), job_version: 1,
       inputs: spec.inputs, parameters: spec.parameters };
     updateStep(step.id, { state: 'admitting', signedBody });
     showPhase('submitting', 'The signed request is saved before admission.');
@@ -364,7 +378,7 @@ export default function useBrowserWorkflow({ apiUrl, gatewayHealth, gatewayOnlin
     const saved = current.steps.find(step => step.state === 'admitting');
     check(saved?.signedBody, 'There is no saved uncertain admission to recover.');
     const step = current.plan.steps.find(item => item.id === saved.id);
-    const spec = await resolveStepManifest(current, step);
+    const spec = await resolveStepManifest(current, step, live.current.connection);
     await verifyWorkflowQuote(saved.quote, step, spec, current.context, true);
     await verifySavedAdmission(current, saved, step, spec);
     await healthAndChannel(current);
@@ -408,7 +422,8 @@ export default function useBrowserWorkflow({ apiUrl, gatewayHealth, gatewayOnlin
       if (mounted.current) setQuote(null);
       const saved = latest.steps.find(step => step.state === 'running');
       if (saved) {
-        await cancelActive(latest, saved);
+        const owner = monitorRef.current?.id === latest.id && monitorRef.current?.stepId === saved.id ? monitorRef.current : null;
+        await cancelActive(latest, saved, owner);
         if (!monitorRef.current) monitor(journal.current);
         showPhase('running', 'Cancellation requested; waiting for the verified terminal receipt.');
       } else if (journal.current.steps.some(step => step.state === 'admitting')) showPhase('attention', 'Stop intent is saved. Recover the original task through signed history, then cancellation will be sent.');

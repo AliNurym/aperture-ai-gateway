@@ -419,21 +419,47 @@ class SolanaClient:
         if not receipt:
             if not start_intent:
                 return None
-            # A start could land after the gateway died. A missing account only
-            # proves no spend after its signed blockhash has expired.
+            # While the signed blockhash is valid, a missing receipt can still
+            # be an RPC visibility race. After expiry, inspect transaction
+            # history before deciding whether execution started.
             height = await self.client.get_block_height(commitment=Confirmed)
             if height.value <= start_intent['last_valid_block_height']:
                 return None
             statuses = await self.client.get_signature_statuses([Signature.from_string(start_intent['signature'])], search_transaction_history=True)
             status = statuses.value[0] if statuses.value else None
-            if status is None or status.err is not None:
+            if status is None:
+                # Missing historical status is not proof that the transaction
+                # failed; leave the job pending rather than invent a zero cost.
+                return None
+            if status.err is not None:
                 return {'signature': None, 'charged_lamports': 0, 'evidence': 'expired_unlanded_start_transaction'}
-            return None
+            # If the start did land but the receipt is temporarily unavailable,
+            # the only safe recovery below is a matching finalized channel state.
         state = await self.get_channel_state(owner)
         if not state:
             return None
         if state['last_task_hash'] == task_hash and not state['burn_rate_lamports']:
-            return {'signature': None, 'charged_lamports': state['last_charged_lamports'], 'evidence': 'confirmed_channel_state'}
+            charged = state.get('last_charged_lamports')
+            if type(charged) is not int or charged < 0:
+                return None
+            result = {
+                'signature': None,
+                'charged_lamports': charged,
+                'evidence': 'confirmed_channel_state',
+            }
+            # A worker-pinned task stores its last recipient in the idle
+            # channel account. Preserve that chain-observed destination when
+            # receipt lookup is temporarily unavailable during recovery.
+            last_worker = state.get('last_worker_pubkey')
+            if last_worker:
+                if worker_pubkey and worker_pubkey != last_worker:
+                    raise ValueError('Settled channel state names a different worker key.')
+                result.update(worker_pubkey=last_worker, payout_destination=last_worker)
+            return result
+        if not receipt:
+            # A missing receipt cannot authorize a stop transaction, even if
+            # the channel still appears active; wait for canonical visibility.
+            return None
         # Never stop another task/channel session after a delayed retry.
         if state['task_hash'] != task_hash:
             return None

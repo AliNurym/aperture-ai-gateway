@@ -1,5 +1,40 @@
 export const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 
+// Restart a short entry motion without remounting a workspace that owns drafts,
+// quotes, or active task recovery state.
+export function animatePageEntry(element) {
+  const doc = element?.ownerDocument;
+  const view = doc?.defaultView;
+  if (!element?.isConnected || doc?.hidden || !view?.matchMedia || !view?.requestAnimationFrame) return () => {};
+
+  const preference = view.matchMedia(REDUCED_MOTION_QUERY);
+  element.removeAttribute('data-entering');
+  if (preference.matches) return () => {};
+
+  let disposed = false;
+  let frame = view.requestAnimationFrame(() => {
+    frame = 0;
+    if (!disposed && element.isConnected && !doc.hidden && !preference.matches)
+      element.setAttribute('data-entering', '');
+  });
+  const stopForReducedMotion = () => {
+    if (!preference.matches) return;
+    disposed = true;
+    if (frame) view.cancelAnimationFrame(frame);
+    frame = 0;
+    element.removeAttribute('data-entering');
+  };
+  preference.addEventListener?.('change', stopForReducedMotion);
+
+  return () => {
+    disposed = true;
+    if (frame) view.cancelAnimationFrame(frame);
+    frame = 0;
+    preference.removeEventListener?.('change', stopForReducedMotion);
+    element.removeAttribute('data-entering');
+  };
+}
+
 const PRESS_CONTROLS = [
   '.console-button', '.console-new', '.console-nav-item', '.console-sample',
   '.console-icon-button', '.studio-editor-heading button', '.studio-presets button',

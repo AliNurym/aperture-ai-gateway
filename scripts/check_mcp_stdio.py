@@ -30,6 +30,7 @@ REQUIRED_TOOLS = {
     "prepare_compute_workflow", "get_assigned_workflows", "start_assigned_workflow",
     "get_assigned_workflow_progress", "start_compute_workflow", "get_compute_workflow",
     "cancel_compute_workflow",
+    "list_sentinel_providers", "quote_source_review", "get_source_review", "quote_reviewed_job",
 }
 
 

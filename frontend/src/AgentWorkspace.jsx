@@ -82,13 +82,13 @@ export default function AgentWorkspace({ context, owner, signMessage, plan, disa
   const handoff = () => operate(async options => {
     const inputs = plan.steps.flatMap(step => step.inputs.filter(item => item.object_id));
     const unique = [...new Map(inputs.map(item => [item.object_id, item])).values()];
-    const references = await assignInputs(options, unique);
+    const references = unique.length ? await assignInputs(options, unique) : [];
     const byId = new Map(unique.map((item, index) => [item.object_id, references[index]]));
     const next = { ...plan, steps: plan.steps.map(step => ({ ...step,
       inputs: step.inputs.map(item => item.object_id ? byId.get(item.object_id) : item) })) };
     const requestId = await assignedRequestId(options, next);
     options.ensureCurrent(); setAssigned({ scope, planKey, plan: next, requestId });
-    setNotice('Files assigned. This agent can use the references through MCP or the SDK without receiving dataset contents in chat.');
+    setNotice(unique.length ? 'Files assigned. Review this plan before approving its execution by the agent.' : 'Plan prepared for this agent. Its passport must allow every runtime in the chain.');
   });
   const observe = () => operate(async options => {
     const next = await openAgentView(options);
@@ -113,7 +113,7 @@ export default function AgentWorkspace({ context, owner, signMessage, plan, disa
   });
   const data = snapshot?.scope === scope ? snapshot.data : null;
   return <section className="console-panel agent-workspace">
-    <div className="console-section-heading"><div><span className="console-eyebrow">DELEGATED EXECUTION</span><h2>Give the work to your agent</h2><p>Assign data and inspect the same agent's tasks, cost and results here.</p></div></div>
+    <div className="console-section-heading"><div><span className="console-eyebrow">DELEGATED EXECUTION</span><h2>Give the work to your agent</h2><p>Approve a bounded plan and inspect the same agent's tasks, cost and results here.</p></div></div>
     <div className="workflow-agent-choice">
       <label htmlFor="workflow-agent">Agent public key<input id="workflow-agent" list="workflow-agent-options" value={agent} disabled={busy || disabled} onChange={event => setAgent(event.target.value.trim())} placeholder="Choose an owner-issued agent" autoComplete="off" /></label>
       <datalist id="workflow-agent-options">{passports.map(item => <option value={item.agent_pubkey} key={item.agent_pubkey}>{item.name}</option>)}</datalist>
@@ -129,7 +129,7 @@ export default function AgentWorkspace({ context, owner, signMessage, plan, disa
       }}><Icon name="spark" size={15} />Select registered agent</button>
     </div>
     <div className="workflow-hero-actions">
-      <button className={'console-button ' + (currentAssigned ? 'secondary' : 'primary')} onClick={handoff} disabled={!canOperate || !agent || agent === owner || !plan || Boolean(currentAssigned)}><Icon name="upload" size={16} />{currentAssigned ? 'Files assigned' : busy ? 'Authorizing…' : 'Assign selected files'}</button>
+      <button className={'console-button ' + (currentAssigned ? 'secondary' : 'primary')} onClick={handoff} disabled={!canOperate || !agent || agent === owner || !plan || Boolean(currentAssigned)}><Icon name="upload" size={16} />{currentAssigned ? 'Plan ready' : busy ? 'Authorizing…' : plan?.steps.some(step => step.inputs.some(item => item.object_id)) ? 'Assign selected files' : 'Prepare agent handoff'}</button>
       {currentAssigned && <button className="console-button secondary" onClick={() => saveFile('aperture-agent-workflow.json', JSON.stringify(currentAssigned, null, 2), 'application/json')}><Icon name="download" size={16} />Export assigned plan</button>}
       {currentAssigned && <button className="console-button primary" onClick={submit} disabled={!canOperate}><Icon name="play" size={16} />Approve {(currentAssigned.max_cost_lamports / 1e9).toLocaleString('en-US', { maximumFractionDigits: 9 })} SOL maximum</button>}
       <button className="console-button secondary" onClick={observe} disabled={!canOperate || !agent}><Icon name="eye" size={16} />{view ? 'Renew observation' : 'Open agent workspace'}</button>

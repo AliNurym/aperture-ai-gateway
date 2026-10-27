@@ -1,6 +1,7 @@
 import { PublicKey } from '@solana/web3.js';
 import { APERTURE_PROGRAM_ID, GATEWAY_PUBKEY_PIN, TREASURY_PUBKEY_PIN, canonicalJson,
-  canonicalQuoteMessage, isPortableFilename, sha256Hex, verifyGatewayReceipt, verifyDevnetSettlement } from './protocol.js';
+  canonicalQuoteMessage, isPortableFilename, verifyGatewayReceipt, verifyDevnetSettlement } from './protocol.js';
+import { inferenceSource } from './inference.js';
 import { MAX_INPUT_BYTES, hashBytes, jobManifest, validateObject, verifyJobManifest } from './jobs.js';
 import { validateSource } from './workloads.js';
 
@@ -8,7 +9,7 @@ export const WORKFLOW_STORAGE_KEY = 'aperture-browser-workflow:v1';
 export const MAX_WORKFLOW_RATE = 25000;
 export const TASK_ID = /^task-[0-9a-f]{32}$/;
 export const STEP_ID = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
-const STEP_FIELDS = new Set(['id', 'source', 'inputs', 'parameters', 'depends_on', 'max_cost_lamports', 'max_runtime_seconds']);
+const STEP_FIELDS = new Set(['id', 'source', 'inputs', 'parameters', 'depends_on', 'max_cost_lamports', 'max_runtime_seconds', 'worker_target', 'message_inputs']);
 
 export function check(condition, message) { if (!condition) throw new Error(message); }
 export function same(left, right) { return canonicalJson(left) === canonicalJson(right); }
@@ -65,6 +66,33 @@ export async function validateBrowserPlan(value) {
     const depends = raw.depends_on ?? [];
     check(Array.isArray(inputs) && inputs.length <= 16 && Array.isArray(depends) && depends.every(item => typeof item === 'string'), 'Invalid step inputs or dependencies.');
     const dependencies = new Set(depends);
+    const extras = {};
+    if (Object.hasOwn(raw, 'worker_target')) {
+      const target = raw.worker_target;
+      check(target && Object.keys(target).sort().join(',') === 'node_id,worker_pubkey'
+        && typeof target.node_id === 'string' && /^[!-~]{1,64}$/.test(target.node_id)
+        && typeof target.worker_pubkey === 'string' && new PublicKey(target.worker_pubkey).toBase58() === target.worker_pubkey, 'Invalid workflow worker target.');
+      extras.worker_target = clone(target);
+    }
+    const bindings = raw.message_inputs ?? [];
+    check(Array.isArray(bindings) && bindings.length <= 8, 'Use at most eight explicit model context files.');
+    const inference = raw.source.startsWith('# Aperture inference request v1\n');
+    if (inference) {
+      check(inputs.length === 0, 'Inference uses explicit message_inputs, rather than file inputs.');
+      await jobManifest(raw.source, [], JSON.stringify(parameters));
+    } else check(!bindings.length, 'Only inference steps accept message_inputs.');
+    const seenBindings = new Set();
+    for (const binding of bindings) {
+      const messages = parameters.inference?.messages;
+      check(binding && Object.keys(binding).sort().join(',') === 'artifact,from_step,message_index'
+        && typeof binding.from_step === 'string' && isPortableFilename(binding.artifact)
+        && Number.isSafeInteger(binding.message_index) && binding.message_index >= 0
+        && Array.isArray(messages) && messages[binding.message_index]?.role === 'user', 'Model context must name a result file and a user message.');
+      const key = canonicalJson(binding);
+      check(!seenBindings.has(key), 'Duplicate model context file.');
+      seenBindings.add(key); dependencies.add(binding.from_step);
+    }
+    if (bindings.length) extras.message_inputs = clone(bindings);
     const names = new Set();
     let total = 0;
     for (const input of inputs) {
@@ -79,7 +107,7 @@ export async function validateBrowserPlan(value) {
     }
     check(total <= MAX_INPUT_BYTES, 'Direct step inputs exceed 64 MiB.');
     steps.push({ id: raw.id, source: raw.source, inputs: clone(inputs), parameters: clone(parameters),
-      depends_on: [...dependencies].sort(), max_cost_lamports: cost, max_runtime_seconds: runtime });
+      depends_on: [...dependencies].sort(), max_cost_lamports: cost, max_runtime_seconds: runtime, ...extras });
   }
   check(steps.reduce((sum, step) => sum + step.max_cost_lamports, 0) <= value.max_cost_lamports, 'Step spending caps exceed the declared workflow maximum.');
   check(steps.every(step => step.depends_on.every(id => identifiers.has(id) && id !== step.id)), 'Workflow has an unknown or self dependency.');
@@ -99,20 +127,24 @@ export function normalizedApi(value) {
   return url.href.replace(/\/$/, '');
 }
 
-export function workflowContext(apiUrl, owner, health) {
+export function workflowContext(apiUrl, owner, health, { gatewayPin = GATEWAY_PUBKEY_PIN, treasuryPin = TREASURY_PUBKEY_PIN } = {}) {
   check(health && health.program_id === APERTURE_PROGRAM_ID && typeof health.demo_mode === 'boolean', 'Gateway identity is unavailable or differs from the pinned program.');
   check(new PublicKey(owner).toBase58() === owner && new PublicKey(health.gateway_pubkey).toBase58() === health.gateway_pubkey, 'Invalid workflow signing identity.');
   const network = health.demo_mode ? 'off_chain' : 'devnet';
-  check(!GATEWAY_PUBKEY_PIN || health.gateway_pubkey === GATEWAY_PUBKEY_PIN, 'Gateway signer differs from the frontend pin.');
-  if (network === 'devnet') check(GATEWAY_PUBKEY_PIN && TREASURY_PUBKEY_PIN, 'Pin the Devnet gateway and treasury before execution.');
+  if (network === 'devnet') {
+    check(gatewayPin && health.gateway_pubkey === gatewayPin, 'Gateway signer differs from the frontend pin.');
+    check(treasuryPin, 'Pin the Devnet gateway and treasury before execution.');
+  }
   return { api_url: normalizedApi(apiUrl), owner, network, program_id: APERTURE_PROGRAM_ID,
-    gateway_pubkey: health.gateway_pubkey, treasury: network === 'devnet' ? TREASURY_PUBKEY_PIN : null,
-    gateway_pin: GATEWAY_PUBKEY_PIN, treasury_pin: TREASURY_PUBKEY_PIN, max_rate_lamports: MAX_WORKFLOW_RATE };
+    gateway_pubkey: health.gateway_pubkey, treasury: network === 'devnet' ? treasuryPin : null,
+    gateway_pin: network === 'devnet' ? gatewayPin : health.gateway_pubkey,
+    treasury_pin: network === 'devnet' ? treasuryPin : null, max_rate_lamports: MAX_WORKFLOW_RATE };
 }
 
 export async function verifyWorkflowQuote(quote, step, spec, context, allowExpired = false) {
   check(quote && quote.wallet === context.owner && quote.agent_pubkey === context.owner
-    && quote.code_sha256 === await sha256Hex(step.source) && quote.max_cost_lamports === step.max_cost_lamports
+    && quote.code_sha256 === spec.source_sha256 && Boolean(quote.worker_target)
+    && (!step.worker_target || same(quote.worker_target, step.worker_target)) && quote.max_cost_lamports === step.max_cost_lamports
     && quote.max_runtime_seconds === step.max_runtime_seconds && quote.program_id === context.program_id
     && quote.gateway_pubkey === context.gateway_pubkey && quote.network === context.network
     && quote.treasury === context.treasury, 'Quote changed the approved identity, source, bounds or deployment.');
@@ -133,7 +165,7 @@ export async function verifyUserSignature(owner, signature, message) {
   check(await crypto.subtle.verify({ name: 'Ed25519' }, key, signature, new TextEncoder().encode(message)), 'Wallet signature differs from the approved owner.');
 }
 
-export async function resolveStepManifest(journal, step) {
+export async function resolveStepManifest(journal, step, connection) {
   const inputs = step.inputs.map(reference => {
     if (!Object.hasOwn(reference, 'from_step')) return reference;
     const previous = journal.steps.find(item => item.id === reference.from_step);
@@ -142,7 +174,22 @@ export async function resolveStepManifest(journal, step) {
     check(artifact, 'The required dependency result file is absent.');
     return artifact;
   });
-  return jobManifest(step.source, inputs, JSON.stringify(step.parameters));
+  const parameters = clone(step.parameters);
+  for (const binding of step.message_inputs || []) {
+    const previous = journal.steps.find(item => item.id === binding.from_step);
+    const artifact = previous?.artifacts.find(item => item.name === binding.artifact);
+    check(previous?.state === 'completed' && artifact && artifact.size_bytes <= 16000, 'Model context requires a completed result file up to 16,000 bytes.');
+    const bytes = await downloadWorkflowArtifact(journal.context, previous, artifact, connection);
+    const message = parameters.inference.messages[binding.message_index];
+    message.content += '\n\n[Aperture input ' + binding.from_step + '/' + binding.artifact + ']\n' + new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    check([...message.content].length <= 16000, 'Resolved model message exceeds 16,000 characters.');
+  }
+  const source = step.source.startsWith('# Aperture inference request v1\n') ? await inferenceSource(parameters) : step.source;
+  return jobManifest(source, inputs, JSON.stringify(parameters));
+}
+
+export async function resolvedWorkflowSource(step, spec) {
+  return spec.runtime === 'inference.chat' ? inferenceSource(spec.parameters) : step.source;
 }
 
 async function readBounded(response, maximum) {

@@ -48,6 +48,8 @@ def approved_sources(project_root: Path, node_executable: str) -> dict[str, str]
     if not isinstance(legacy, dict):
         raise ValueError("Legacy workload catalog is invalid.")
     sources.update({"legacy-" + name: code for name, code in legacy.items()})
+    model_workflow = json.loads((root / "backend" / "workloads" / "model_workflow.json").read_text(encoding="utf-8"))
+    sources['model-text-analysis'] = model_workflow['analysis_source']
 
     for name, code in sources.items():
         if (not isinstance(name, str) or not re.fullmatch(r"[a-z0-9_-]{1,64}", name)

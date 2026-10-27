@@ -144,7 +144,7 @@ class TrustedLocalExecutor:
         safe_env["OPENBLAS_NUM_THREADS"] = "1"
         safe_env["OMP_NUM_THREADS"] = "1"
         return subprocess.Popen(
-            [sys.executable, "-I", "-u", str(task_directory / ("runner.py" if (task_directory / "runner.py").exists() else "payload.py"))],
+            [sys.executable, "-I", "-X", "utf8", "-u", str(task_directory / ("runner.py" if (task_directory / "runner.py").exists() else "payload.py"))],
             cwd=task_directory, env=safe_env, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, bufsize=0,
         )

@@ -25,6 +25,7 @@ const paths = {
   sun: "M12 3v2m0 14v2m9-9h-2M5 12H3m15.364-6.364-1.414 1.414M7.05 16.95l-1.414 1.414M18.364 18.364l-1.414-1.414M7.05 7.05 5.636 5.636M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z",
   moon: "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z",
   activity: "M22 12h-4l-3 9L9 3l-3 9H2",
+  more: "M5 12h0m7 0h0m7 0h0",
 };
 
 export default function Icon({ name, size = 20, spinning = false, ...props }) {

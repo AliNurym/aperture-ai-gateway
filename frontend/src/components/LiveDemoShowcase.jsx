@@ -47,7 +47,7 @@ const STEPS = [
     eyebrow: "PAYMENT + RECOVERY",
     heading: "Keep settlement state with the task.",
     copy: "When Devnet is configured and the owner's payment channel is funded, the gateway can settle within the approved cap. Resumable workflows use a durable journal to recover accepted steps after interruption.",
-    note: "OFF_CHAIN preview sends no Solana payment. Updated Devnet source routes 100% of a confirmed task charge to its assigned worker; upstream model API bills remain outside Aperture.",
+    note: "Program source routes the full confirmed Devnet charge to its assigned worker; live deployment is unverified. Model API billing is separate.",
     actionLabel: "Build a recoverable workflow",
     action: "workflows",
   },
@@ -87,6 +87,9 @@ export default function LiveDemoShowcase({
   const [activeId, setActiveId] = useState("capacity");
   const active = STEPS.find((step) => step.id === activeId) || STEPS[0];
   const payment = settlementStatus(gatewayOnline, gatewayHealth);
+  const connectionLabel = !gatewayOnline
+    ? "GATEWAY NOT CONNECTED"
+    : active.id === "capacity" ? "LIVE CAPACITY" : "PROTOCOL OVERVIEW";
 
   const facts = active.id === "capacity"
     ? [
@@ -110,7 +113,7 @@ export default function LiveDemoShowcase({
           ? [
               { label: "Settlement", value: payment.value },
               { label: "Recovery", value: "Durable workflow journal" },
-              { label: "Worker payout", value: "100% of confirmed charge" },
+              { label: "Worker share in source", value: "100% of confirmed charge" },
             ]
           : [
               { label: "Signatures", value: "Gateway + worker" },
@@ -135,7 +138,7 @@ export default function LiveDemoShowcase({
           <p>Explore how the earlier compute mesh joins the current owner-approved task flow.</p>
         </div>
         <span className={"demo-tour-connection " + (gatewayOnline ? "connected" : "")}>
-          <i aria-hidden="true" /> {gatewayOnline ? "LIVE GATEWAY DATA" : "GATEWAY NOT CONNECTED"}
+          <i aria-hidden="true" /> {connectionLabel}
         </span>
       </div>
 
@@ -146,6 +149,7 @@ export default function LiveDemoShowcase({
               key={step.id}
               type="button"
               className={"demo-tour-step " + (active.id === step.id ? "selected" : "")}
+              aria-label={`Stage ${step.number}: ${step.title}`}
               aria-pressed={active.id === step.id}
               onClick={() => setActiveId(step.id)}
             >
@@ -160,24 +164,26 @@ export default function LiveDemoShowcase({
         </div>
 
         <article className="demo-tour-panel" aria-live="polite">
-          <div className="demo-tour-panel-head">
-            <span className="demo-tour-icon"><Icon name={active.icon} size={21} /></span>
-            <span className="demo-tour-stage">STAGE {active.number} <i /> {active.eyebrow}</span>
+          <div className="demo-tour-panel-content" key={active.id}>
+            <div className="demo-tour-panel-head">
+              <span className="demo-tour-icon"><Icon name={active.icon} size={21} /></span>
+              <span className="demo-tour-stage">STAGE {active.number} <i /> {active.eyebrow}</span>
+            </div>
+            <h3>{active.heading}</h3>
+            <p className="demo-tour-copy">{active.copy}</p>
+            <div className="demo-tour-facts">
+              {facts.map((fact) => (
+                <div className="demo-tour-fact" key={fact.label}>
+                  <span>{fact.label}</span>
+                  <strong>{fact.value}</strong>
+                </div>
+              ))}
+            </div>
+            <p className="demo-tour-note"><Icon name="shield" size={15} />{active.id === "settlement" ? payment.detail + " " : ""}{active.note}</p>
+            <button className="console-button secondary demo-tour-action" type="button" onClick={actions[active.action]}>
+              {active.actionLabel}<Icon name="arrow" size={16} />
+            </button>
           </div>
-          <h3>{active.heading}</h3>
-          <p className="demo-tour-copy">{active.copy}</p>
-          <div className="demo-tour-facts">
-            {facts.map((fact) => (
-              <div className="demo-tour-fact" key={fact.label}>
-                <span>{fact.label}</span>
-                <strong>{fact.value}</strong>
-              </div>
-            ))}
-          </div>
-          <p className="demo-tour-note"><Icon name="shield" size={15} />{active.id === "settlement" ? payment.detail + " " : ""}{active.note}</p>
-          <button className="console-button secondary demo-tour-action" type="button" onClick={actions[active.action]}>
-            {active.actionLabel}<Icon name="arrow" size={16} />
-          </button>
         </article>
       </div>
     </section>

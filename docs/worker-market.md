@@ -6,14 +6,14 @@ The shell also retains its stateful Studio, inference and visited workflow modul
 
 ## Consumer flow
 
-1. Open **Worker network**, choose a Python worker with **Use this worker**.
-2. **Compute Studio → Compute route** retains its node ID and signing key. Automatic routing remains an explicit alternative.
-3. The gateway checks that the exact key is registered, its heartbeat is recent, it accepts tasks, and its runtime/offer matches.
-4. Execution authorization **v5** includes `worker_target: {node_id, worker_pubkey}` alongside the source hash, cost/runtime limits and deployment identity. Older automatic v2/v3/v4 authorizations remain supported.
+1. A worker owner publishes a rate in **Provide compute** (or at startup with `APERTURE_WORKER_RATE_LAMPORTS_SEC`).
+2. Open **Worker network** and choose a priced Python worker with **Use this worker**, or leave the Studio route on automatic.
+3. The gateway checks that the exact key is registered, its heartbeat is recent, it accepts tasks, its rate is valid, and its runtime/offer matches.
+4. Execution authorization **v5** includes the selected `worker_target` and the worker's per-second rate alongside the source hash, cost/runtime limits and deployment identity. Automatic routing selects the lowest-priced compatible worker and pins that identity. Older v2/v3/v4 authorizations remain supported.
 5. Admission rechecks capacity. A different worker cannot claim a pinned job. Queued work does not silently fall back if the chosen node disconnects or drains; the owner can stop it or wait for the queue timeout.
 6. The gateway receipt preserves the target. Browser and Python SDK verification reject results attributed to another node or signing key.
 
-Python, file jobs and inference support the same optional target through the API and SDK. The browser model catalog currently chooses the model offer and automatically matches a serving worker; the Python Studio exposes exact worker selection.
+Python, file jobs and inference use the same pinned executor and published rate through the API, SDK and browser. In **Model inference** or **AI Sentinel**, choose an **Execution worker** after selecting the offer, or let the gateway select the lowest-priced compatible worker. The browser rechecks the key, offer, admission mode and rate before asking for a signature. A stale explicit selection remains pinned and unavailable until the owner chooses another node or automatic routing.
 
 ```python
 node = next(node for node in client.workers()
@@ -27,7 +27,7 @@ MCP exposes `list_workers` and the same optional `worker_target` on `quote_pytho
 
 ## Provider flow
 
-Open **Provide compute**, enter the running worker's ID and configured worker credential. Credentials are held only in component memory, never in browser storage, URLs or public network responses.
+Open **Provide compute**, enter the running worker's ID and configured worker credential. Set the lamports-per-second rate that you want buyers to sign. The worker's full confirmed task charge goes to its executor address; the gateway's DeepSeek/Gemini API bill remains separate. Credentials are held only in component memory, never in browser storage, URLs or public network responses.
 
 The workspace reads:
 
@@ -39,7 +39,7 @@ The workspace reads:
 
 **Drain worker** persists `accepting_tasks=false`. Current leases can be recovered and completed, but the worker cannot claim another task. Heartbeats and gateway restarts preserve the mode. **Resume admissions** enables new claims. Neither operation starts/stops the operating system process or kills a running job.
 
-Public `GET /workers` returns selected metadata and aggregate totals. Authenticated `GET /workers/me` adds private task activity; `POST /workers/me/mode` changes admission mode. Authentication uses existing per-worker credentials; source, wallet owner identities, task tokens and worker credentials are excluded from the public directory and operator activity response.
+Public `GET /workers` returns selected metadata, published rate and aggregate totals. Authenticated `GET /workers/me` adds private task activity; `POST /workers/me/mode` changes admission mode and `POST /workers/me/rate` updates the worker owner's rate. Authentication uses existing per-worker credentials; source, wallet owner identities, task tokens and worker credentials are excluded from the public directory and operator activity response.
 
 Headless operators can use the same API through:
 

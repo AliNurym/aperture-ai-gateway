@@ -6,7 +6,7 @@
 
 - Set `GEMINI_API_KEY` in the PowerShell session, then run `start_preview.bat`.
 - Open `http://127.0.0.1:3000/#studio` and confirm the gateway, Gemini offer, inference worker and CPU worker are ready.
-- Connect with **Temporary key**. Gemini receives a prompt only after its quote is signed. Google may charge separately for API use; Aperture preview makes no Solana payment.
+- Connect with **Temporary key**. The quote request sends the prompt to the gateway; after you sign and submit, it forwards the prompt to Gemini. Google may charge separately for API use; Aperture preview makes no Solana payment.
 - The demo uses the remote Gemini API and does not require a local model download.
 - Prepare two small example CSV batches in Agent workflows, or upload them before recording.
 

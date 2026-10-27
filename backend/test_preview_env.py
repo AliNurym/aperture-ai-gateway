@@ -19,7 +19,7 @@ class PreviewEnvironmentTests(unittest.TestCase):
             env_path.write_text(
                 "GEMINI_API_KEY=file-secret\n"
                 "APERTURE_GEMINI_MODEL=gemini-test\n"
-                "APERTURE_GEMINI_RATE_LAMPORTS_SEC=2400\n"
+                "APERTURE_WORKER_RATE_LAMPORTS_SEC=2400\n"
                 "BACKEND_PRIVATE_KEY=must-not-load\n",
                 encoding="utf-8",
             )
@@ -29,11 +29,11 @@ class PreviewEnvironmentTests(unittest.TestCase):
 
         self.assertEqual(loaded, (
             "APERTURE_GEMINI_MODEL",
-            "APERTURE_GEMINI_RATE_LAMPORTS_SEC",
+            "APERTURE_WORKER_RATE_LAMPORTS_SEC",
         ))
         self.assertEqual(environment["GEMINI_API_KEY"], "process-secret")
         self.assertEqual(environment["APERTURE_GEMINI_MODEL"], "gemini-test")
-        self.assertEqual(environment["APERTURE_GEMINI_RATE_LAMPORTS_SEC"], "2400")
+        self.assertEqual(environment["APERTURE_WORKER_RATE_LAMPORTS_SEC"], "2400")
         self.assertNotIn("BACKEND_PRIVATE_KEY", environment)
 
     def test_missing_file_is_a_noop(self):
@@ -43,6 +43,24 @@ class PreviewEnvironmentTests(unittest.TestCase):
 
         self.assertEqual(loaded, ())
         self.assertEqual(environment, {})
+
+    def test_loads_deepseek_settings_without_copying_other_secrets(self):
+        with self.temporary_directory() as directory:
+            env_path = Path(directory) / ".env"
+            env_path.write_text(
+                "DEEPSEEK_API_KEY=file-secret\n"
+                "APERTURE_DEEPSEEK_MODEL=deepseek-flash\n"
+                "APERTURE_WORKER_RATE_LAMPORTS_SEC=1500\n"
+                "BACKEND_PRIVATE_KEY=must-not-load\n",
+                encoding="utf-8",
+            )
+            environment = {"DEEPSEEK_API_KEY": "process-secret"}
+            loaded = load_local_inference_environment(env_path, environment)
+
+        self.assertEqual(loaded, ("APERTURE_DEEPSEEK_MODEL", "APERTURE_WORKER_RATE_LAMPORTS_SEC"))
+        self.assertEqual(environment["DEEPSEEK_API_KEY"], "process-secret")
+        self.assertEqual(environment["APERTURE_DEEPSEEK_MODEL"], "deepseek-flash")
+        self.assertNotIn("BACKEND_PRIVATE_KEY", environment)
 
 
 if __name__ == "__main__":

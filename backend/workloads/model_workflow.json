@@ -1,0 +1,3 @@
+{
+  "analysis_source": "import aperture\nimport hashlib\n\ntext = aperture.read_text('response.txt')\nwords = text.split()\nreport = {'characters': len(text), 'words': len(words), 'lines': len(text.splitlines()), 'sha256': hashlib.sha256(text.encode('utf-8')).hexdigest()}\naperture.write_json('analysis.json', report)\nprint('Verified text statistics:', report)\n"
+}

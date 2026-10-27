@@ -24,6 +24,9 @@
 .workflow-upload h3 { margin: 18px 0 8px; font-size: 17px; font-weight: 500; }
 .workflow-upload p { max-width: 350px; margin: 0 0 20px; font-size: 12px; line-height: 1.7; color: var(--console-muted); overflow-wrap: anywhere; }
 .workflow-example-button { margin-top: 10px; }
+.workflow-context-error { display: grid; justify-items: start; gap: 8px; max-width: 360px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--md-sys-color-error) 24%, transparent); border-radius: 12px; background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); text-align: left; }
+.workflow-context-error small { font-size: 11px; line-height: 1.55; }
+.workflow-context-error .console-text-button { min-height: 32px; color: var(--md-sys-color-error); }
 .workflow-input-list { list-style: none; padding: 0; margin: 16px 0; max-height: 300px; overflow: auto; }
 .workflow-input-list li { display: flex; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--console-line); }
 .workflow-input-list li > svg { color: var(--console-primary); flex-shrink: 0; }

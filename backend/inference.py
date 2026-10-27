@@ -44,7 +44,9 @@ class Provider(BaseModel):
     model: str = Field(min_length=1, max_length=128)
     base_url: str = Field(max_length=2048)
     api_key_env: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]{0,127}$")
-    rate_lamports_sec: StrictInt = Field(ge=1, le=25000)
+    # Accepted temporarily for older provider config files. It is intentionally
+    # excluded from the public offer and never determines a worker's task price.
+    rate_lamports_sec: StrictInt | None = Field(default=None, ge=1, le=25000)
     max_output_tokens: StrictInt = Field(default=512, ge=1, le=4096)
     development_only: bool = False
 
@@ -71,6 +73,12 @@ class Provider(BaseModel):
                 raise ValueError("Gemini provider URL must use the Gemini API v1beta base path.")
             if not loopback and host != "generativelanguage.googleapis.com":
                 raise ValueError("Gemini API keys may only be sent to Google's Generative Language API.")
+        if host == "api.deepseek.com" and (info.data.get("id") != "aperture-deepseek"
+                or info.data.get("protocol") != "openai_chat_completions"
+                or parsed.path.rstrip("/") not in ("", "/v1")):
+            raise ValueError("DeepSeek's API endpoint is reserved for the fixed Aperture Sentinel provider.")
+        if info.data.get("id") == "aperture-deepseek" and host != "api.deepseek.com":
+            raise ValueError("Aperture DeepSeek credentials may only be sent to api.deepseek.com.")
         return value.rstrip("/")
 
     @field_validator("model")
@@ -78,23 +86,32 @@ class Provider(BaseModel):
     def valid_model(cls, value, info):
         if info.data.get("protocol") == "gemini_generate_content" and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", value):
             raise ValueError("Gemini model IDs may contain only letters, digits, dot, underscore and hyphen.")
+        if info.data.get("id") == "aperture-deepseek" and value not in {"deepseek-flash", "deepseek-v4-pro"}:
+            raise ValueError("Use a currently supported DeepSeek API model ID.")
         return value
 
     @field_validator("api_key_env")
     @classmethod
-    def gemini_requires_key(cls, value, info):
-        if info.data.get("protocol") == "gemini_generate_content" and not value:
-            raise ValueError("Gemini providers require an API key environment variable.")
+    def provider_requires_key(cls, value, info):
+        if (info.data.get("protocol") == "gemini_generate_content" or info.data.get("id") == "aperture-deepseek") and not value:
+            raise ValueError("This provider requires an API key environment variable.")
+        if info.data.get("id") == "aperture-deepseek" and value != "DEEPSEEK_API_KEY":
+            raise ValueError("Aperture DeepSeek must use the DEEPSEEK_API_KEY environment variable.")
+        parsed = urlsplit(info.data.get("base_url", ""))
+        if value == "DEEPSEEK_API_KEY" and (info.data.get("id") != "aperture-deepseek"
+                or info.data.get("protocol") != "openai_chat_completions" or parsed.hostname != "api.deepseek.com"):
+            raise ValueError("DEEPSEEK_API_KEY may only be used by the pinned DeepSeek provider.")
+        if value == "GEMINI_API_KEY" and info.data.get("protocol") != "gemini_generate_content":
+            raise ValueError("GEMINI_API_KEY may only be used by the native Gemini provider.")
         return value
 
     def offer(self):
         # Endpoint identity is signed without publishing internal URLs or credentials.
         offer = {"id": self.id, "name": self.name, "model": self.model, "protocol": self.protocol,
                 "endpoint_sha256": hashlib.sha256(self.base_url.encode()).hexdigest(),
-                "rate_lamports_sec": self.rate_lamports_sec,
                 "max_output_tokens": self.max_output_tokens,
-                "runtime": CAPABILITY, "pricing": "published_inference_time_tariff_v1",
-                "billing": "Elapsed time, including provider waiting; not token billing",
+                "runtime": CAPABILITY, "pricing": "worker_published_time_rate_v1",
+                "billing": "Worker execution time; upstream model API charges are paid separately",
                 "settlement_destination": "authenticated_task_worker_on_confirmed_devnet",
                 "worker_settlement_share_pct": 100,
                 "upstream_provider_payouts": False}
@@ -109,6 +126,15 @@ def is_development_offer(offer):
     return (offer.get("development_only") is True
             or offer.get("id") in {"local-model", "aperture-local-fixture"}
             or "smollm" in str(offer.get("model", "")).lower())
+
+
+def offers_match(expected, advertised):
+    """Match current offers while tolerating the retired provider-rate field."""
+    if not isinstance(expected, dict) or not isinstance(advertised, dict):
+        return False
+    clean_expected = {key: value for key, value in expected.items() if key != "rate_lamports_sec"}
+    clean_advertised = {key: value for key, value in advertised.items() if key != "rate_lamports_sec"}
+    return clean_expected == clean_advertised
 
 
 def load_providers():
@@ -150,13 +176,38 @@ def validate_request(code, parameters, providers=None):
     offer = parameters["offer"]
     if (not isinstance(offer, dict) or offer.get("id") != request.provider_id
             or offer.get("runtime") != CAPABILITY
-            or type(offer.get("rate_lamports_sec")) is not int
-            or not 1 <= offer["rate_lamports_sec"] <= 25000
             or type(offer.get("max_output_tokens")) is not int
             or not 1 <= request.max_tokens <= offer["max_output_tokens"] <= 4096):
         raise ValueError("Invalid inference offer.")
+    if request.provider_id == "aperture-deepseek":
+        from sentinel_review import PROMPT_PREFIX
+        messages = request.messages
+        if len(messages) != 1 or messages[0].role != "user" or not messages[0].content.startswith(PROMPT_PREFIX):
+            raise ValueError("DeepSeek is available only for the fixed AI Sentinel source review.")
+        try:
+            source = json.loads(messages[0].content[len(PROMPT_PREFIX):])
+        except (ValueError, TypeError):
+            source = None
+        try:
+            source_size = len(source.encode("utf-8")) if isinstance(source, str) else 0
+        except UnicodeEncodeError:
+            source_size = 32001
+        if (not isinstance(source, str) or not source.strip() or source_size > 32000
+                or messages[0].content != PROMPT_PREFIX + json.dumps(source, ensure_ascii=False)):
+            raise ValueError("DeepSeek accepts only an exact AI Sentinel review prompt bound to one source string.")
     if providers is not None:
         provider = providers.get(request.provider_id)
-        if provider is None or request_parameters(request, provider) != parameters:
+        if provider is None:
+            raise ValueError("Provider offer changed or is no longer configured. Request a fresh quote.")
+        expected = request_parameters(request, provider)
+        supplied = dict(parameters)
+        supplied_offer = supplied.get("offer", {})
+        legacy_rate = supplied_offer.get("rate_lamports_sec") if isinstance(supplied_offer, dict) else None
+        if "rate_lamports_sec" in supplied_offer and (
+                provider.rate_lamports_sec is None or type(legacy_rate) is not int
+                or legacy_rate != provider.rate_lamports_sec):
+            raise ValueError("Legacy model rates must match the configured provider record and cannot set task price.")
+        supplied["offer"] = {key: value for key, value in supplied_offer.items() if key != "rate_lamports_sec"}
+        if expected != supplied:
             raise ValueError("Provider offer changed or is no longer configured. Request a fresh quote.")
     return request

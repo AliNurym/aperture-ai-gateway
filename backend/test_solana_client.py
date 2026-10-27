@@ -2,6 +2,7 @@ import sys
 import unittest
 import struct
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -88,6 +89,99 @@ class WorkerPayoutAbiTests(unittest.TestCase):
         self.assertEqual(idle["last_worker_pubkey"], str(worker))
         self.assertEqual(idle["last_charged_lamports"], 42)
         self.assertEqual(idle["last_task_hash"], "cd" * 32)
+
+
+class WorkerPayoutRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    def make_client(self, *, receipt=None, channel_state=None):
+        client = object.__new__(SolanaClient)
+        client.get_task_receipt = AsyncMock(return_value=receipt)
+        client.get_channel_state = AsyncMock(return_value=channel_state)
+        client._receipt_settlement = AsyncMock(return_value={
+            "signature": "settlement-signature",
+            "charged_lamports": 42,
+            "evidence": "confirmed_task_receipt",
+        })
+        client.client = SimpleNamespace(
+            get_block_height=AsyncMock(return_value=SimpleNamespace(value=2)),
+            get_signature_statuses=AsyncMock(return_value=SimpleNamespace(
+                value=[SimpleNamespace(err=None)],
+            )),
+        )
+        return client
+
+    async def test_channel_state_recovery_preserves_chain_observed_worker_payment(self):
+        owner, agent, worker = (str(Keypair().pubkey()) for _ in range(3))
+        task_hash = "ab" * 32
+        start_signature = str(Keypair().sign_message(b"start"))
+        client = self.make_client(channel_state={
+            "last_task_hash": task_hash,
+            "burn_rate_lamports": 0,
+            "last_charged_lamports": 42,
+            "last_worker_pubkey": worker,
+        })
+
+        settlement = await client.stop_task(
+            owner, task_hash, agent,
+            start_intent={"signature": start_signature, "last_valid_block_height": 1},
+            worker_pubkey=worker, worker_payout_bound=True,
+        )
+
+        self.assertEqual(settlement["charged_lamports"], 42)
+        self.assertEqual(settlement["worker_pubkey"], worker)
+        self.assertEqual(settlement["payout_destination"], worker)
+        self.assertEqual(settlement["evidence"], "confirmed_channel_state")
+
+    async def test_channel_state_recovery_rejects_a_different_stored_worker(self):
+        owner, agent, expected, wrong = (str(Keypair().pubkey()) for _ in range(4))
+        task_hash = "cd" * 32
+        start_signature = str(Keypair().sign_message(b"start"))
+        client = self.make_client(channel_state={
+            "last_task_hash": task_hash,
+            "burn_rate_lamports": 0,
+            "last_charged_lamports": 42,
+            "last_worker_pubkey": expected,
+        })
+
+        with self.assertRaisesRegex(ValueError, "different worker key"):
+            await client.stop_task(
+                owner, task_hash, agent,
+                start_intent={"signature": start_signature, "last_valid_block_height": 1},
+                worker_pubkey=wrong, worker_payout_bound=True,
+            )
+
+    async def test_missing_transaction_history_does_not_claim_zero_cost(self):
+        owner, agent = (str(Keypair().pubkey()) for _ in range(2))
+        client = self.make_client()
+        client.client.get_signature_statuses = AsyncMock(return_value=SimpleNamespace(value=[None]))
+        start_signature = str(Keypair().sign_message(b"start"))
+
+        settlement = await client.stop_task(
+            owner, "12" * 32, agent,
+            start_intent={"signature": start_signature, "last_valid_block_height": 1},
+        )
+
+        self.assertIsNone(settlement)
+        client.get_channel_state.assert_not_awaited()
+
+    async def test_settled_receipt_recovery_records_only_a_pinned_worker(self):
+        owner, agent, worker = (str(Keypair().pubkey()) for _ in range(3))
+        receipt = {"owner": owner, "agent_pubkey": agent, "settled": True}
+        client = self.make_client(receipt=receipt)
+
+        settlement = await client.stop_task(
+            owner, "ef" * 32, agent, worker_pubkey=worker,
+            worker_payout_bound=True,
+        )
+
+        self.assertEqual(settlement["payout_destination"], worker)
+        client._receipt_settlement.assert_awaited_once_with(receipt)
+
+        client = self.make_client(receipt=receipt)
+        settlement = await client.stop_task(
+            owner, "ef" * 32, agent, worker_pubkey=worker,
+            worker_payout_bound=False,
+        )
+        self.assertNotIn("payout_destination", settlement)
 
 
 if __name__ == "__main__":

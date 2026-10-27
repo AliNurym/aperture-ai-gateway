@@ -31,6 +31,9 @@
 .market-filters button[aria-pressed="true"] { background: var(--console-tonal); color: var(--console-primary); font-weight: 600; box-shadow: 0 1px 3px rgba(40, 25, 62, .08); }
 .market-directory-count { color: var(--console-muted); font-size: 12px; white-space: nowrap; }
 .market-directory-message { margin: 12px 0 0; padding: 10px 12px; border-radius: 9px; background: var(--console-tonal); color: var(--console-muted); font-size: 11px; line-height: 1.5; }
+.market-directory-message-action { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.market-directory-message-action p { margin: 0; }
+.market-directory-message-action .console-text-button { flex: 0 0 auto; white-space: nowrap; }
 .market-list { display: grid; }
 .market-row {
   display: grid;
@@ -100,7 +103,8 @@
   .market-intro-actions { display: grid; grid-template-columns: 1fr; }
   .market-intro-actions .console-button { width: 100%; }
   .market-directory-heading { align-items: flex-start; }
-  .market-refresh { width: 38px; min-width: 38px; padding: 9px; overflow: hidden; font-size: 0; }
+  .market-directory-message-action { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .console-app.aperture-workspace .market-refresh { display: grid; place-items: center; width: 40px; min-width: 40px; height: 40px; min-height: 40px; padding: 0; overflow: hidden; border-radius: 50%; font-size: 0; line-height: 0; }
   .market-toolbar { align-items: flex-start; }
   .market-filters { min-width: 0; }
   .market-filters button { padding-inline: 8px; font-size: 10px; }

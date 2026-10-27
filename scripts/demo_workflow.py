@@ -87,6 +87,7 @@ def main():
         state = Path(temporary)
         owner, agent, oracle = Keypair(), Keypair(), Keypair()
         port, worker_secret = available_port(), secrets.token_urlsafe(40)
+        demo_worker_rate = 1_000
         url = f"http://127.0.0.1:{port}"
         approved = state / "approved"
         approved.mkdir()
@@ -95,6 +96,7 @@ def main():
         env = {**os.environ, "APERTURE_ENV": "development", "APERTURE_DEMO_MODE": "true",
             "APERTURE_STATE_DB": str(state / "gateway.sqlite3"), "BACKEND_PRIVATE_KEY": json.dumps(list(bytes(oracle))),
             "APERTURE_WORKER_CREDENTIALS": "", "APERTURE_WORKER_TOKEN": worker_secret,
+            "APERTURE_WORKER_RATE_LAMPORTS_SEC": str(demo_worker_rate),
             "APERTURE_NODE_ID": "NODE-WORKFLOW-DEMO", "GATEWAY_API_URL": url,
             "APERTURE_WORKER_STATE_DIR": str(state / "worker"),
             "APERTURE_TRUSTED_SOURCE_DIRECTORY": str(approved), "APERTURE_ALLOW_UNSAFE_LOCAL_EXECUTION": "true"}
@@ -119,6 +121,30 @@ def main():
                     raise TimeoutError("Demo gateway startup timed out.")
                 processes.append(subprocess.Popen([sys.executable, "worker.py"], cwd=ROOT / "backend", env=env,
                     stdout=worker_log, stderr=subprocess.STDOUT, creationflags=creationflags))
+                registration_deadline = time.monotonic() + 30
+                registered_worker = None
+                while time.monotonic() < registration_deadline:
+                    if processes[-1].poll() is not None:
+                        raise RuntimeError("Demo worker stopped before registration: " + (state / "worker.log").read_text())
+                    try:
+                        workers = requests.get(url + "/workers", timeout=1).json().get("workers", [])
+                        registered_worker = next(
+                            (worker for worker in workers if worker.get("node_id") == "NODE-WORKFLOW-DEMO"), None
+                        )
+                        if (registered_worker and registered_worker.get("online")
+                                and registered_worker.get("accepting_tasks", True)
+                                and registered_worker.get("rate_lamports_sec") == demo_worker_rate
+                                and "python" in registered_worker.get("runtimes", [])):
+                            break
+                    except (requests.RequestException, ValueError):
+                        pass
+                    time.sleep(0.2)
+                else:
+                    state_summary = ({key: registered_worker.get(key) for key in
+                                      ("online", "accepting_tasks", "rate_lamports_sec", "runtimes")}
+                                     if registered_worker else "not registered")
+                    raise TimeoutError("Demo worker did not become online with its published test rate: "
+                                       + json.dumps(state_summary))
                 client = ApertureClient(url, owner=str(owner.pubkey()), agent_keypair=agent,
                     program_id="A5HfdyRWy77i5DxhTMBa1ZinxVGZbVZnb35EvXUvkNzQ",
                     gateway_pubkey=str(oracle.pubkey()), network="off_chain")

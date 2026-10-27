@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import Field
+from pydantic import Field, StrictInt
 from ai_engine import analyze_code_ast, get_sol_price_from_pyth
 from compute_profiles import csv_profile
 from solana_client import KEYPAIR_PATH, SolanaClient
@@ -237,6 +237,7 @@ class NodeInfo(Utf8Request):
     approved_source_count: Optional[int] = Field(default=None, ge=1, le=10_000)
     runtimes: list[str] = Field(default_factory=lambda: ["python"], max_length=2)
     inference_offers: list[dict] = Field(default_factory=list, max_length=32)
+    rate_lamports_sec: Optional[StrictInt] = Field(default=None, ge=1, le=1_000_000_000)
 
 class AirdropRequest(Utf8Request):
     wallet: str = Field(min_length=32, max_length=44)
@@ -296,7 +297,7 @@ async def health():
             "kya": "owner-issued delegation; not legal KYC", "execution_scope": "bounded Python CPU and configured model inference",
             "inference_api_version": 1, "inference_provider_count": sum(
                 not provider.is_development_only for provider in gateway.inference_providers.values()),
-            "compute_profiles": [csv_profile(gateway.csv_tariff)]}
+            "compute_profiles": [csv_profile()]}
 
 @app.get("/health/worker-auth")
 def worker_auth_health():
@@ -337,10 +338,11 @@ async def channel_config():
 @app.post("/register_node")
 async def register_node(info: NodeInfo, worker_id: str = Depends(require_worker)):
     from agent_identity import valid_public_key
+    from inference import offers_match
     if info.node_id != worker_id or not valid_public_key(info.worker_pubkey):
         raise HTTPException(409, "Worker identity does not match node payload.")
     if (not set(info.runtimes) <= {"python", "inference.chat"}
-            or any(offer not in [provider.offer() for provider in gateway.inference_providers.values()]
+            or any(not any(offers_match(provider.offer(), offer) for provider in gateway.inference_providers.values())
                    for offer in info.inference_offers)
             or (info.inference_offers and "inference.chat" not in info.runtimes)):
         raise HTTPException(422, "Worker inference offers must match the gateway's configured providers.")
@@ -349,6 +351,12 @@ async def register_node(info: NodeInfo, worker_id: str = Depends(require_worker)
         raise HTTPException(409, "Worker signing key changed; register a new worker ID.")
     record = {**info.model_dump(), "last_seen": time.time(),
               "accepting_tasks": (existing or {}).get("accepting_tasks", True)}
+    # The worker reports its initial offer at registration. Once an operator
+    # changes it in the provider workspace, heartbeats cannot silently reset it.
+    if existing and existing.get("rate_lamports_sec") is not None:
+        record["rate_lamports_sec"] = existing["rate_lamports_sec"]
+        if existing.get("rate_source"):
+            record["rate_source"] = existing["rate_source"]
     gateway.store.put("workers", worker_id, record)
     nodes[worker_id] = record
     return {"status": "registered", "node_id": worker_id}

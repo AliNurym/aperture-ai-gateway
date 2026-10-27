@@ -33,6 +33,6 @@ class InferenceExecutor(TrustedLocalExecutor):
         safe_env["APERTURE_INFERENCE_CONFIG"] = str(Path(os.environ["APERTURE_INFERENCE_CONFIG"]).resolve())
         if provider.api_key_env:
             safe_env[provider.api_key_env] = os.environ[provider.api_key_env]
-        return subprocess.Popen([sys.executable, "-I", "-u", str(Path(__file__).with_name("inference_runner.py")),
+        return subprocess.Popen([sys.executable, "-I", "-X", "utf8", "-u", str(Path(__file__).with_name("inference_runner.py")),
                                  str(task_directory)], cwd=task_directory, env=safe_env,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)

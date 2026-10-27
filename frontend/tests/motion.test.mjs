@@ -1,6 +1,62 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { installNavigationIndicator, installPressFeedback, REDUCED_MOTION_QUERY, revealContent, syncNavigationIndicator } from '../src/utils/motion.js';
+import { animatePageEntry, installNavigationIndicator, installPressFeedback, REDUCED_MOTION_QUERY, revealContent, syncNavigationIndicator } from '../src/utils/motion.js';
+
+function pageStage({ reduced = false, hidden = false, connected = true } = {}) {
+  const frames = new Map();
+  let serial = 0;
+  const preference = new EventTarget();
+  preference.matches = reduced;
+  const view = {
+    matchMedia: query => { assert.equal(query, REDUCED_MOTION_QUERY); return preference; },
+    requestAnimationFrame: fn => { const id = ++serial; frames.set(id, fn); return id; },
+    cancelAnimationFrame: id => frames.delete(id),
+  };
+  const attrs = new Map();
+  const element = {
+    ownerDocument: { defaultView: view, hidden },
+    isConnected: connected,
+    setAttribute: (key, value) => attrs.set(key, value),
+    removeAttribute: key => attrs.delete(key),
+  };
+  return {
+    element, attrs, frames, preference,
+    tick: () => { const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(fn => fn()); },
+  };
+}
+
+test('page entry motion starts after a frame and its cleanup preserves the mounted stage', () => {
+  const env = pageStage();
+  const cleanup = animatePageEntry(env.element);
+  assert.equal(env.attrs.has('data-entering'), false);
+  assert.equal(env.frames.size, 1);
+  env.tick();
+  assert.ok(env.attrs.has('data-entering'));
+  cleanup();
+  assert.equal(env.attrs.has('data-entering'), false);
+  assert.equal(env.frames.size, 0);
+  assert.equal(env.element.isConnected, true);
+});
+
+test('reduced motion and background tabs never start a page entrance', () => {
+  for (const options of [{ reduced: true }, { hidden: true }]) {
+    const env = pageStage(options);
+    animatePageEntry(env.element)();
+    assert.equal(env.frames.size, 0);
+    assert.equal(env.attrs.has('data-entering'), false);
+  }
+});
+
+test('turning on reduced motion cancels an active page entrance', () => {
+  const env = pageStage();
+  const cleanup = animatePageEntry(env.element);
+  env.tick();
+  assert.ok(env.attrs.has('data-entering'));
+  env.preference.matches = true;
+  env.preference.dispatchEvent(new Event('change'));
+  assert.equal(env.attrs.has('data-entering'), false);
+  cleanup();
+});
 
 // A deterministic event/timer fixture tests lifecycle behavior without pretending
 // to verify rendered CSS or browser geometry.

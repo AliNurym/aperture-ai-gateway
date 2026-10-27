@@ -1,0 +1,11 @@
+[
+  {
+    "id": "aperture-deepseek",
+    "name": "Aperture · DeepSeek",
+    "model": "deepseek-flash",
+    "base_url": "https://api.deepseek.com",
+    "protocol": "openai_chat_completions",
+    "api_key_env": "DEEPSEEK_API_KEY",
+    "max_output_tokens": 2048
+  }
+]

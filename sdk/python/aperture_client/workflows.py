@@ -10,6 +10,7 @@ from .client import (AdmissionUncertainError, Task, canonical, require, sha256,
 from .jobs import NAME, object_reference, workload_manifest
 from .retries import retry_throttled
 from .local_paths import durable_path
+from .workflow_steps import step_extensions, resolve_messages, resolved_source
 
 STEP_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 
@@ -22,7 +23,7 @@ def validate_workflow(steps, max_cost_lamports):
     for item in steps:
         require(isinstance(item, dict)
                 and set(item) <= {"id", "source", "inputs", "parameters", "depends_on",
-                                  "max_cost_lamports", "max_runtime_seconds"},
+                                  "max_cost_lamports", "max_runtime_seconds", "worker_target", "message_inputs"},
                 "Unknown workflow step fields")
         identifier = item.get("id")
         require(isinstance(identifier, str) and STEP_ID.fullmatch(identifier)
@@ -39,6 +40,7 @@ def validate_workflow(steps, max_cost_lamports):
         require(isinstance(dependencies, list) and all(isinstance(value, str) for value in dependencies),
                 "Step dependencies must be an ID list")
         dependencies = set(dependencies)
+        extras = step_extensions(item, dependencies)
         references, input_names = [], set()
         for reference in inputs:
             if isinstance(reference, dict) and set(reference) == {"from_step", "artifact"}:
@@ -61,7 +63,7 @@ def validate_workflow(steps, max_cost_lamports):
         parameters = workload_manifest(source, direct_inputs, parameters)["parameters"]
         normalized.append({"id": identifier, "source": source, "inputs": references,
                            "parameters": parameters, "depends_on": sorted(dependencies),
-                           "max_cost_lamports": cost, "max_runtime_seconds": runtime})
+                           "max_cost_lamports": cost, "max_runtime_seconds": runtime, **extras})
     require(sum(item["max_cost_lamports"] for item in normalized) <= max_cost_lamports,
             "Sum of step spending caps exceeds the workflow budget")
     for item in normalized:
@@ -194,7 +196,12 @@ class WorkflowRunner:
                         inputs.append(item)
                     else:
                         inputs.append(reference)
-                spec = workload_manifest(step["source"], inputs, step["parameters"])
+                def read_context(binding):
+                    parent = completed[binding["from_step"]]
+                    return self.client.download_artifact(self._task(parent["task"]), parent["result"]["receipt"], binding["artifact"])
+                parameters = resolve_messages(step, read_context)
+                source = resolved_source(step, parameters)
+                spec = workload_manifest(source, inputs, parameters)
                 if state == "completed":
                     task = self._task(data["task"])
                     self._verify_step(task, step, spec)
@@ -207,9 +214,10 @@ class WorkflowRunner:
                     self._progress(on_progress, step, "completed", completed, plan, task)
                     continue
                 if state == "new" or (state == "quoted" and data["quote"]["expires_at"] <= time.time()):
-                    quote = retry_throttled(lambda: self.client.quote_job(step["source"], inputs=inputs, parameters=step["parameters"],
+                    quote = retry_throttled(lambda: self.client.quote_job(source, inputs=inputs, parameters=parameters,
                         max_cost_lamports=step["max_cost_lamports"], max_runtime_seconds=step["max_runtime_seconds"],
-                        max_rate_lamports=self.max_rate), should_stop=should_stop)
+                        max_rate_lamports=self.max_rate,
+                        **({"worker_target": step["worker_target"]} if "worker_target" in step else {})), should_stop=should_stop)
                     data, state = {"quote": quote}, "quoted"
                     self._save(db, step["id"], state, data)
                 if state in {"quoted", "admitting"}:
@@ -221,8 +229,8 @@ class WorkflowRunner:
                         self._save(db, step["id"], "admitting", data)
                         if should_stop and should_stop():
                             raise InterruptedError("Workflow stopped before task admission.")
-                        task = retry_throttled(lambda: self.client.execute_job(data["quote"], step["source"], inputs=inputs,
-                            parameters=step["parameters"], max_rate_lamports=self.max_rate),
+                        task = retry_throttled(lambda: self.client.execute_job(data["quote"], source, inputs=inputs,
+                            parameters=parameters, max_rate_lamports=self.max_rate),
                             seconds=min(75, data["quote"]["expires_at"] - time.time() - 2), should_stop=should_stop)
                     data, state = {"quote": data["quote"], "task": self._task_data(task)}, "running"
                     self._save(db, step["id"], state, data)
@@ -256,7 +264,8 @@ class WorkflowRunner:
         verify_recovered_quote(quote, owner=self.client.owner, agent=self.client.agent,
             program_id=self.client.program_id, gateway_pubkey=self.client.gateway_pubkey,
             network=self.client.network, treasury=self.client.treasury, max_rate_lamports=self.max_rate)
-        require(quote.get("workload") == spec
+        require(quote.get("workload") == spec and isinstance(quote.get("worker_target"), dict)
+                and (step.get("worker_target") is None or quote.get("worker_target") == step.get("worker_target"))
                 and quote["max_cost_lamports"] == step["max_cost_lamports"]
                 and quote["max_runtime_seconds"] == step["max_runtime_seconds"],
                 "Workflow journal task differs from its approved step")

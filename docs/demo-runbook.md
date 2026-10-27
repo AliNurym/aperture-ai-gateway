@@ -13,6 +13,8 @@ Compute Studio has one execution path: signed source and limits, authenticated g
 5. Connect a Solana wallet. Confirm the actual network and settlement mode shown by the gateway.
 6. Keep the worker and gateway running throughout the presentation.
 
+For an existing upgradeable program, first run `scripts/deploy-devnet.ps1` without switches to review the pinned build, balance and current upgrade authority. Then run it with `-Upgrade` (still review-only) and confirm `signer_is_upgrade_authority: true`. Only an intentional operator action with both `-Upgrade -Publish` submits the program upgrade; it uses the existing program ID and its current upgrade authority. Rebuild and review `target/deploy/build-manifest.json` before this step. The script does not upgrade an existing program unless `-Upgrade` is explicit, and it never substitutes a new program address.
+
 ## Three-minute live walkthrough
 
 1. Open **Agent batch risk scoring** in Compute Studio. Show the actual Python source and fixed random seed.

@@ -38,7 +38,7 @@ export function validateWorkerTarget(target) {
 export function verifyWorkerTarget(quote, expected) {
   if (expected) validateWorkerTarget(expected);
   if (quote.worker_target) validateWorkerTarget(quote.worker_target);
-  if (canonicalJson(quote.worker_target || null) !== canonicalJson(expected || null)) {
+  if (!quote.worker_target || expected && canonicalJson(quote.worker_target) !== canonicalJson(expected)) {
     throw new Error('The quote changed the selected worker. Review capacity again.');
   }
 }

@@ -1,5 +1,6 @@
 """One streamed request, no retries or automatic failover after dispatch."""
 import hashlib
+import io
 import json
 import math
 import os
@@ -11,6 +12,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import requests
 from inference import canonical, load_providers, validate_request
+from sentinel_review import source_bound_sentinel_source, valid_sentinel_output
 
 
 def _sse_data(response):
@@ -47,12 +49,24 @@ def _gemini_body(request):
     return body
 
 
+def _openai_body(request, provider):
+    body = {"model": provider.model, "messages": [item.model_dump() for item in request.messages],
+            "max_tokens": request.max_tokens, "stream": True}
+    if provider.id == "aperture-deepseek":
+        body["thinking"] = {"type": "disabled"}
+        body["response_format"] = {"type": "json_object"}
+    return body
+
+
 def run(directory):
     spec = json.loads((directory / "job.json").read_text(encoding="utf-8"))
     code = (directory / "payload.py").read_text(encoding="utf-8")
     providers = load_providers()
     request = validate_request(code, spec["parameters"], providers)
     provider = providers[request.provider_id]
+    sentinel_source = source_bound_sentinel_source(request)
+    if request.provider_id == "aperture-deepseek" and sentinel_source is None:
+        raise ValueError("DeepSeek requires the fixed source-bound Sentinel request")
     headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
     if provider.protocol == "gemini_generate_content":
         headers["x-goog-api-key"] = os.environ[provider.api_key_env]
@@ -62,9 +76,9 @@ def run(directory):
         if provider.api_key_env:
             headers["Authorization"] = "Bearer " + os.environ[provider.api_key_env]
         endpoint = provider.base_url + "/chat/completions"
-        body = {"model": provider.model, "messages": [item.model_dump() for item in request.messages],
-                "max_tokens": request.max_tokens, "stream": True}
-    total, content_hash, done, seen_gemini_response = 0, hashlib.sha256(), False, False
+        body = _openai_body(request, provider)
+    content_hash, done, seen_gemini_response = hashlib.sha256(), False, False
+    text_output = io.StringIO()
     # Ignore ambient proxy credentials and never forward auth across redirects.
     with requests.Session() as session:
         session.trust_env = False
@@ -98,6 +112,7 @@ def run(directory):
                                 if not isinstance(text, str):
                                     raise ValueError("Provider returned invalid text")
                                 content_hash.update(text.encode("utf-8"))
+                                text_output.write(text)
                                 print(text, end="", flush=True)
                         finish_reason = candidate.get("finishReason")
                         if finish_reason in ("STOP", "MAX_TOKENS"):
@@ -116,11 +131,20 @@ def run(directory):
                             if not isinstance(text, str):
                                 raise ValueError("Provider returned invalid text")
                             content_hash.update(text.encode("utf-8"))
+                            text_output.write(text)
                             print(text, end="", flush=True)
     if provider.protocol == "gemini_generate_content" and not (done and seen_gemini_response):
         raise ValueError("Gemini stream ended before completion")
     if not done:
         raise ValueError("Provider stream ended before completion")
+    response_text = text_output.getvalue()
+    if sentinel_source is not None and not valid_sentinel_output(response_text, sentinel_source):
+        raise ValueError("Provider returned an incomplete source-bound Sentinel report")
+    # Only the trusted adapter writes this file. Provider text never becomes an
+    # artifact control frame in stdout; the coordinator publishes its exact bytes.
+    response_bytes = response_text.encode("utf-8")
+    if response_bytes:
+        (directory / "response.txt").write_bytes(response_bytes)
     print("\n\n[Aperture inference metadata]\n" + canonical({
         "provider_id": provider.id, "model": provider.model, "protocol": provider.protocol,
         "max_tokens": request.max_tokens, "text_sha256": content_hash.hexdigest(), "offer": provider.offer(),

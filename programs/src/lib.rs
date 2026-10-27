@@ -304,6 +304,7 @@ fn pay_from_channel(
     channel: &AccountInfo,
     destination: &AccountInfo,
     amount: u64,
+    rent: &Rent,
     require_rent_exempt_destination: bool,
 ) -> Result<()> {
     require!(
@@ -315,7 +316,7 @@ fn pay_from_channel(
         .checked_sub(amount)
         .ok_or(ApertureError::InsufficientBalance)?;
     require!(
-        remaining >= Rent::get()?.minimum_balance(channel.data_len()),
+        remaining >= rent.minimum_balance(channel.data_len()),
         ApertureError::InsufficientBalance
     );
     let credited = destination
@@ -324,7 +325,7 @@ fn pay_from_channel(
         .ok_or(ApertureError::MathOverflow)?;
     if amount > 0 && require_rent_exempt_destination {
         require!(
-            credited >= Rent::get()?.minimum_balance(destination.data_len()),
+            credited >= rent.minimum_balance(destination.data_len()),
             ApertureError::PaymentRecipientNotRentExempt
         );
     }
@@ -592,6 +593,7 @@ pub mod aperture_gateway {
                 &ctx.accounts.channel.to_account_info(),
                 &ctx.accounts.worker.to_account_info(),
                 charge,
+                &Rent::get()?,
                 false,
             )?;
             emit!(TaskSettledEvent {
@@ -672,6 +674,7 @@ pub mod aperture_gateway {
                 &ctx.accounts.channel.to_account_info(),
                 &recipient_info,
                 charge,
+                &Rent::get()?,
                 false,
             )?;
             emit!(TaskSettledEvent {
@@ -693,6 +696,7 @@ pub mod aperture_gateway {
             &ctx.accounts.channel.to_account_info(),
             &ctx.accounts.user.to_account_info(),
             refund,
+            &Rent::get()?,
             false,
         )?;
         ctx.accounts.channel.balance = 0;
@@ -1136,10 +1140,56 @@ mod tests {
         assert_eq!(bound_task_worker(&channel).unwrap(), worker);
         assert_eq!(channel.last_charged, WORKER_PAYOUT_BOUND);
 
-        settle_task_state(&mut channel, Some(&mut p), &mut receipt, [2; 32], 105).unwrap();
+        let charge = settle_task_state(&mut channel, Some(&mut p), &mut receipt, [2; 32], 105)
+            .unwrap()
+            .unwrap();
         assert_eq!(channel.agent, worker);
         assert_eq!(channel.last_task_hash, [2; 32]);
         assert_eq!(channel.last_charged, 50);
+        assert_eq!(charge, 50);
+
+        let rent = Rent::default();
+        let channel_key = Pubkey::new_unique();
+        let worker_key = worker;
+        let channel_owner = crate::ID;
+        let worker_owner = system_program::ID;
+        let mut channel_data = vec![0; 8 + ChannelState::INIT_SPACE];
+        let rent_reserve = rent.minimum_balance(channel_data.len());
+        let mut channel_lamports = rent_reserve + 500;
+        let mut worker_data = Vec::new();
+        let mut worker_lamports = 7;
+        let channel_info = AccountInfo::new(
+            &channel_key,
+            false,
+            true,
+            &mut channel_lamports,
+            &mut channel_data,
+            &channel_owner,
+            false,
+            0,
+        );
+        let worker_info = AccountInfo::new(
+            &worker_key,
+            false,
+            true,
+            &mut worker_lamports,
+            &mut worker_data,
+            &worker_owner,
+            false,
+            0,
+        );
+        pay_from_channel(&channel_info, &worker_info, charge, &rent, false).unwrap();
+        assert_eq!(worker_info.lamports(), 7 + charge);
+        assert_eq!(channel_info.lamports(), rent_reserve + channel.balance);
+        assert_eq!(
+            channel_info.lamports() + worker_info.lamports(),
+            rent_reserve + 507
+        );
+        let channel_after_payout = channel_info.lamports();
+        let worker_after_payout = worker_info.lamports();
+        assert!(pay_from_channel(&channel_info, &worker_info, 451, &rent, false).is_err());
+        assert_eq!(channel_info.lamports(), channel_after_payout);
+        assert_eq!(worker_info.lamports(), worker_after_payout);
         assert_eq!(8 + ChannelState::INIT_SPACE, 225);
         assert_eq!(8 + TaskReceipt::INIT_SPACE, 186);
     }

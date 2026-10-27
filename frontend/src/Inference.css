@@ -12,6 +12,11 @@
 .console-studio-sentinel .inference-request textarea { min-height: 118px; }
 .inference-intro { max-width: 660px; padding: 8px 0; }
 .inference-return { margin-top: 2px; }
+.inference-privacy-note { display: flex; align-items: flex-start; gap: 10px; margin: 16px 0; padding: 12px 14px; border: 1px solid var(--console-line); border-radius: 12px; background: var(--console-tonal); color: var(--console-ink) !important; font-size: 13px !important; }
+.inference-privacy-note svg { flex: 0 0 auto; margin-top: 2px; color: var(--console-primary); }
+.inference-sentinel-facts { display: grid; flex: 1 1 auto; gap: 8px; min-width: 0; }
+.inference-sentinel-facts > span { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 10px; color: var(--console-muted); font-size: 12px; line-height: 1.5; }
+.inference-sentinel-facts strong { color: var(--console-ink); font-size: 12px; font-weight: 600; }
 .sentinel-report { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--console-line); border-radius: 10px; background: var(--console-tonal); }
 .sentinel-report strong { color: var(--console-primary); font-size: 13px; }
 .sentinel-report p { margin: 7px 0 0; }
@@ -23,15 +28,16 @@
 .inference-intro h2 { font-size: clamp(26px, 3vw, 38px); line-height: 1.18; letter-spacing: -.035em; margin: 14px 0; }
 .inference-intro p, .inference-disclosure, .inference-provider-status, .inference-evidence p, .inference-setup p { color: var(--console-muted); font-size: 14px; line-height: 1.6; }
 .inference-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.inference-layout > *, .inference-request form, .inference-request label { min-width: 0; }
 .inference-request, .inference-evidence > .console-panel { padding: 26px; }
 .inference-request h3, .inference-evidence h3 { margin: 0 0 16px; }
 .inference-request form { display: grid; gap: 20px; }
 .inference-request label { display: grid; gap: 8px; font-size: 13px; font-weight: 500; }
-.inference-request input, .inference-request select, .inference-request textarea { width: 100%; box-sizing: border-box; background: var(--console-bg); color: var(--console-ink); border: 1px solid var(--console-line); border-radius: 10px; padding: 12px; font: inherit; }
+.inference-request input, .inference-request select, .inference-request textarea { min-width: 0; max-width: 100%; width: 100%; box-sizing: border-box; background: var(--console-bg); color: var(--console-ink); border: 1px solid var(--console-line); border-radius: 10px; padding: 12px; font: inherit; }
 .inference-request textarea { resize: vertical; min-height: 150px; line-height: 1.6; }
 .inference-request :is(input, select, textarea):focus-visible { outline: 2px solid var(--console-primary); outline-offset: 2px; }
 .inference-limits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-.inference-provider-status, .inference-disclosure { margin: 0; }
+.inference-provider-status, .inference-disclosure { margin: 0; overflow-wrap: anywhere; }
 .inference-evidence { display: grid; gap: 18px; min-width: 0; }
 .inference-network { border-bottom: 1px solid var(--console-line); padding-bottom: 16px; }
 .inference-quote dl { display: grid; gap: 15px; margin: 20px 0; }
@@ -42,6 +48,6 @@
 .inference-result .console-tag { display: inline-flex; background: var(--console-tonal); color: var(--console-primary); padding: 6px 10px; border: 1px solid var(--console-line); font-size: 12px; }
 .inference-notice { background: var(--console-tonal); padding: 16px 20px; border-radius: 12px; line-height: 1.5; font-size: 14px; }
 .inference-setup { padding: 20px 0; }.inference-setup code { font-size: 12px; overflow-wrap: anywhere; }
-@media (max-width: 1050px) { .inference-layout { grid-template-columns: 1fr; } }
+@media (max-width: 1050px) { .inference-layout { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 1100px) { .console-studio-body.with-sentinel { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 600px) { .inference-limits { grid-template-columns: 1fr; }.inference-request, .inference-evidence > .console-panel { padding: 18px; }.console-studio-sentinel { padding: 14px; border-radius: 14px; } }

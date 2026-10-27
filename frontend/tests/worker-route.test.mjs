@@ -48,12 +48,12 @@ async function fixture() {
   return { quote, taskId, fullLog, receipt };
 }
 
-test('worker route is bound to authorization v5 and cannot be silently replaced', async () => {
+test('worker route is bound to authorization v5 while automatic routing may be pinned by the gateway', async () => {
   const { quote } = await fixture();
   assert.ok(quote.message.startsWith('Aperture execution authorization v5\n'));
   assert.deepEqual(JSON.parse(quote.message.split('\n').at(-1)).worker_target, quote.worker_target);
   verifyWorkerTarget(quote, quote.worker_target);
-  assert.throws(() => verifyWorkerTarget(quote, null), /changed the selected worker/);
+  verifyWorkerTarget(quote, null);
   assert.throws(() => verifyWorkerTarget(quote, { ...quote.worker_target, node_id: 'other-worker' }), /changed the selected worker/);
   assert.throws(() => canonicalQuoteMessage({ ...quote, worker_target: { ...quote.worker_target, route: 'fallback' } }), /Invalid selected worker/);
   const legacy = { ...quote }; delete legacy.worker_target;

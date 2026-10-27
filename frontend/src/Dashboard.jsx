@@ -16,7 +16,10 @@ import { verifyUserSignature, workflowContext, workflowRequest } from './utils/b
 import { useClipboardFeedback } from './hooks/useClipboardFeedback';
 import './Dashboard.css';
 import { revealContent } from './utils/motion';
-import { computeJobManifest, matchingSourceReview } from './utils/sourceReview';
+import { executionBoundaryLabel } from './utils/executionBoundary';
+import { computeJobManifest, matchingSourceReview, sourceReviewStatus, sourceReviewBundle, sourceLineRange } from './utils/sourceReview';
+import { studioProgressStep, studioStepComplete } from './utils/studioProgress';
+import { inspectRestoredSource, sourceIsAvailable } from './utils/restoredSource';
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 const ACTIVE = ['uploading', 'reviewing', 'signing', 'submitting', 'uncertain', 'retryable', 'queued', 'running', 'settlement_pending', 'verifying', 'stopping'];
@@ -136,12 +139,14 @@ async function anchorInstructionData(name, amount) {
   return data;
 }
 
-export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOnline, workerCount, workers = [], workerTarget = null, onWorkerTargetChange, reviewedSourcesOnly, selection, releasedObject, onBusyChange, onRecord, onSentinelReview, sentinelResult, sentinelAvailable = false, sentinelPanel = null, sentinelPanelOpen = false, externalBusy = false }) {
+export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOnline, workerCount, workers = [], workerTarget = null, onWorkerTargetChange, reviewedSourcesOnly, selection, releasedObject, onBusyChange, onRecord, onSentinelReview, onImportSentinelReview, sentinelResult, sentinelRecoveryNotice = '', sentinelAvailable = false, sentinelPanel = null, sentinelPanelOpen = false, externalBusy = false }) {
   const { publicKey, signMessage, sendTransaction, wallet, connect, connecting } = useWallet();
   const { connection } = useConnection();
   const { setVisible } = useWalletModal();
-  const [sampleId, setSampleId] = useState(DEFAULT_STUDIO_WORKLOAD.id);
-  const [name, setName] = useState(DEFAULT_STUDIO_WORKLOAD.name);
+  const [sampleId, setSampleId] = useState(() => WORKLOADS.find(sample => sample.code === code)?.id || 'custom');
+  const [name, setName] = useState(() => WORKLOADS.find(sample => sample.code === code)?.name || 'Custom workload');
+  const [restoredSourceStatus, setRestoredSourceStatus] = useState(null);
+  const restoredSourceCheck = useRef(0);
   const [status, setStatus] = useState('idle');
   const [logs, setLogs] = useState([]);
   const [notice, setNotice] = useState('');
@@ -170,6 +175,9 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
   const controller = useRef(null);
   const inputRef = useRef(null);
   const highlightRef = useRef(null);
+  const editorRef = useRef(null);
+  const reviewFileRef = useRef(null);
+  const [reviewImportBusy, setReviewImportBusy] = useState(false);
   const dataInputRef = useRef(null);
   const uploadController = useRef(null);
   const uploadGeneration = useRef(0);
@@ -184,10 +192,12 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
   const followLogs = useRef(true);
   const resultAccess = useRef(new Map());
   const verificationController = useRef(null);
-  const busy = ACTIVE.includes(status) || verificationBusy;
+  const busy = ACTIVE.includes(status) || verificationBusy || reviewImportBusy;
   const draftLocked = busy || externalBusy;
+  const sourceUnavailable = restoredSourceStatus === 'missing';
   const selectedNode = workerTarget && workers.find(node => node.node_id === workerTarget.node_id && node.worker_pubkey === workerTarget.worker_pubkey);
-  const routeReady = !workerTarget || Boolean(selectedNode && selectedNode.online !== false && selectedNode.accepting_tasks !== false);
+  const routeReady = !workerTarget || Boolean(selectedNode && selectedNode.online !== false
+    && selectedNode.accepting_tasks !== false && Number.isSafeInteger(selectedNode.rate_lamports_sec));
   const executionReady = gatewayOnline && gatewayHealth?.status === 'ready' && workerCount > 0 && routeReady;
   let resultFiles = [];
   let invalidResultFiles = false;
@@ -201,22 +211,82 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
     } catch { invalidResultFiles = true; }
   }
   const inspectorRef = useRef(null);
+  const sentinelResultRef = useRef(null);
   useEffect(() => {
     if (!sentinelPanelOpen || !window.matchMedia('(max-width: 980px)').matches) return;
     const frame = requestAnimationFrame(() => revealContent(inspectorRef.current, { block: 'start', focus: true }));
     return () => cancelAnimationFrame(frame);
   }, [sentinelPanelOpen]);
-  const progressStep = sentinelPanelOpen ? 1 : status === 'idle' ? 0
-    : ['reviewing', 'quoted', 'signing', 'submitting', 'uncertain', 'retryable', 'blocked'].includes(status) ? 2
-      : ['queued', 'running', 'settlement_pending', 'stopping'].includes(status) ? 3
-        : status === 'failed' && !receipt?.backendReceipt ? 2 : 4;
   const sentinelMatchesSource = matchingSourceReview(sentinelResult, code, walletIdentity, gatewayHealth?.gateway_pubkey);
+  const progressStep = studioProgressStep({
+    status,
+    sentinelPanelOpen,
+    sentinelMatchesSource,
+    hasReceipt: Boolean(receipt?.backendReceipt),
+  });
+  const sentinelActionLabel = sentinelMatchesSource
+    ? sentinelAvailable ? 'Review this source again' : 'View attached AI Sentinel review'
+    : sentinelAvailable ? 'Review with AI Sentinel' : 'Set up AI Sentinel';
   const prepareManifest = () => computeJobManifest({ source: code, inputs: dataInputs.map(item => item.descriptor),
     parametersText, dataJob, review: sentinelResult, owner: walletIdentity, gatewayPubkey: gatewayHealth?.gateway_pubkey });
 
   const requestSentinelReview = () => {
+    if (sourceUnavailable) {
+      setNotice('The recovered task has no source text in this tab. Choose a sample or import Python source before asking AI Sentinel to review it.');
+      return;
+    }
     try { onSentinelReview?.({ source: code, prompt: buildSentinelPrompt(code) }); }
     catch (error) { setNotice(error.message); }
+  };
+
+  const activateSentinelStep = () => {
+    if (sentinelPanelOpen) return revealContent(inspectorRef.current, { focus: true, block: 'start' });
+    if (sentinelMatchesSource) return revealContent(sentinelResultRef.current, { focus: true, block: 'center' });
+    return requestSentinelReview();
+  };
+
+  const activateSentinelAction = () => {
+    if (sentinelMatchesSource && !sentinelAvailable)
+      return revealContent(sentinelResultRef.current, { focus: true, block: 'center' });
+    return requestSentinelReview();
+  };
+
+  const importReview = async event => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || draftLocked) return;
+    setReviewImportBusy(true);
+    try {
+      if (file.size > 2_000_000) throw new Error('Choose a signed review JSON file up to 2 MB.');
+      const imported = await onImportSentinelReview?.(JSON.parse(await file.text()));
+      const sample = WORKLOADS.find(item => item.code === imported?.source);
+      restoredSourceCheck.current += 1;
+      setRestoredSourceStatus(null);
+      setSampleId(sample?.id || 'custom');
+      setName(sample?.name || 'Reviewed source');
+      setNotice('Signed review imported. The original source and receipt were verified; reconnect the reviewing wallet to attach it to compute.');
+    } catch (error) { setNotice(error.message); }
+    finally { setReviewImportBusy(false); }
+  };
+
+  const exportReview = () => {
+    try {
+      const bundle = sourceReviewBundle(sentinelResult);
+      saveFile('aperture-source-review-' + sentinelResult.taskId + '.json', JSON.stringify(bundle, null, 2), 'application/json');
+    } catch (error) { setNotice(error.message); }
+  };
+
+  const focusReviewedLine = line => {
+    if (draftLocked || sentinelResult?.source !== code) return;
+    const range = sourceLineRange(code, line);
+    const editor = editorRef.current;
+    if (!range || !editor) return;
+    editor.focus({ preventScroll: true });
+    editor.setSelectionRange(range.start, range.end);
+    const lineHeight = parseFloat(getComputedStyle(editor).lineHeight) || 24;
+    editor.scrollTop = Math.max(0, (line - 1) * lineHeight - editor.clientHeight / 2 + lineHeight);
+    if (highlightRef.current) highlightRef.current.scrollTop = editor.scrollTop;
+    revealContent(editor, { focus: false, block: 'nearest' });
   };
 
   const connectWallet = async () => {
@@ -237,7 +307,7 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
     if (currentIdentity.current !== owner) throw new Error('The signing identity changed while checking the payment channel.');
     if (health.demo_mode === true) {
       setWalletBalance(null); setChannel(null); setProtocolConfig(null);
-      return { channel: null, config: null, development: true };
+      return { channel: null, config: null, development: true, gateway_pubkey: health.gateway_pubkey };
     }
     const [walletResult, channelResult, configResult] = await Promise.allSettled([
       connection.getBalance(publicKey, 'confirmed'),
@@ -250,7 +320,7 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
     const nextConfig = configResult.status === 'fulfilled' ? configResult.value.data : null;
     setChannel(nextChannel);
     setProtocolConfig(nextConfig);
-    return { channel: nextChannel, config: nextConfig, development: false };
+    return { channel: nextChannel, config: nextConfig, development: false, gateway_pubkey: health.gateway_pubkey };
   }, [connection, publicKey]);
 
   useEffect(() => {
@@ -263,10 +333,10 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
   }, [publicKey, refreshChannel]);
 
   const submitChannelInstruction = async (instruction) => {
-    if (otherFlowBusy.current) throw new Error('An agent workflow is using the execution slot. Finish or stop it before changing channel funds.');
+    if (otherFlowBusy.current) throw new Error('Another request is using the execution slot. Finish or stop it before changing channel funds.');
     const transaction = new Transaction().add(instruction);
     const latest = await connection.getLatestBlockhash('confirmed');
-    if (otherFlowBusy.current) throw new Error('An agent workflow is using the execution slot. Finish or stop it before changing channel funds.');
+    if (otherFlowBusy.current) throw new Error('Another request is using the execution slot. Finish or stop it before changing channel funds.');
     transaction.feePayer = publicKey;
     transaction.recentBlockhash = latest.blockhash;
     const signature = await sendTransaction(transaction, connection);
@@ -371,7 +441,7 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
     }
     if (interruptedUpload || interruptedReview) {
       setStatus(previous => !active.current && ['uploading', 'reviewing'].includes(previous) ? 'idle' : previous);
-      setNotice('An agent workflow is using the execution slot. Draft preparation paused; completed uploads are retained.');
+      setNotice('Another request is using the execution slot. Draft preparation paused; completed uploads are retained.');
     }
   }, [externalBusy]);
   useLayoutEffect(() => {
@@ -422,6 +492,8 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
   }, [quote]);
   useEffect(() => {
     if (selection && !active.current && !verificationController.current && !otherFlowBusy.current) {
+      restoredSourceCheck.current += 1;
+      setRestoredSourceStatus(null);
       onCodeChange(selection.code); setName(selection.name); setSampleId(selection.id);
       setDataJob(Boolean(selection.dataJob)); setParametersText(JSON.stringify(selection.parameters || {}, null, 2));
       setStatus('idle'); setNotice(''); setAnalysis(null); setReceipt(null);
@@ -439,6 +511,8 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
   const log = (message, kind = 'info') => setLogs(previous => [...previous, { message, kind, time: new Date().toLocaleTimeString([], { hour12: false }) }].slice(-500));
   const selectSample = sample => {
     if (active.current || verificationController.current || otherFlowBusy.current) return;
+    restoredSourceCheck.current += 1;
+    setRestoredSourceStatus(null);
     onCodeChange(sample.code); setName(sample.name); setSampleId(sample.id);
     setDataJob(Boolean(sample.dataJob)); setParametersText(JSON.stringify(sample.parameters || {}, null, 2));
     setStatus('idle'); setAnalysis(null); setReceipt(null); setNotice('');
@@ -531,14 +605,25 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
       const run = { ...restored, offset: 0 };
       active.current = run;
       controller.current = new AbortController();
-      setName(run.name); setSampleId('custom');
-      onCodeChange('# Saved gateway task restored from this browser tab.\n# Original Python source is not stored in this checkpoint.\n# Inspect its source hash in the verified receipt.\n');
+      const restoreSample = WORKLOADS.find(sample => sample.code === code);
+      setName(restoreSample?.name || 'Custom workload');
+      const checkId = ++restoredSourceCheck.current;
+      setRestoredSourceStatus(sourceIsAvailable(code) ? 'checking' : 'missing');
+      inspectRestoredSource(code, run.quote?.code_sha256)
+        .then(result => {
+          if (restoredSourceCheck.current !== checkId) return;
+          setRestoredSourceStatus(result);
+          if (result === 'match') setName(run.name);
+        })
+        .catch(() => { if (restoredSourceCheck.current === checkId) setRestoredSourceStatus('unknown'); });
       setStatus('queued');
       setNotice(run.terminal ? 'Restoring the latest saved result. Its receipt and output will be verified again before files can be opened.' : 'Restored the active gateway task from this browser tab. Monitoring continues; the original source was not saved.');
       monitor(run);
-      return () => { clearTimeout(pollTimer.current); controller.current?.abort(); if (active.current === run) active.current = null; };
+      return () => { restoredSourceCheck.current += 1; clearTimeout(pollTimer.current); controller.current?.abort(); if (active.current === run) active.current = null; };
     }
     if (pending) {
+      restoredSourceCheck.current += 1;
+      setRestoredSourceStatus(null);
       active.current = { id: 'request-pending', name: pending.name, mode: 'gateway', started: pending.started, offset: 0, estimate: pending.estimate, quote: pending.quote, submitting: true };
       setPendingAdmission(pending);
       setName(pending.name); setSampleId('custom'); onCodeChange(pending.body.code);
@@ -555,6 +640,7 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
 
   const reviewQuote = async () => {
     if (active.current || busy || otherFlowBusy.current) return;
+    if (sourceUnavailable) { setNotice('The recovered task has no source text in this tab. Choose a sample or import Python source before reviewing a price.'); return; }
     if (!publicKey) { await connectWallet(); return; }
     const wallet = publicKey.toBase58();
     const revision = draftRevision.current;
@@ -586,7 +672,7 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
       if (data.program_id !== APERTURE_PROGRAM_ID) throw new Error('The quote program does not match the deployment pinned in this frontend.');
       try { new PublicKey(data.gateway_pubkey); }
       catch { throw new Error('The quote has an invalid gateway signing key.'); }
-      if (GATEWAY_PUBKEY_PIN && data.gateway_pubkey !== GATEWAY_PUBKEY_PIN) throw new Error('The quote signer does not match the gateway pinned in this frontend.');
+      if (!liveState.gateway_pubkey || data.gateway_pubkey !== liveState.gateway_pubkey) throw new Error('The quote signer does not match the live gateway identity.');
       if (data.network !== (liveState?.development ? 'off_chain' : 'devnet')) throw new Error('The quote network does not match the gateway mode.');
       if (data.network === 'devnet') {
         if (!GATEWAY_PUBKEY_PIN || !TREASURY_PUBKEY_PIN) throw new Error('Pin VITE_APERTURE_GATEWAY_PUBKEY and VITE_APERTURE_TREASURY_PUBKEY before approving Devnet work.');
@@ -596,6 +682,10 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
       } else if (data.treasury !== null) throw new Error('The off-chain quote unexpectedly names a treasury.');
       if (data.message !== canonicalQuoteMessage(data)) throw new Error('The signed quote does not match the values shown for approval.');
       verifyWorkerTarget(data, workerTarget);
+      const pricedWorker = workers.find(node => node.node_id === data.worker_target?.node_id
+        && node.worker_pubkey === data.worker_target?.worker_pubkey && node.online !== false
+        && node.accepting_tasks !== false && node.rate_lamports_sec === data.rate_lamports);
+      if (!pricedWorker) throw new Error('The quote does not match a live worker and its published rate. Refresh capacity before signing.');
       if (spec) await verifyJobManifest(data, spec);
       else if (data.workload) throw new Error('The quote added an unrequested data job.');
       if (!current()) return;
@@ -619,7 +709,7 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
   const resumePendingAdmission = async () => {
     if (!pendingAdmission) return;
     if (otherFlowBusy.current) {
-      setNotice('An agent workflow is using the execution slot. The exact signed admission remains saved; finish or stop the workflow before retrying it.');
+      setNotice('Another request is using the execution slot. The exact signed admission remains saved; finish or stop that request before retrying it.');
       return;
     }
     const pending = {
@@ -716,7 +806,7 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
     controller.current = new AbortController();
     const ensureCurrent = () => {
       if (active.current !== run) throw new DOMException('Workload preparation was cancelled.', 'AbortError');
-      if (otherFlowBusy.current) throw new Error('An agent workflow is using the execution slot. Finish or stop it before authorizing a Studio task.');
+      if (otherFlowBusy.current) throw new Error('Another request is using the execution slot. Finish or stop it before authorizing a Studio task.');
       if (currentIdentity.current !== wallet || draftRevision.current !== revision) throw new Error('The signing identity or workload changed. Review a fresh quote before signing.');
       if (challenge.wallet !== wallet || challenge.agent_pubkey !== wallet) throw new Error('The quote belongs to a different signing identity. Review a fresh quote.');
       if (challenge.expires_at * 1000 <= Date.now()) throw new Error('Quote expired. Review a fresh quote before signing.');
@@ -840,6 +930,8 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
     try {
       const content = await file.text();
       if (active.current || otherFlowBusy.current) return;
+      restoredSourceCheck.current += 1;
+      setRestoredSourceStatus(null);
       onCodeChange(content); setName(file.name); setSampleId('custom'); setAnalysis(null); setReceipt(null); setStatus('idle'); setNotice('');
     } catch { setNotice('The file could not be read. Please try another file.'); }
   };
@@ -865,7 +957,7 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
     try {
       ensureCurrent();
       if (gatewayHealth?.program_id && gatewayHealth.program_id !== APERTURE_PROGRAM_ID
-          || GATEWAY_PUBKEY_PIN && gatewayHealth?.gateway_pubkey !== GATEWAY_PUBKEY_PIN) throw new Error('Gateway identity differs from this frontend deployment.');
+          || gatewayHealth?.demo_mode !== true && GATEWAY_PUBKEY_PIN && gatewayHealth?.gateway_pubkey !== GATEWAY_PUBKEY_PIN) throw new Error('Gateway identity differs from this frontend deployment.');
       for (const file of files) {
         ensureCurrent();
         const descriptor = await uploadInput({ apiUrl: API_URL, file, owner, signMessage,
@@ -954,7 +1046,7 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
   const statusSpinning = statusIcon === 'refresh' && (verificationBusy || status !== 'retryable');
 
   return <div className={"studio" + (sentinelPanelOpen ? " sentinel-panel-open" : "")}>
-    {externalBusy && <div className="studio-policy" role="status"><Icon name="network" size={18} /><p>An agent workflow is using the execution slot. New Studio preparations are paused; existing task monitoring and cancellation remain available.</p></div>}
+    {externalBusy && <div className="studio-policy" role="status"><Icon name="network" size={18} /><p>{sentinelPanelOpen ? 'AI Sentinel is reviewing this source. Prepare compute after its signed result is ready.' : 'Another task is running. Finish or stop it before preparing a new Studio request.'}</p></div>}
     {notice && <div className={'studio-notice ' + (status === 'blocked' ? 'blocked' : '')} role="alert"><Icon name="shield" size={18} /><p>{notice}</p>{pendingAdmission && ['uncertain', 'retryable'].includes(status) && <button className="console-button secondary" disabled={externalBusy} onClick={resumePendingAdmission}>{status === 'retryable' ? 'Retry signed admission' : 'Recover signed request'}</button>}</div>}
     <section className={'console-panel studio-status-card studio-state-' + status} aria-busy={busy}>
       <div className="studio-action-row">
@@ -964,29 +1056,41 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
         </div>
         <div>
           <h2 aria-live="polite">{verificationBusy ? LABELS.verifying : status === 'uploading' ? 'Staging your input files' : LABELS[status]}</h2>
-          <p>{status === 'idle' ? 'Set your limits, then review the price.' : status === 'quoted' ? 'Check the quote before signing.' : busy ? 'Your run stays active when you change pages.' : 'Inspect the result or prepare another run.'}</p>
+          <p>{sourceUnavailable ? 'Saved task restored. Load source before preparing a new request.' : status === 'idle' ? 'Set your limits, then review the price.' : status === 'quoted' ? 'Check the quote before signing.' : busy ? 'Your run stays active when you change pages.' : 'Inspect the result or prepare another run.'}</p>
         </div>
       </div>
       <div className="studio-run-summary">
         <p id="studio-run-limits"><strong>{quote ? 'Up to ' + formatSol(quote.max_cost_lamports / 1e9) : 'Cap ' + (maxCost || '—')} SOL</strong><span>{quote ? formatSol(quote.rate_lamports / 1e9) + ' SOL/s · ' + quote.effective_runtime_seconds + 's' : (maxRuntime || '—') + 's limit'} · {workerTarget?.node_id || 'Automatic routing'}</span></p>
-        <div className="studio-run-control">{busy ? <button className="console-button secondary" disabled={!['queued', 'running', 'settlement_pending'].includes(status)} onClick={stop}><Icon name="stop" size={16} />{status === 'stopping' ? 'Stopping…' : ['queued', 'running', 'settlement_pending'].includes(status) ? 'Stop run' : 'Please wait…'}</button> : <button className="console-button primary" onClick={quote ? start : reviewQuote} disabled={externalBusy || channelBusy || connecting || Boolean(quote && !executionReady)} aria-busy={channelBusy || connecting} aria-describedby="studio-run-limits"><Icon name={channelBusy || connecting ? 'refresh' : !publicKey ? 'wallet' : quote ? 'play' : 'shield'} spinning={channelBusy || connecting} size={16} />{externalBusy ? 'Agent workflow active' : connecting ? 'Connecting…' : channelBusy ? 'Channel transaction…' : !publicKey ? 'Connect wallet' : quote ? executionReady ? 'Accept quote & sign' : 'Execution unavailable' : 'Review price & limits'}</button>}</div>
+        <div className="studio-run-control">{busy ? <button className="console-button secondary" disabled={!['queued', 'running', 'settlement_pending'].includes(status)} onClick={stop}><Icon name="stop" size={16} />{status === 'stopping' ? 'Stopping…' : ['queued', 'running', 'settlement_pending'].includes(status) ? 'Stop run' : 'Please wait…'}</button> : <button className="console-button primary" onClick={quote ? start : reviewQuote} disabled={sourceUnavailable || externalBusy || channelBusy || connecting || Boolean(quote && !executionReady)} aria-busy={channelBusy || connecting} aria-describedby="studio-run-limits"><Icon name={channelBusy || connecting ? 'refresh' : !publicKey ? 'wallet' : quote ? 'play' : 'shield'} spinning={channelBusy || connecting} size={16} />{sourceUnavailable ? 'Load source to continue' : externalBusy ? sentinelPanelOpen ? 'Source review in progress' : 'Another task is active' : connecting ? 'Connecting…' : channelBusy ? 'Channel transaction…' : !publicKey ? 'Connect wallet' : quote ? executionReady ? 'Accept quote & sign' : 'Execution unavailable' : 'Review price & limits'}</button>}</div>
       </div>
       </div>
       <ol className="studio-steps">
         {['Source', 'Sentinel', 'Price', 'Worker', 'Receipt'].map((step, index) => (
-          <li key={step} className={((index === 1 ? sentinelMatchesSource : index <= progressStep) ? 'reached' : '') + (index === progressStep ? ' current' : '')} aria-current={index === progressStep ? 'step' : undefined} title={index === 1 ? 'Optional Gemini source review' : step}>
-            {index === 1 ? <button className="studio-step-action" onClick={requestSentinelReview} disabled={draftLocked || !code.trim()} aria-label="Review source with Gemini">
-              <span className="studio-step-number">02</span><span className="studio-step-label">{step}</span>
-            </button> : <><span className="studio-step-number">{String(index + 1).padStart(2, '0')}</span><span className="studio-step-label">{step}</span></>}
+          <li key={step} className={((index === 1 ? sentinelMatchesSource : index <= progressStep) ? 'reached' : '') + (index === progressStep ? ' current' : '') + (studioStepComplete(index, { progressStep, status, sentinelMatchesSource }) ? ' completed' : '')} aria-current={index === progressStep ? 'step' : undefined} title={index === 1 ? 'Optional model source review' : step}>
+            {index === 1 ? <button className="studio-step-action" onClick={activateSentinelStep} disabled={!sentinelMatchesSource && !sentinelPanelOpen && (sourceUnavailable || draftLocked || !code.trim())} aria-label={sentinelPanelOpen ? 'Open AI Sentinel panel' : sentinelMatchesSource ? 'View attached AI Sentinel review' : sentinelActionLabel}>
+              <span className="studio-step-number">{studioStepComplete(index, { progressStep, status, sentinelMatchesSource }) ? <Icon name="check" size={15} /> : '02'}</span><span className="studio-step-label">{step}</span>
+            </button> : <><span className="studio-step-number">{studioStepComplete(index, { progressStep, status, sentinelMatchesSource }) ? <Icon name="check" size={15} /> : String(index + 1).padStart(2, '0')}</span><span className="studio-step-label">{step}</span></>}
           </li>
         ))}
       </ol>
     </section>
+    {['missing', 'different', 'unknown'].includes(restoredSourceStatus) && <div className="studio-source-recovery" role="status" data-state={restoredSourceStatus}>
+      <Icon name="shield" size={18} />
+      <div>
+        <strong>{restoredSourceStatus === 'missing' ? 'Original source is not saved in this tab' : restoredSourceStatus === 'different' ? 'Recovered result belongs to a different source' : 'Recovered source could not be compared'}</strong>
+        <p>{restoredSourceStatus === 'missing'
+          ? 'The editor contains a recovery note, not the code that produced this task. Choose a sample or import Python source before Sentinel review or a new quote.'
+          : restoredSourceStatus === 'different'
+            ? 'The editor draft does not match the source hash in the recovered task. Its result stays tied to that task; a new quote uses the current editor.'
+            : 'The recovered task has a saved source hash, but this draft could not be compared. Treat its result as separate from the current editor.'}</p>
+      </div>
+    </div>}
     <div className="studio-grid">
       <section className="studio-editor">
         <div className="studio-editor-heading"><div><span className="studio-file-dot" /><strong>workload.py</strong><span className="studio-language">PYTHON CPU</span></div><div className="studio-presets"><label htmlFor="workload-preset">Sample</label><select id="workload-preset" value={sampleId} disabled={draftLocked} onChange={event => selectSample(WORKLOADS.find(sample => sample.id === event.target.value))}>{WORKLOADS.map(sample => <option value={sample.id} key={sample.id}>{sample.name}</option>)}{sampleId === 'custom' && <option value="custom">Custom workload</option>}</select><button disabled={draftLocked} onClick={() => selectSample(WORKLOADS.find(sample => sample.id === sampleId) || DEFAULT_STUDIO_WORKLOAD)} title="Reset sample" aria-label="Reset sample"><Icon name="refresh" size={16} /></button></div><div><button onClick={copyCode} title="Copy source" data-copied={copied} aria-label={copied ? 'Code copied' : 'Copy code'}><Icon name={copied ? 'check' : 'copy'} size={18} /></button><button onClick={() => inputRef.current.click()} disabled={draftLocked} title="Import Python file" aria-label="Import Python file"><Icon name="upload" size={18} /></button></div></div>
 
         <div className="studio-source"><pre className="studio-code-highlight" ref={highlightRef} aria-hidden="true">{highlightedPython(code)}</pre><textarea
+            ref={editorRef}
             aria-label="Python source code"
             value={code}
             spellCheck={false}
@@ -997,7 +1101,7 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
                 highlightRef.current.scrollLeft = event.currentTarget.scrollLeft;
               }
             }}
-            onChange={event => { if (otherFlowBusy.current) return; onCodeChange(event.target.value); setSampleId('custom'); setName('Custom workload'); setAnalysis(null); setReceipt(null); setStatus('idle'); }}
+            onChange={event => { if (otherFlowBusy.current) return; restoredSourceCheck.current += 1; setRestoredSourceStatus(null); onCodeChange(event.target.value); setSampleId('custom'); setName('Custom workload'); setAnalysis(null); setReceipt(null); setStatus('idle'); }}
             onKeyDown={event => {
               if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
                 event.preventDefault();
@@ -1019,19 +1123,23 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
 
         <div className="studio-inspector-heading"><h2>Task review</h2></div>
         <section className="console-panel studio-review" aria-label="AI Sentinel source review">
-          <div className="console-section-heading"><h2><Icon name="shield" size={18} />AI Sentinel</h2><span className="studio-section-state">{sentinelMatchesSource ? 'Review attached' : sentinelAvailable ? 'Gemini available' : 'Gemini not connected'}</span></div>
-          <p>Gemini advises on this source. Compute needs separate approval.</p>
-          <button className="console-text-button studio-sentinel-action" disabled={draftLocked || !code.trim()} onClick={requestSentinelReview}><Icon name="spark" size={16} />Review with Gemini</button>
+          <div className="console-section-heading"><h2><Icon name="shield" size={18} />AI Sentinel</h2><span className="studio-section-state">{sentinelMatchesSource ? 'Review attached' : sentinelAvailable ? 'Ready to review' : 'Setup needed'}</span></div>
+          <p>AI Sentinel flags risky code patterns; it does not run code or set the price. The worker owner publishes the rate, and compute needs your separate approval.</p>
+          {!sentinelAvailable && !sentinelMatchesSource && <p className="studio-sentinel-note" role="status">Connect a supported model and active worker. A quote shares the source with this gateway; signing and submitting sends it to the model.</p>}
+          {sentinelRecoveryNotice && <p role="status">{sentinelRecoveryNotice}</p>}
+          <div className="studio-review-tools"><button className="console-button secondary studio-sentinel-action" disabled={!(sentinelMatchesSource && !sentinelAvailable) && (sourceUnavailable || draftLocked || !code.trim())} onClick={activateSentinelAction}><Icon name={sentinelMatchesSource && !sentinelAvailable ? 'check' : 'spark'} size={16} />{sentinelActionLabel}</button>{onImportSentinelReview && <button className="console-text-button" disabled={draftLocked || !gatewayHealth?.gateway_pubkey} onClick={() => reviewFileRef.current.click()}><Icon name="upload" size={15} />{reviewImportBusy ? 'Verifying review…' : 'Import signed review'}</button>}<input ref={reviewFileRef} type="file" accept=".json,application/json" hidden onChange={importReview} /></div>
 
-          {sentinelResult && <section className={'studio-sentinel-result ' + (sentinelMatchesSource ? 'current' : 'stale')} aria-live="polite">
-            <div className="studio-sentinel-result-heading"><strong>AI Sentinel · {sentinelResult.report?.security || 'manual review'}</strong><span>{sentinelMatchesSource ? 'Matches current source' : 'Source changed since review'}</span></div>
-            <p>{sentinelMatchesSource ? 'This Gemini review matches the current source and signing identity. Its task and receipt hashes will be bound to your compute quote.' : 'This report belongs to an earlier source version. Request a new review before relying on it.'}</p>
+          {sentinelResult && <section ref={sentinelResultRef} tabIndex={-1} className={'studio-sentinel-result ' + (sentinelMatchesSource ? 'current' : 'stale')} aria-live="polite" aria-label="Attached AI Sentinel review">
+            <div className="studio-sentinel-result-heading"><strong className="studio-review-verdict" data-verdict={sentinelResult.report?.security}>AI Sentinel · {sentinelResult.report?.security || 'manual review'}</strong><span>{sourceReviewStatus(sentinelResult, code, walletIdentity, gatewayHealth?.gateway_pubkey)}</span></div>
+            <p>{sentinelMatchesSource ? 'This review matches the current source and signing identity. Its task and receipt hashes will be bound to your compute quote.' : 'This review is not attached to the current source and signing identity. Restore its source and wallet, or request a new review.'}</p>
+            <p>Advisory only: SAFE is not a guarantee, and the model verdict by itself does not authorize or block execution.</p>
+            <p>Saved only in this tab. Reloading rechecks the original signed receipt and output.</p>
             {sentinelResult.report?.reason && <p>{sentinelResult.report.reason}</p>}
-            {sentinelResult.report && <dl><div><dt>Estimated CPU</dt><dd>{sentinelResult.report.cpu ?? 'Unknown'}</dd></div><div><dt>Estimated RAM</dt><dd>{sentinelResult.report.ram ?? 'Unknown'}</dd></div><div><dt>Network</dt><dd>{sentinelResult.report.network ?? 'Unknown'}</dd></div><div><dt>Runtime estimate</dt><dd>{sentinelResult.report.predicted_sec == null ? 'Unknown' : `${sentinelResult.report.predicted_sec}s`}</dd></div></dl>}
-            {sentinelResult.report?.findings?.length > 0 && <ul>{sentinelResult.report.findings.map((finding, index) => <li key={index}><strong>{finding.severity}{finding.line ? ` · line ${finding.line}` : ''}</strong> — {finding.issue}{finding.evidence && <small>{finding.evidence}</small>}</li>)}</ul>}
-            {!sentinelResult.report && <p>The model returned a non-JSON response. Read the verified output in the AI Sentinel review and check the source manually.</p>}
+            {sentinelResult.report?.findings?.length > 0 && <ul className="studio-review-findings">{sentinelResult.report.findings.map((finding, index) => <li key={index} data-severity={finding.severity}><div><strong>{finding.severity}</strong>{finding.line && <button className="console-text-button studio-finding-line" disabled={draftLocked || sentinelResult.source !== code || !sourceLineRange(code, finding.line)} onClick={() => focusReviewedLine(finding.line)}>Line {finding.line}<Icon name="arrow" size={12} /></button>}</div><p>{finding.issue}</p>{finding.evidence && <small>{finding.evidence}</small>}</li>)}</ul>}
+            {sentinelResult.evidence && <div className="studio-review-export"><button className="console-text-button" onClick={exportReview}><Icon name="download" size={15} />Export signed review</button><small>Includes source, model output and receipts. Opens in another tab on the same gateway, or in the Python SDK with matching deployment pins.</small></div>}
+            {!sentinelResult.report && <p className="studio-sentinel-note" role="status">The signed output did not match the expected report format or cited a line outside this source. Read the verified model output and check the source manually; no safety verdict was accepted.</p>}
             {sentinelMatchesSource && sentinelResult.report && <div className="studio-sentinel-next-step"><p>The report matches this source. Next, Aperture checks its execution policy and prepares a separate price and limit quote.</p><button className="console-button secondary" disabled={draftLocked} onClick={reviewQuote}><Icon name="arrow" size={16} />Review compute price & limits</button></div>}
-            {!sentinelMatchesSource && <button className="console-text-button" disabled={draftLocked || !code.trim()} onClick={requestSentinelReview}>Review current source with AI Sentinel</button>}
+            {!sentinelMatchesSource && <button className="console-text-button" disabled={sourceUnavailable || draftLocked || !code.trim()} onClick={requestSentinelReview}>Review current source with AI Sentinel</button>}
           </section>}
           {quote && !executionReady && <p className="studio-execution-help">{!gatewayOnline ? 'Reconnect the gateway to execute this workload.' : 'Execution needs a configured gateway and an authenticated worker.'}</p>}
           {reviewedSourcesOnly && <p className="studio-policy-note">This node accepts reviewed samples. Edited source needs operator approval.</p>}
@@ -1044,11 +1152,11 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
             const node = workers.find(item => item.node_id === event.target.value);
             onWorkerTargetChange?.(node ? { node_id: node.node_id, worker_pubkey: node.worker_pubkey } : null);
           }}>
-            <option value="">Automatic · any available Python worker</option>
-            {workers.map(node => <option key={node.node_id} value={node.node_id} disabled={node.accepting_tasks === false}>{node.node_id}{node.accepting_tasks === false ? ' · draining' : node.active_tasks > 0 ? ' · busy' : ''}</option>)}
+            <option value="">Automatic · lowest published rate</option>
+            {workers.map(node => <option key={node.node_id} value={node.node_id} disabled={node.accepting_tasks === false || !Number.isSafeInteger(node.rate_lamports_sec)}>{node.node_id} · {Number.isSafeInteger(node.rate_lamports_sec) ? `${node.rate_lamports_sec.toLocaleString()} lamports/s` : 'price not set'}{node.accepting_tasks === false ? ' · draining' : node.active_tasks > 0 ? ' · busy' : ''}</option>)}
             {workerTarget && !selectedNode && <option value={workerTarget.node_id}>{workerTarget.node_id} · unavailable</option>}
           </select>
-          <p>{workerTarget ? 'Your signature binds this worker to the task and its result.' : 'The first compatible worker can claim this task.'}</p>
+          <p>{workerTarget ? 'Your signature binds this worker, its published rate and its result.' : 'The gateway pins the lowest-priced compatible worker and rate into your quote.'}</p>
           {workerTarget && <details className="studio-disclosure"><summary>Executor identity</summary><code className="studio-worker-key">{workerTarget.worker_pubkey}</code></details>}
           {!routeReady && <p role="status" className="studio-route-warning">Selected worker is unavailable or draining. Reconnect it or choose another route before signing.</p>}
         </section>
@@ -1061,7 +1169,7 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
           {quote && <div className="studio-quote">
             <h3>Your quote</h3>
             <dl>
-              <div><dt>{quote.analysis?.pricing === 'published_cpu_tariff_v1' ? 'Rate · operator CPU tariff' : 'Rate · source heuristic'}</dt><dd>{quote.rate_lamports / 1e9} SOL/s</dd></div>
+              <div><dt>Worker owner rate</dt><dd>{quote.rate_lamports / 1e9} SOL/s</dd></div>
               <div><dt>Maximum charge</dt><dd>{quote.max_cost_lamports / 1e9} SOL</dd></div>
               <div><dt>Execution limit</dt><dd>{quote.effective_runtime_seconds}s</dd></div>
               <div><dt>Executor</dt><dd>{quote.worker_target?.node_id || 'Automatic assignment'}</dd></div>
@@ -1074,12 +1182,13 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
         <section className="console-panel studio-pricing" aria-label="Pricing analysis">
           <div className="console-section-heading"><h2>Pricing analysis</h2><span className="studio-section-state">{analysis ? 'Quoted rate' : 'Available after quote'}</span></div>
           {analysis ? <><strong className="studio-price-rate">{formatSol(analysis.rateLamports / 1e9)} <small>SOL / second</small></strong>
-            {analysis.pricing === 'published_cpu_tariff_v1' ? <p>This CSV profile uses the operator’s published CPU tariff.</p> : <>
+            <p>The selected worker owner sets this rate. AI Sentinel and source-complexity estimates do not change it.</p>
+            {analysis.pricing !== 'provider_published_worker_rate_v1' && <>
               <dl className="studio-analysis-scores"><div><dt>CPU score</dt><dd>{analysis.scores?.cpu ?? '—'}</dd></div><div><dt>RAM score</dt><dd>{analysis.scores?.ram ?? '—'}</dd></div><div><dt>Runtime estimate</dt><dd>{analysis.predictedSeconds == null ? '—' : analysis.predictedSeconds + 's'}</dd></div></dl>
-              <details className="studio-disclosure"><summary>Complexity and APS calculation</summary><p>{analysis.description}</p><p>The gateway scales its base rate by source complexity and a configured hardware divisor. APS currently uses a fixed zero pressure input; these scores are estimates, not live worker utilization.</p></details>
+              <details className="studio-disclosure"><summary>Source review estimates</summary><p>{analysis.description}</p><p>These static estimates inform review only; they do not affect the provider's price.</p></details>
             </>}
-            {quote?.workload?.parameters?.aperture_review && <p className="studio-linked-review"><Icon name="shield" size={14} />Gemini review is bound to this compute quote.</p>}
-          </> : <p>Source complexity and APS set this rate.</p>}
+            {quote?.workload?.parameters?.aperture_review && <p className="studio-linked-review"><Icon name="shield" size={14} />AI Sentinel review is bound to this compute quote.</p>}
+          </> : <p>The selected worker owner sets this rate.</p>}
           <p className="studio-price-note">Actual time determines the charge within your cap.</p>
         </section>
         <section id="studio-payment-channel" className="console-panel studio-channel" tabIndex={-1}>
@@ -1118,7 +1227,7 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
         </section>
         </>}
       </aside>
-      <section className="studio-terminal"><div className="studio-terminal-heading"><h2><Icon name="code" size={18} />Output{logs.length > 0 && <span className="studio-terminal-count">{logs.length} events</span>}{busy && <span className="studio-terminal-live" aria-label="Streaming workload output"><span className="studio-terminal-live-dot" />LIVE</span>}</h2><button className="console-text-button" disabled={!logs.length} onClick={() => saveFile('aperture-output.txt', logs.map(entry => '[' + entry.time + '] ' + entry.message).join('\n'))}><Icon name="download" size={16} />Save log</button></div><div className="studio-log" ref={logRef} onScroll={event => { const element = event.currentTarget; followLogs.current = element.scrollHeight - element.scrollTop - element.clientHeight < 32; }} role="log" aria-label="Run output" aria-live="polite" aria-atomic="false">{logs.length ? logs.map((entry, index) => <div className={'studio-log-line ' + entry.kind} key={index}><time>{entry.time}</time><span>{entry.message}</span></div>) : <div className="studio-terminal-empty"><p>Worker output appears here after execution.</p></div>}</div></section>
+      <section className="studio-terminal"><div className="studio-terminal-heading"><h2><Icon name="code" size={18} />Output{logs.length > 0 && <span className="studio-terminal-count">{logs.length} events</span>}{busy && <span className="studio-terminal-live" aria-label="Streaming workload output"><span className="studio-terminal-live-dot" />LIVE</span>}</h2><button className="console-text-button" disabled={!logs.length} onClick={() => saveFile('aperture-output.txt', logs.map(entry => '[' + entry.time + '] ' + entry.message).join('\n'))}><Icon name="download" size={16} />Save log</button></div><div className="studio-log" ref={logRef} onScroll={event => { const element = event.currentTarget; followLogs.current = element.scrollHeight - element.scrollTop - element.clientHeight < 32; }} role="log" aria-label="Run output" aria-live="polite" aria-atomic="false">{logs.length ? logs.map((entry, index) => <div className={'studio-log-line ' + entry.kind} key={index}><time>{entry.time}</time><span>{entry.message}</span></div>) : <div className="studio-terminal-empty"><span aria-hidden="true"><Icon name="activity" size={17} /></span><div><strong>No run output yet</strong><p>Worker output and status events will appear here after a workload is approved and dispatched.</p></div></div>}</div></section>
         <section className={'console-panel studio-data' + (!dataJob ? ' compact' : '')}>
           <div className="console-section-heading"><div><span className="console-eyebrow">DATA → COMPUTE → FILES</span><h2>Input files</h2></div><Icon name="upload" size={20} /></div>
           <label className="studio-data-toggle"><input type="checkbox" checked={dataJob} disabled={draftLocked} onChange={event => { if (!otherFlowBusy.current) setDataJob(event.target.checked); }} />Add input files</label>
@@ -1156,11 +1265,13 @@ export default function Dashboard({ code, onCodeChange, gatewayHealth, gatewayOn
             <details className="studio-disclosure studio-receipt-disclosure"><summary>Receipt evidence</summary><dl className="studio-receipt-evidence">
               {[
                 ['Worker', receipt.backendReceipt.worker_id], ['Exit code', receipt.backendReceipt.exit_code],
-                ['Execution boundary', receipt.backendReceipt.execution_backend], ['Agent public key', receipt.backendReceipt.agent_pubkey],
+                ['Execution mode', receipt.backendReceipt.execution_backend],
+                ['Boundary note', executionBoundaryLabel(receipt.backendReceipt.execution_backend)],
+                ['Agent public key', receipt.backendReceipt.agent_pubkey],
                 ['Source SHA-256', receipt.backendReceipt.code_sha256], ['Raw output SHA-256', receipt.backendReceipt.output_sha256],
                 ...(receipt.workload?.parameters?.aperture_review ? [
-                  ['Gemini review task', receipt.workload.parameters.aperture_review.task_id],
-                  ['Gemini review receipt SHA-256', receipt.workload.parameters.aperture_review.receipt_sha256],
+                  ['AI Sentinel review task', receipt.workload.parameters.aperture_review.task_id],
+                  ['AI Sentinel review receipt SHA-256', receipt.workload.parameters.aperture_review.receipt_sha256],
                   ['Task manifest SHA-256', receipt.backendReceipt.workload_sha256],
                 ] : []),
                 ['Worker signature', receipt.backendReceipt.worker_signature], ['Receipt hash', receipt.backendReceipt.receipt_sha256],

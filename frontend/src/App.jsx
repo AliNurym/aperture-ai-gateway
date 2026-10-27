@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import axios from "axios";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton, useWalletModal } from "@solana/wallet-adapter-react-ui";
 import Dashboard from "./Dashboard";
 const Agents = lazy(() => import("./Agents"));
@@ -16,16 +16,32 @@ import ProofVerifierModal from "./components/ProofVerifierModal";
 import CommandPalette from "./components/CommandPalette";
 import { DEFAULT_STUDIO_WORKLOAD, WORKLOADS } from "./utils/workloads";
 import { activeModelWorkerCount, buildSentinelPrompt, publicInferenceProviders } from "./utils/inference";
-import { installNavigationIndicator, installPressFeedback, syncNavigationIndicator } from "./utils/motion";
+import { APERTURE_PROGRAM_ID, GATEWAY_PUBKEY_PIN } from "./utils/protocol";
+import { inspectGatewayStatus } from "./utils/gatewayStatus";
+import { animatePageEntry, installNavigationIndicator, installPressFeedback, syncNavigationIndicator } from "./utils/motion";
 import logo from "./assets/aperture-mark-v3.png";
 import "./Console.css";
 import "./Motion.css";
 import "./Workspace.css";
 import WorkspaceModes from "./components/WorkspaceModes";
+import { readSourceReview, readStudioSource, recoverSourceReview, saveSourceReview, saveStudioSource } from './utils/sourceReview';
+import { parseSentinelDraft, sourceIsAvailable } from './utils/restoredSource';
 
 const API_URL = (
   import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
 ).replace(/\/$/, "");
+
+function formatCount(count, singular, plural) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function WorkspaceLoading({ label }) {
+  return <div className="console-panel workspace-loading" role="status" aria-live="polite">
+    <Icon name="refresh" size={18} spinning />
+    <span>{label}</span>
+  </div>;
+}
+
 const PAGES = [
   {
     id: "overview",
@@ -69,8 +85,8 @@ const PAGES = [
     shortLabel: "Agents",
     icon: "shield",
     group: "control",
-    title: "Agent permissions",
-    subtitle: "Set permissions and spending limits for each agent.",
+    title: "Agent passports",
+    subtitle: "Set spending, runtime and access limits for each agent.",
   },
   {
     id: "network",
@@ -88,7 +104,7 @@ const PAGES = [
     icon: "chip",
     group: "network",
     title: "Provide compute",
-    subtitle: "Manage your worker, finish active work, and track its earnings.",
+    subtitle: "Manage your worker, finish active work, and review confirmed and estimated totals.",
   },
   {
     id: "guide",
@@ -106,15 +122,11 @@ const NAV_GROUPS = [
   { id: "network", label: "Network" },
   { id: "guide", label: "" },
 ];
+const MOBILE_PRIMARY_NAV = new Set(["overview", "studio", "workflows", "network"]);
 const SENTINEL_DRAFT_KEY = "aperture-sentinel-draft-v1";
 function readSentinelDraft() {
-  try {
-    const draft = JSON.parse(sessionStorage.getItem(SENTINEL_DRAFT_KEY) || "null");
-    return draft && typeof draft.id === "string" && typeof draft.source === "string"
-      && typeof draft.prompt === "string" ? draft : null;
-  } catch {
-    return null;
-  }
+  try { return parseSentinelDraft(sessionStorage.getItem(SENTINEL_DRAFT_KEY)); }
+  catch { return null; }
 }
 function clearSentinelDraft() {
   try { sessionStorage.removeItem(SENTINEL_DRAFT_KEY); } catch { /* Tab storage may be unavailable. */ }
@@ -141,8 +153,10 @@ function readHistory() {
 
 export default function App() {
   const { connected, wallet } = useWallet();
+  const { connection } = useConnection();
   const { setVisible: chooseWallet } = useWalletModal();
   const [page, setPage] = useState(currentPage);
+  const [showMobileMore, setShowMobileMore] = useState(false);
   const [studioMode, setStudioMode] = useState(() => window.location.hash.slice(1) === "inference" ? "inference" : "python");
   const [inferenceVisited, setInferenceVisited] = useState(() => ["inference", "sentinel"].includes(window.location.hash.slice(1)));
   const [showReceiptGuide, setShowReceiptGuide] = useState(false);
@@ -154,9 +168,11 @@ export default function App() {
   const [workerTarget, setWorkerTarget] = useState(null);
   const [sentinelDraft, setSentinelDraft] = useState(readSentinelDraft);
   const [sentinelResult, setSentinelResult] = useState(null);
+  const [sentinelRecoveryNotice, setSentinelRecoveryNotice] = useState('');
+  const sentinelGeneration = useRef(0);
   const [sentinelLaunchError, setSentinelLaunchError] = useState("");
   const busy = studioBusy || workflowBusy || inferenceBusy;
-  const [studioSource, setStudioSource] = useState(() => readSentinelDraft()?.source || DEFAULT_STUDIO_WORKLOAD.code);
+  const [studioSource, setStudioSource] = useState(() => readStudioSource(API_URL) ?? readSentinelDraft()?.source ?? DEFAULT_STUDIO_WORKLOAD.code);
   const [selection, setSelection] = useState(null);
   const [releasedObject, setReleasedObject] = useState(null);
   const [history, setHistory] = useState(readHistory);
@@ -166,24 +182,58 @@ export default function App() {
     stats: null,
     health: null,
     providers: [],
+    sentinelProviders: [],
     updated: null,
   });
   const [refreshing, setRefreshing] = useState(false);
+  const gatewaySigner = telemetry.health?.gateway_pubkey;
+  const gatewayProgram = telemetry.health?.program_id;
+  const gatewayDemo = telemetry.health?.demo_mode;
+  useEffect(() => { saveStudioSource(API_URL, studioSource); }, [studioSource]);
+  useEffect(() => {
+    if (!gatewaySigner) return;
+    const saved = readSourceReview(API_URL);
+    if (!saved) return;
+    let cancelled = false;
+    const generation = sentinelGeneration.current;
+    recoverSourceReview(saved, { gateway_pubkey: gatewaySigner, program_id: gatewayProgram, demo_mode: gatewayDemo }, connection)
+      .then(review => { if (!cancelled && generation === sentinelGeneration.current) { setSentinelResult(current => current || review); setSentinelRecoveryNotice(''); } })
+      .catch(() => { if (!cancelled && generation === sentinelGeneration.current) setSentinelRecoveryNotice('The saved AI Sentinel review could not be verified for this gateway. Request a new review.'); });
+    return () => { cancelled = true; };
+  }, [gatewaySigner, gatewayProgram, gatewayDemo, connection]);
   const [theme, setTheme] = useState(() => {
     try {
-      return localStorage.getItem('aperture-theme-v2') || 'light';
+      // The v2 shell saved its grey/light default even without a user choice.
+      // Restore the purple default, then remember explicit choices in this theme.
+      const saved = localStorage.getItem('aperture-theme-v3') || localStorage.getItem('aperture-theme');
+      return saved === 'light' || saved === 'dark' ? saved : 'dark';
     } catch {
-      return 'light';
+      return 'dark';
     }
   });
+  const themeTransitionTimer = useRef(null);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     document.documentElement.classList.toggle('dark-theme', theme === 'dark');
-    try { localStorage.setItem('aperture-theme-v2', theme); } catch {}
+    try { localStorage.setItem('aperture-theme-v3', theme); } catch {}
   }, [theme]);
 
-  const toggleTheme = () => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  useEffect(() => () => {
+    if (themeTransitionTimer.current !== null) window.clearTimeout(themeTransitionTimer.current);
+    document.documentElement.removeAttribute('data-theme-transitioning');
+  }, []);
+
+  const toggleTheme = () => {
+    const root = document.documentElement;
+    root.setAttribute('data-theme-transitioning', '');
+    if (themeTransitionTimer.current !== null) window.clearTimeout(themeTransitionTimer.current);
+    themeTransitionTimer.current = window.setTimeout(() => {
+      root.removeAttribute('data-theme-transitioning');
+      themeTransitionTimer.current = null;
+    }, 260);
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
 
   const [visitedPages, setVisitedPages] = useState(() => new Set([currentPage()]));
   useEffect(() => {
@@ -198,9 +248,33 @@ export default function App() {
   const refreshController = useRef(null);
   const appRef = useRef(null);
   const navRef = useRef(null);
+  const mobileMoreRef = useRef(null);
   const previousPage = useRef(page);
   const focusContent = useRef(false);
   const activePage = PAGES.find((item) => item.id === page);
+  const motionView = page === "studio" ? `${page}:${studioMode}` : page;
+  const previousMotionView = useRef(motionView);
+  const motionViewEntered = useRef(false);
+  const mobileMorePages = PAGES.filter((item) => !MOBILE_PRIMARY_NAV.has(item.id));
+  const mobileMoreActive = mobileMorePages.some((item) => item.id === page);
+
+  useEffect(() => setShowMobileMore(false), [page]);
+  useEffect(() => {
+    if (!showMobileMore) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setShowMobileMore(false);
+    };
+    const closeOnOutsideClick = (event) => {
+      if (navRef.current?.contains(event.target) || mobileMoreRef.current?.contains(event.target)) return;
+      setShowMobileMore(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    return () => {
+      document.removeEventListener("keydown", closeOnEscape);
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+    };
+  }, [showMobileMore]);
 
   const navigate = useCallback((target) => {
     const inferenceMode = target === "inference";
@@ -240,9 +314,15 @@ export default function App() {
     navigate("inference");
   }, [navigate]);
   const openSentinelReview = useCallback(({ source, prompt }) => {
+    if (!sourceIsAvailable(source)) {
+      setSentinelLaunchError('The recovered task has no source text in this tab. Load a sample or import Python source before opening AI Sentinel.');
+      return;
+    }
+    setSentinelLaunchError('');
+    sentinelGeneration.current += 1;
+    setSentinelRecoveryNotice('');
     setInferenceVisited(true);
     setPreferredProviderId("");
-    setSentinelResult(null);
     setSentinelLaunchError("");
     const draft = { id: crypto.randomUUID(), source, prompt };
     try { sessionStorage.setItem(SENTINEL_DRAFT_KEY, JSON.stringify(draft)); } catch { /* The review can continue in this tab. */ }
@@ -261,7 +341,23 @@ export default function App() {
     clearSentinelDraft();
     navigate("studio");
   }, [navigate]);
-  const recordSentinelResult = useCallback((result) => setSentinelResult(result), []);
+  const recordSentinelResult = useCallback((result) => {
+    sentinelGeneration.current += 1;
+    setSentinelResult(result);
+    setSentinelRecoveryNotice(saveSourceReview(API_URL, result) ? '' : 'This review is available now, but private tab storage could not save it for reload recovery.');
+  }, []);
+
+  const importSentinelReview = useCallback(async record => {
+    if (!gatewaySigner) throw new Error('Connect the gateway once to verify this review against its signing identity.');
+    const generation = ++sentinelGeneration.current;
+    const review = await recoverSourceReview(record, { gateway_pubkey: gatewaySigner, program_id: gatewayProgram, demo_mode: gatewayDemo }, connection);
+    if (generation !== sentinelGeneration.current) throw new Error('Another source review arrived while importing. Import the file again.');
+    setStudioSource(review.source);
+    recordSentinelResult(review);
+    setSentinelDraft(null);
+    clearSentinelDraft();
+    return review;
+  }, [gatewaySigner, gatewayProgram, gatewayDemo, connection, recordSentinelResult]);
 
   useEffect(() => installPressFeedback(appRef.current), []);
   useEffect(() => {
@@ -332,7 +428,16 @@ export default function App() {
       document.getElementById('main-content')?.focus({ preventScroll: true });
     previousPage.current = page;
     focusContent.current = false;
-  }, [page]);
+    const viewChanged = previousMotionView.current !== motionView;
+    previousMotionView.current = motionView;
+    if (!viewChanged && motionViewEntered.current) return undefined;
+    motionViewEntered.current = true;
+    const stopPageEntry = animatePageEntry(appRef.current?.querySelector('.console-page-stage'));
+    return () => {
+      stopPageEntry();
+      motionViewEntered.current = false;
+    };
+  }, [page, motionView]);
   useLayoutEffect(() => installNavigationIndicator(navRef.current), []);
   const refresh = useCallback(async () => {
     const started = performance.now();
@@ -342,11 +447,12 @@ export default function App() {
     setRefreshing(true);
     try {
       const config = { timeout: 8000, signal: controller.signal };
-      const [health, nodes, stats, modelCatalog] = await Promise.all([
+      const [health, nodes, stats, modelCatalog, sentinelCatalog] = await Promise.all([
         axios.get(API_URL + "/health", config),
         axios.get(API_URL + "/active_nodes", config),
         axios.get(API_URL + "/stats", config),
         axios.get(API_URL + "/inference/providers", config).catch(() => ({ data: { providers: [] } })),
+        axios.get(API_URL + "/sentinel/providers", config).catch(() => ({ data: { providers: [] } })),
       ]);
       if (!controller.signal.aborted)
         setTelemetry({
@@ -355,6 +461,7 @@ export default function App() {
           nodes: Array.isArray(nodes.data) ? nodes.data : [],
           stats: stats.data,
           providers: publicInferenceProviders(modelCatalog.data?.providers),
+          sentinelProviders: sentinelCatalog.data?.providers || [],
           updated: new Date(),
           refreshDurationMs: Math.round(performance.now() - started),
         });
@@ -364,6 +471,21 @@ export default function App() {
     } finally {
       if (!controller.signal.aborted) setRefreshing(false);
     }
+  }, []);
+  const syncWorkerPublicState = useCallback((worker) => {
+    if (!worker?.node_id) return;
+    setTelemetry((previous) => ({
+      ...previous,
+      nodes: previous.nodes.map((node) => node.node_id === worker.node_id ? {
+        ...node,
+        rate_lamports_sec: worker.rate_lamports_sec,
+        accepting_tasks: worker.accepting_tasks,
+        online: worker.online,
+        status: worker.status,
+        last_seen: worker.last_seen,
+        active_tasks: worker.active_tasks,
+      } : node),
+    }));
   }, []);
   useEffect(() => {
     refresh();
@@ -394,17 +516,19 @@ export default function App() {
     navigate("studio");
   };
   const online = telemetry.state === "online";
-  const gatewayReady = online && telemetry.health?.status === "ready";
+  const modelOfferCount = online ? telemetry.providers.length : 0;
+  const pythonWorkerCount = online ? telemetry.nodes.filter(node => (node.runtimes || ["python"]).includes("python")).length : 0;
+  const gatewayStatus = inspectGatewayStatus(telemetry, { programId: APERTURE_PROGRAM_ID, signerPin: GATEWAY_PUBKEY_PIN });
+  const gatewayReady = gatewayStatus.ready;
   const activeWorkerCount = online ? telemetry.nodes.length : 0;
-  const stateLabel = gatewayReady
-    ? "Gateway connected"
-    : online
-      ? telemetry.health?.status === "workers_unavailable"
-        ? "Waiting for a worker"
-        : "Gateway needs setup"
-      : telemetry.state === "checking"
-        ? "Checking gateway"
-        : "Gateway offline";
+  const stateLabel = gatewayStatus.label;
+  const identitySetupMessage = gatewayStatus.issue === 'signer_mismatch'
+    ? 'This console expects a different gateway signer. Open the unified local preview or fix the pin before signing.'
+    : gatewayStatus.issue === 'program_mismatch'
+      ? 'The gateway program differs from this console. Check the setup guide before signing.'
+      : online && activeWorkerCount === 0
+        ? 'Connect a worker when you are ready to execute.'
+        : 'Connect your execution stack to run workloads.';
 
   return (
     <div className="console-app aperture-workspace" ref={appRef}>
@@ -441,6 +565,7 @@ export default function App() {
                 <button
                   key={item.id}
                   className={"console-nav-item " + (page === item.id ? "selected" : "")}
+                  data-mobile-primary={MOBILE_PRIMARY_NAV.has(item.id) ? "true" : "false"}
                   aria-current={page === item.id ? "page" : undefined}
                   aria-label={item.label}
                   title={item.label}
@@ -457,13 +582,40 @@ export default function App() {
               ))}
             </div>
           ))}
+          <button
+            className={"console-nav-item console-mobile-more-trigger " + (mobileMoreActive ? "selected" : "")}
+            type="button"
+            aria-label="More pages"
+            aria-expanded={showMobileMore}
+            aria-controls="console-mobile-more-pages"
+            aria-current={mobileMoreActive ? "page" : undefined}
+            onClick={() => setShowMobileMore((open) => !open)}
+          >
+            <Icon name="more" />
+            <span className="console-nav-full">More</span>
+            <span className="console-nav-short" aria-hidden="true">More</span>
+          </button>
         </nav>
+        <div className="console-mobile-more-menu" id="console-mobile-more-pages" ref={mobileMoreRef} role="group" aria-label="More pages" hidden={!showMobileMore}>
+          {mobileMorePages.map((item) => (
+            <button
+              key={item.id}
+              className={"console-nav-item " + (page === item.id ? "selected" : "")}
+              aria-current={page === item.id ? "page" : undefined}
+              onClick={() => navigate(item.id)}
+            >
+              <Icon name={item.icon} />
+              <span className="console-nav-full">{item.label}</span>
+              {item.badge && <span className="console-nav-badge">{item.badge}</span>}
+            </button>
+          ))}
+        </div>
         <div className="console-sidebar-bottom">
           <div className="console-devnet">
-            <span className={"console-dot " + (gatewayReady ? "ready" : "muted")} />
+            <span className={"console-dot " + gatewayStatus.tone} />
             {telemetry.health?.demo_mode ? 'OFF_CHAIN preview' : telemetry.health?.environment === 'production' ? 'Production · Solana' : 'Development workspace'}
           </div>
-          <span className="console-version">{telemetry.providers.length ? 'Model + compute marketplace' : 'Compute gateway · connect Gemini'}</span>
+          <span className="console-version">{modelOfferCount ? 'Model + compute marketplace' : 'Compute gateway · connect a model'}</span>
         </div>
       </aside>
       <div className="console-body">
@@ -474,7 +626,7 @@ export default function App() {
           </div>
           <div className="console-top-actions">
             <div className="console-hud-badge" title={"Gateway: " + API_URL + " · Network: " + (telemetry.health?.demo_mode ? "Off-chain" : "Devnet")}>
-              <span className={"console-hud-dot " + (gatewayReady ? "ready" : online ? "warning" : "muted")} />
+              <span className={"console-hud-dot " + gatewayStatus.tone} />
               <span className="console-hud-label">Gateway</span>
               <span className="console-hud-sep">{new URL(API_URL, window.location.origin).port ? ':' + new URL(API_URL, window.location.origin).port : new URL(API_URL, window.location.origin).hostname}</span>
               <span className="console-hud-badge-tag">{online ? (telemetry.health?.demo_mode ? "Off-chain" : "Devnet") : "offline"}</span>
@@ -522,7 +674,14 @@ export default function App() {
           </div>
         </header>
         <main id="main-content" tabIndex={-1} className="console-main">
-          <div data-page={page} className={"console-page-stage" + (page === "studio" ? " is-studio-page" : "")}>
+          <div
+            data-page={page}
+            className={"console-page-stage" + (page === "studio" ? " is-studio-page" : "")}
+            onAnimationEnd={(event) => {
+              if (event.target === event.currentTarget && event.animationName === 'aperture-page-glide')
+                event.currentTarget.removeAttribute('data-entering');
+            }}
+          >
             <div className="console-page-heading">
               <div className="console-heading-copy">
                 <h1>{activePage.title}</h1>
@@ -533,20 +692,16 @@ export default function App() {
               onClick={refresh}
               disabled={refreshing}
               aria-busy={refreshing}
-              title={"Refresh gateway: " + API_URL}
+              aria-label={gatewayStatus.issue ? stateLabel + '. Check gateway setup before signing.' : stateLabel + '. Refresh gateway.'}
+              title={gatewayStatus.issue ? identitySetupMessage : "Refresh gateway: " + API_URL}
             >
-              <span
-                className={
-                  "console-dot " +
-                  (gatewayReady ? "ready" : online ? "warning" : "muted")
-                }
-              />
+              <span className={"console-dot " + gatewayStatus.tone} />
               {stateLabel}
               <Icon name="refresh" spinning={refreshing} size={15} />
             </button>
           </div>
 
-          {wallet?.adapter.name === 'Temporary key' && <aside className="console-session-notice"><Icon name="shield" size={15} /><p>Temporary signing key · this tab only</p><details><summary>Key details</summary><p>The private key is lost on reload or disconnect. Use an external wallet for persistent assets.</p></details></aside>}
+            {connected && wallet?.adapter.name === 'Temporary key' && <aside className="console-session-notice"><Icon name="shield" size={15} /><p>Temporary signing key · this tab only</p><details><summary>Key details</summary><p>The private key is lost on reload or disconnect. Use an external wallet for persistent assets.</p></details></aside>}
           {(page === "studio" || page === "workflows") && <WorkspaceModes mode={page === "workflows" ? "workflows" : studioMode}
             onPython={() => navigate("studio")} onInference={openGeneralInference} onWorkflows={() => navigate("workflows")} inferenceBusy={inferenceBusy} />}
           {page === "overview" && (
@@ -557,28 +712,28 @@ export default function App() {
                   <h2>Choose a model or worker.<br /><span>Approve each request.</span></h2>
                   <p>Browse configured model routes and live workers, set a spending ceiling, then inspect the signed result. Python jobs and recoverable agent workflows use the same gateway.</p>
                   <div className="console-dispatch-paths" aria-label="Available workload types">
-                    <button className="console-dispatch-path" onClick={openSentinelFromOverview}>
+                    <button className="console-dispatch-path" data-dispatch-route="compute" onClick={openSentinelFromOverview}>
                       <span className="console-dispatch-icon"><Icon name="shield" size={19} /></span>
                       <span className="console-dispatch-copy"><strong>AI Sentinel → compute</strong><small>Review the current Python source, then approve a separate worker quote</small></span>
                       <span className="console-dispatch-count">Review + run</span>
                       <Icon name="arrow" size={17} />
                     </button>
-                    <button className="console-dispatch-path" onClick={openGeneralInference}>
+                    <button className="console-dispatch-path" data-dispatch-route="inference" onClick={openGeneralInference}>
                       <span className="console-dispatch-icon"><Icon name="spark" size={19} /></span>
                       <span className="console-dispatch-copy"><strong>Model inference</strong><small>Prompt · configured provider · elapsed-time quote</small></span>
-                      <span className="console-dispatch-count">{online ? `${telemetry.providers.length} offers` : "—"}</span>
+                      <span className="console-dispatch-count">{online ? formatCount(modelOfferCount, "offer", "offers") : "—"}</span>
                       <Icon name="arrow" size={17} />
                     </button>
-                    <button className="console-dispatch-path" onClick={() => navigate("workflows")}>
+                    <button className="console-dispatch-path" data-dispatch-route="workflow" onClick={() => navigate("workflows")}>
                       <span className="console-dispatch-icon"><Icon name="network" size={19} /></span>
                       <span className="console-dispatch-copy"><strong>Agent workflow</strong><small>Partitioned data · durable recovery · signed files</small></span>
                       <span className="console-dispatch-count">Multi-step</span>
                       <Icon name="arrow" size={17} />
                     </button>
-                    <button className="console-dispatch-path" onClick={() => navigate("studio")}>
+                    <button className="console-dispatch-path" data-dispatch-route="compute" onClick={() => navigate("studio")}>
                       <span className="console-dispatch-icon"><Icon name="code" size={19} /></span>
                       <span className="console-dispatch-copy"><strong>Python compute</strong><small>Reviewed source · worker quote · hard limits</small></span>
-                      <span className="console-dispatch-count">{online ? `${telemetry.nodes.filter(node => (node.runtimes || ["python"]).includes("python")).length} workers` : "—"}</span>
+                      <span className="console-dispatch-count">{online ? formatCount(pythonWorkerCount, "worker", "workers") : "—"}</span>
                       <Icon name="arrow" size={17} />
                     </button>
                   </div>
@@ -600,9 +755,9 @@ export default function App() {
               <LiveDemoShowcase
                 gatewayOnline={online}
                 gatewayHealth={telemetry.health}
-                workerCount={online ? telemetry.nodes.filter(node => (node.runtimes || ["python"]).includes("python")).length : 0}
+                workerCount={pythonWorkerCount}
                 modelWorkerCount={online ? activeModelWorkerCount(telemetry.nodes, telemetry.providers) : 0}
-                modelOfferCount={online ? telemetry.providers.length : 0}
+                modelOfferCount={modelOfferCount}
                 onOpenMarket={() => navigate("network")}
                 onOpenStudio={(presetId) => {
     const sample = WORKLOADS.find(w => w.id === presetId) || DEFAULT_STUDIO_WORKLOAD;
@@ -742,7 +897,7 @@ export default function App() {
               </div>
               {!gatewayReady && <div className="console-setup-nudge">
                 <Icon name="chip" size={18} />
-                <p>{online && activeWorkerCount === 0 ? "Connect a worker when you are ready to execute." : "Connect your execution stack to run workloads."} You can prepare source in Studio now.</p>
+                <p>{identitySetupMessage} You can prepare source in Studio now.</p>
                 <button className="console-text-button" onClick={() => navigate("guide")}>Setup guide<Icon name="arrow" size={16} /></button>
               </div>}
             </>
@@ -771,11 +926,13 @@ export default function App() {
                   onBusyChange={setStudioBusy}
                   onRecord={recordRun}
                   onSentinelReview={openSentinelReview}
+                  onImportSentinelReview={importSentinelReview}
                   sentinelResult={sentinelDraft ? null : sentinelResult}
-                  sentinelAvailable={telemetry.providers.some(provider => provider.protocol === "gemini_generate_content" && activeModelWorkerCount(telemetry.nodes, [provider]) > 0)}
+                  sentinelRecoveryNotice={sentinelRecoveryNotice}
+                  sentinelAvailable={telemetry.sentinelProviders.some(provider => provider.available_workers > 0)}
                   sentinelPanel={sentinelDraft ? (<section className="console-studio-sentinel" aria-label="AI Sentinel review">
-                <Suspense fallback={<div className="console-panel" style={{ padding: "2.5rem", textAlign: "center" }}>Opening AI Sentinel…</div>}>
-                  <Inference key={sentinelDraft.id} apiUrl={API_URL} gatewayHealth={telemetry.health} sentinelDraft={sentinelDraft} onSentinelResult={recordSentinelResult} onReturnToStudio={returnToStudio} onOpenFunding={openFunding} onOpenSetup={() => navigate("guide")} externalBusy={studioBusy || workflowBusy} onBusyChange={setInferenceBusy} onRecord={recordRun} />
+                <Suspense fallback={<WorkspaceLoading label="Opening AI Sentinel…" />}>
+                  <Inference key={sentinelDraft.id} apiUrl={API_URL} gatewayHealth={telemetry.health} workers={telemetry.nodes} sentinelDraft={sentinelDraft} sentinelSourceCurrent={studioSource === sentinelDraft.source} onSentinelResult={recordSentinelResult} onReturnToStudio={returnToStudio} onOpenFunding={openFunding} onOpenSetup={() => navigate("guide")} externalBusy={studioBusy || workflowBusy} onBusyChange={setInferenceBusy} onRecord={recordRun} />
                 </Suspense>
               </section>) : null}
                   sentinelPanelOpen={Boolean(sentinelDraft)}
@@ -783,17 +940,17 @@ export default function App() {
               </div>
 
               {inferenceVisited && !sentinelDraft && <div id="studio-inference-panel" className="console-studio-panel" role="region" aria-labelledby="studio-inference-tab" hidden={studioMode !== "inference"}>
-                <Suspense fallback={<div className="console-panel" style={{ padding: "2.5rem", textAlign: "center" }}>Loading model workspace…</div>}>
-                  <Inference key={preferredProviderId || "general-inference"} apiUrl={API_URL} gatewayHealth={telemetry.health} preferredProviderId={preferredProviderId} onSentinelResult={recordSentinelResult} onOpenFunding={openFunding} onOpenSetup={() => navigate("guide")} externalBusy={studioBusy || workflowBusy} onBusyChange={setInferenceBusy} onRecord={recordRun} />
+                <Suspense fallback={<WorkspaceLoading label="Loading model workspace…" />}>
+                  <Inference key={preferredProviderId || "general-inference"} apiUrl={API_URL} gatewayHealth={telemetry.health} workers={telemetry.nodes} preferredProviderId={preferredProviderId} onSentinelResult={recordSentinelResult} onOpenFunding={openFunding} onOpenSetup={() => navigate("guide")} externalBusy={studioBusy || workflowBusy} onBusyChange={setInferenceBusy} onRecord={recordRun} />
                 </Suspense>
               </div>}
             </div>
           </section>
 
-          <Suspense fallback={<div className="console-panel" style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-dim, #888)' }}>Loading workspace module…</div>}>
+          <Suspense fallback={<WorkspaceLoading label="Loading workspace module…" />}>
             {visitedPages.has("workflows") && (
               <section className="console-workflows" hidden={page !== "workflows"} aria-label="Agent workflows">
-                <Workflows apiUrl={API_URL} gatewayHealth={telemetry.health} gatewayOnline={online} externalBusy={studioBusy || inferenceBusy} onBusyChange={setWorkflowBusy} onRecord={recordRun} releasedObject={releasedObject} onOpenStudio={openSample} onOpenFunding={openFunding} />
+                <Workflows apiUrl={API_URL} gatewayHealth={telemetry.health} gatewayOnline={online} externalBusy={studioBusy || inferenceBusy} onBusyChange={setWorkflowBusy} onRecord={recordRun} releasedObject={releasedObject} onOpenStudio={openSample} onOpenFunding={openFunding} onOpenSetup={() => navigate("guide")} />
               </section>
             )}
 
@@ -811,7 +968,7 @@ export default function App() {
           </Suspense>
 
           {page === "network" && (
-            <Suspense fallback={<div className="console-panel" style={{ padding: "2rem" }}>Loading capacity directory…</div>}>
+            <Suspense fallback={<WorkspaceLoading label="Loading capacity directory…" />}>
               <ComputeMarket
                 apiUrl={API_URL}
                 online={online}
@@ -830,7 +987,7 @@ export default function App() {
             </Suspense>
           )}
 
-          {page === "provider" && <Suspense fallback={<div className="console-panel" style={{ padding: '2rem' }}>Loading operator workspace…</div>}><ProviderWorkspace apiUrl={API_URL} health={telemetry.health} onOpenGuide={() => navigate('guide')} onOpenNetwork={() => navigate('network')} /></Suspense>}
+          {page === "provider" && <Suspense fallback={<WorkspaceLoading label="Loading operator workspace…" />}><ProviderWorkspace apiUrl={API_URL} health={telemetry.health} onWorkerUpdated={syncWorkerPublicState} onOpenGuide={() => navigate('guide')} onOpenNetwork={() => navigate('network')} /></Suspense>}
 
           {page === "guide" && (
             <div className="console-guide">
@@ -838,26 +995,39 @@ export default function App() {
                 <div className="console-section-heading">
                   <div>
                     <span className="console-eyebrow">CAPACITY OPERATORS</span>
-                    <h2 id="capacity-setup-title">Connect this gateway to real compute capacity.</h2>
-                    <p>The original Gemini review and Python compute now share the same gateway, workspace and approval rules.</p>
+                    <h2 id="capacity-setup-title">Choose how to connect model capacity.</h2>
+                    <p>Run a local preview, or attach an inference worker to a gateway that already exists.</p>
                   </div>
                   <Icon name="network" size={22} />
                 </div>
                 <div className="console-capacity-options">
-                  <article>
-                    <h3>Reconnect AI Sentinel with Gemini</h3>
-                    <p>The original code review now uses the current Gemini API. The source is sent only after you review the prompt and sign its bounded request.</p>
-                    <CommandBlock label="Set Gemini key for this preview" command={"$env:GEMINI_API_KEY = '<Google AI Studio API key>'"}>
-                      <p>The key stays in the inference worker environment. Do not add it to frontend files, the provider catalog or browser storage.</p>
+                  <article className="console-capacity-path" aria-labelledby="capacity-preview-title">
+                    <div className="console-capacity-path-heading">
+                      <span className="console-capacity-path-step" aria-hidden="true">01</span>
+                      <div>
+                        <span className="console-eyebrow">QUICK START · LOCAL PREVIEW</span>
+                        <h3 id="capacity-preview-title">Run Sentinel with a model</h3>
+                      </div>
+                    </div>
+                    <p>Start one local gateway with its model and Python workers. Requesting a Sentinel quote sends the selected source to this gateway; signing and submitting authorizes forwarding it to the model. Sentinel returns advisory findings only: the worker owner sets the rate, and Python runs only through a separate signed quote.</p>
+                    <CommandBlock label="Set a model key for this preview" command={"$env:DEEPSEEK_API_KEY = '<DeepSeek API key>'"}>
+                      <p>Replace the placeholder, then run this and <code>.\start_preview.bat</code> in the same PowerShell window. For the double-click launcher, add <code>DEEPSEEK_API_KEY</code> to <code>backend/.env</code> first. The key stays in the inference worker environment, never in frontend files, the provider catalog or browser storage.</p>
                     </CommandBlock>
-                    <CommandBlock label="Run the unified Gemini + Python preview" command={'.\\start_preview.bat'}>
-                      <p>It runs Gemini and Python through one gateway in OFF_CHAIN preview mode. Owner signatures are exercised; no Solana payment is made.</p>
+                    <CommandBlock label="Run the unified model + Python preview" command={'.\\start_preview.bat'}>
+                      <p>It runs the configured model and Python through one gateway in OFF_CHAIN preview mode. Owner signatures are exercised; no Solana payment is made.</p>
                     </CommandBlock>
                   </article>
-                  <article>
-                    <h3>Connect Gemini to your gateway</h3>
-                    <p>Copy the Gemini offer, point the gateway and inference worker to it, and expose the API key to the worker only.</p>
-                    <CommandBlock label="Create the Gemini offer file" command={'Copy-Item backend\\inference-providers.gemini.example.json backend\\inference-providers.json -NoClobber'} />
+                  <article className="console-capacity-path" aria-labelledby="capacity-worker-title">
+                    <div className="console-capacity-path-heading">
+                      <span className="console-capacity-path-step" aria-hidden="true">02</span>
+                      <div>
+                        <span className="console-eyebrow">EXISTING GATEWAY · OPERATOR SETUP</span>
+                        <h3 id="capacity-worker-title">Attach an inference worker</h3>
+                      </div>
+                    </div>
+                    <p>Connect an inference-only worker to a running gateway using the matching offer template. Keep provider credentials in the worker environment.</p>
+                    <CommandBlock label="Create a DeepSeek offer file" command={'Copy-Item backend\\inference-providers.deepseek.example.json backend\\inference-providers.json -NoClobber'} />
+                    <p>For Gemini, use <code>inference-providers.gemini.example.json</code> instead.</p>
                     <CommandBlock label="Start an inference-only worker" command={'backend\\venv\\Scripts\\python.exe backend\\worker.py --inference-only'}>
                       <p>Set the same absolute <code>APERTURE_INFERENCE_CONFIG</code> path in the gateway environment and <code>backend/.worker.env</code>, then restart both. Keep provider credentials in the worker environment, never in the offer file or browser.</p>
                     </CommandBlock>

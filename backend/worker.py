@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import codecs
 from contextlib import contextmanager
 import hashlib
@@ -39,6 +40,10 @@ args, _ = parser.parse_known_args()
 API_URL = (args.gateway or os.getenv("GATEWAY_API_URL") or "http://127.0.0.1:8000").rstrip("/")
 NODE_ID = args.node_id or os.getenv("APERTURE_NODE_ID") or f"NODE-CPU-{socket.gethostname()}"
 WORKER_TOKEN = (args.token or os.getenv("APERTURE_WORKER_TOKEN", "")).strip()
+_rate_value = os.getenv("APERTURE_WORKER_RATE_LAMPORTS_SEC", "").strip()
+if _rate_value and (not _rate_value.isascii() or not _rate_value.isdecimal() or not 1 <= int(_rate_value) <= 1_000_000_000):
+    raise SystemExit("APERTURE_WORKER_RATE_LAMPORTS_SEC must be an integer from 1 to 1,000,000,000.")
+WORKER_RATE_LAMPORTS_SEC = int(_rate_value) if _rate_value else None
 ALLOW_UNSAFE_LOCAL_EXECUTION = args.allow_unsafe_local_execution or os.getenv("APERTURE_ALLOW_UNSAFE_LOCAL_EXECUTION", "false").lower() == "true"
 STATE_ROOT = Path(os.getenv("APERTURE_WORKER_STATE_DIR", str(Path.home() / ".aperture-worker" / hashlib.sha256(NODE_ID.encode()).hexdigest()[:16])))
 SANDBOX_IMAGE = os.getenv("APERTURE_SANDBOX_IMAGE", "aperture-task:local")
@@ -106,7 +111,7 @@ if args.inference_only:
 def register_heartbeat(stop_event, executor=None):
     while not stop_event.is_set():
         try:
-            response = requests.post(f"{API_URL}/register_node", json={
+            registration = {
                 "node_id": NODE_ID, "gpu_name": GPU_NAME, "vram_total": 0.0,
                 "vram_used": None, "gpu_temp": None, "gpu_util": None,
                 "power_watts": None, "tflops": 0.0, "status": current_status,
@@ -116,7 +121,11 @@ def register_heartbeat(stop_event, executor=None):
                 "approved_source_count": len(executor.approved_hashes) if ALLOW_UNSAFE_LOCAL_EXECUTION and executor and executor.approved_hashes is not None else None,
                 "runtimes": ["inference.chat"] if args.inference_only else ["python"],
                 "inference_offers": [provider.offer() for provider in executor.providers.values()] if args.inference_only else [],
-            }, headers=worker_headers(), timeout=4, allow_redirects=False)
+            }
+            if WORKER_RATE_LAMPORTS_SEC is not None:
+                registration["rate_lamports_sec"] = WORKER_RATE_LAMPORTS_SEC
+            response = requests.post(f"{API_URL}/register_node", json=registration,
+                                     headers=worker_headers(), timeout=4, allow_redirects=False)
             if response.status_code == 200:
                 registration_ready.set()
             else:
@@ -197,6 +206,7 @@ def execute_task(task, executor, state_root=STATE_ROOT, http=requests):
     reason = None
     forced_exit = None
     frames = None
+    inference_artifacts = []
 
     with task_staging_directory(staging) as directory:
         task_directory = Path(directory)
@@ -305,6 +315,14 @@ def execute_task(task, executor, state_root=STATE_ROOT, http=requests):
                 process.wait(timeout=12)
             current_status = "ONLINE (IDLE)"
 
+        if executor.backend == "inference_proxy" and not reason and process.returncode == 0:
+            response_file = task_directory / "response.txt"
+            if response_file.is_file():
+                response_bytes = response_file.read_bytes()
+                if not 0 < len(response_bytes) <= MAX_OUTPUT_BYTES:
+                    raise ValueError("Model response artifact exceeds the output limit.")
+                inference_artifacts = [{"name": "response.txt", "content": base64.b64encode(response_bytes).decode("ascii")}]
+
     duration = min(allowed_duration, round(time.perf_counter() - started, 4))
     with output_lock:
         full_output = bytes(output).decode("utf-8", errors="replace")
@@ -314,6 +332,8 @@ def execute_task(task, executor, state_root=STATE_ROOT, http=requests):
     payload = result_payload(task, full_output, duration, forced_exit if forced_exit is not None else process.returncode, executor)
     if frames:
         payload["_artifact_blobs"] = frames.artifacts
+    elif inference_artifacts:
+        payload["_artifact_blobs"] = inference_artifacts
     return payload
 
 

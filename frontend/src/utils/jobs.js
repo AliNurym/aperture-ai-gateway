@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { canonicalJson, isPortableFilename, sha256Hex } from './protocol.js';
+import { inferenceSource } from './inference.js';
 
 export const MAX_INPUT_BYTES = 64 * 1024 * 1024;
 
@@ -34,7 +35,20 @@ export async function jobManifest(source, inputs, text) {
   const files = inputs.map(item => validateObject(item)).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
   if (files.length > 16 || new Set(files.map(item => item.name.toLowerCase())).size !== files.length
       || files.reduce((sum, item) => sum + item.size_bytes, 0) > MAX_INPUT_BYTES) throw new Error('Use up to 16 uniquely named files, totaling 64 MiB.');
-  return { version: 1, runtime: 'python', source_sha256: await sha256Hex(source), inputs: files, parameters };
+  const inference = source.startsWith('# Aperture inference request v1\n');
+  if (inference && (files.length || Object.keys(parameters).sort().join(',') !== 'inference,offer'
+      || source !== await inferenceSource(parameters))) throw new Error('Inference source must bind its exact offer and messages, without file inputs.');
+  if (inference) {
+    const request = parameters.inference, offer = parameters.offer;
+    if (!request || Object.keys(request).sort().join(',') !== 'max_tokens,messages,provider_id'
+        || request.provider_id !== offer?.id || !Number.isSafeInteger(request.max_tokens)
+        || !Number.isSafeInteger(offer.max_output_tokens) || request.max_tokens < 1 || request.max_tokens > offer.max_output_tokens
+        || offer.max_output_tokens > 4096 || !Array.isArray(request.messages) || request.messages.length < 1 || request.messages.length > 32
+        || request.messages.some(message => !message || Object.keys(message).sort().join(',') !== 'content,role'
+          || !['user', 'assistant', 'system'].includes(message.role) || typeof message.content !== 'string'
+          || !message.content.length || [...message.content].length > 16000)) throw new Error('Invalid model messages or output-token bounds.');
+  }
+  return { version: 1, runtime: inference ? 'inference.chat' : 'python', source_sha256: await sha256Hex(source), inputs: files, parameters };
 }
 
 export async function verifyJobManifest(quote, expected) {

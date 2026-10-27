@@ -9,6 +9,21 @@
 }
 .motion-icon-spin { display: inline-grid; place-items: center; flex-shrink: 0; line-height: 0; }
 
+/* Restrict the Material theme crossfade to the short user-triggered switch. */
+@media (prefers-reduced-motion: no-preference) {
+  :where(
+    html[data-theme-transitioning],
+    html[data-theme-transitioning] body,
+    html[data-theme-transitioning] #root,
+    html[data-theme-transitioning] .console-app.aperture-workspace,
+    html[data-theme-transitioning] .console-app.aperture-workspace *
+  ) {
+    transition-property: color, background-color, border-color;
+    transition-duration: var(--motion-medium);
+    transition-timing-function: var(--motion-standard);
+  }
+}
+
 /* Press acknowledgement remains visible when motion is reduced or unavailable. */
 .console-app :is(.console-button, .console-new, .console-nav-item, .console-sample,
   .console-icon-button, .studio-editor-heading button, .studio-presets button,
@@ -102,22 +117,61 @@
   }
   .console-nav-indicator[data-resizing] { transition: none; }
 
-  /* Unified page transition: cinematic optical aperture focus and glide matching the 320ms sidebar glide */
-  .console-page-stage {
-    animation: aperture-page-glide 340ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  /* Replayed on route and Studio-mode changes without remounting workspace state. */
+  .console-page-stage[data-entering] {
+    animation: aperture-page-glide 340ms var(--motion-emphasized) both;
   }
   .console-breadcrumb strong { animation: aperture-label-in 340ms cubic-bezier(0.16, 1, 0.3, 1); }
 
-  /* Decorative illustration movement settles quickly; no idle orbit loops. */
-  .console-orbit-core img { animation: aperture-awaken 700ms var(--motion-emphasized) 30ms backwards; }
-  .console-orbit-tile.code { animation: aperture-code-arrive 600ms var(--motion-emphasized) 60ms backwards; }
-  .console-orbit-tile.result { animation: aperture-result-arrive 600ms var(--motion-emphasized) 110ms backwards; }
+  /* Overview's model → compute → receipt visual resolves once on route entry, then rests. */
+  .console-page-stage[data-page="overview"][data-entering] .console-dispatch-visual .dispatch-ring-outer {
+    animation: aperture-dispatch-ring-in 260ms var(--motion-emphasized) both;
+  }
+  .console-page-stage[data-page="overview"][data-entering] .console-dispatch-visual .dispatch-ring-inner {
+    animation: aperture-dispatch-ring-in 280ms var(--motion-emphasized) 24ms both;
+  }
+  .console-page-stage[data-page="overview"][data-entering] .console-dispatch-visual .dispatch-center {
+    animation: aperture-dispatch-center-in 240ms var(--motion-emphasized) 48ms both;
+  }
+  .console-page-stage[data-page="overview"][data-entering] .console-dispatch-visual .dispatch-orbit-label {
+    animation: aperture-dispatch-label-in 180ms var(--motion-standard) 50ms both;
+  }
+  .console-page-stage[data-page="overview"][data-entering] .console-dispatch-visual .dispatch-label-model { animation-delay: 50ms; }
+  .console-page-stage[data-page="overview"][data-entering] .console-dispatch-visual .dispatch-label-compute { animation-delay: 95ms; }
+  .console-page-stage[data-page="overview"][data-entering] .console-dispatch-visual .dispatch-label-proof { animation-delay: 140ms; }
+  /* Selecting a route briefly links its row to the matching model/compute/proof node. */
+  .console-dispatch:has(.console-dispatch-path[data-dispatch-route="inference"]:is(:hover, :focus-visible)) .dispatch-label-model,
+  .console-dispatch:has(.console-dispatch-path[data-dispatch-route="compute"]:is(:hover, :focus-visible)) .dispatch-label-compute,
+  .console-dispatch:has(.console-dispatch-path[data-dispatch-route="workflow"]:is(:hover, :focus-visible)) .dispatch-orbit-label {
+    transform: translateY(-3px) scale(1.035);
+  }
+  .console-dispatch-path:is(:hover, :focus-visible) .console-dispatch-icon { transform: scale(1.06); }
+  .console-dispatch:has(.console-dispatch-path[data-dispatch-route="inference"]:is(:hover, :focus-visible)) .dispatch-ring-outer,
+  .console-dispatch:has(.console-dispatch-path[data-dispatch-route="workflow"]:is(:hover, :focus-visible)) .dispatch-ring-outer {
+    transform: translate(-50%, -50%) rotate(-20deg) scale(1.025);
+  }
+  .console-dispatch:has(.console-dispatch-path[data-dispatch-route="compute"]:is(:hover, :focus-visible)) .dispatch-ring-inner,
+  .console-dispatch:has(.console-dispatch-path[data-dispatch-route="workflow"]:is(:hover, :focus-visible)) .dispatch-ring-inner {
+    transform: translate(-50%, -50%) rotate(-30deg) scale(1.035);
+  }
   .console-workflows:not([hidden]) .workflow-graph > :is(.workflow-graph-input, .workflow-branches, .workflow-graph-merge, .workflow-graph-output) {
     animation: aperture-graph-in 420ms var(--motion-emphasized) backwards;
   }
   .console-workflows:not([hidden]) .workflow-graph > .workflow-branches { animation-delay: 60ms; }
   .console-workflows:not([hidden]) .workflow-graph > .workflow-graph-merge { animation-delay: 120ms; }
   .console-workflows:not([hidden]) .workflow-graph > .workflow-graph-output { animation-delay: 180ms; }
+  .workflow-mode-content[data-motion-enter='true'] {
+    animation: aperture-workflow-mode-in 240ms var(--motion-emphasized) both;
+  }
+  .mixed-workflow-path > li { animation: aperture-graph-in 360ms var(--motion-emphasized) backwards; }
+  .mixed-workflow-path > li:nth-child(2) { animation-delay: 60ms; }
+  .mixed-workflow-path > li:nth-child(3) { animation-delay: 120ms; }
+  .mixed-workflow-path > li:not(:last-child)::after { animation: aperture-flow-link 240ms var(--motion-standard) backwards; }
+  .mixed-workflow-path > li:first-child::after { animation-delay: 110ms; }
+  .mixed-workflow-path > li:nth-child(2)::after { animation-delay: 190ms; }
+  @media (max-width: 640px) {
+    .mixed-workflow-path > li:not(:last-child)::after { animation-name: aperture-flow-link-vertical; }
+  }
 
   /* A brief ripple follows the actual pointer position, with centered keyboard feedback. */
   .console-app :is(.console-button, .console-new, .console-nav-item, .console-sample,
@@ -162,6 +216,7 @@
   .studio-steps li,
   .studio-steps li span,
   .studio-steps li::before,
+  .studio-steps li::after,
   .studio-status-icon,
   .workflow-run-state-icon,
   .workflow-run-step-number,
@@ -169,9 +224,23 @@
     transition:
       background-color var(--motion-medium) var(--motion-standard),
       color var(--motion-medium) var(--motion-standard),
-      border-color var(--motion-medium) var(--motion-standard);
+      border-color var(--motion-medium) var(--motion-standard),
+      box-shadow var(--motion-medium) var(--motion-standard);
   }
-  .studio-steps li.reached:not(:first-child)::before { background: #c9b2e1; }
+  .studio-steps li.current .studio-step-number {
+    animation: aperture-step-current var(--motion-enter) var(--motion-emphasized) both;
+  }
+  .studio-steps li.completed .studio-step-number svg path {
+    stroke-dasharray: 32;
+    animation: aperture-check var(--motion-medium) var(--motion-standard);
+  }
+  .workflow-run-step:is(.admitting, .running, .verifying) .workflow-run-step-number {
+    animation: aperture-step-live 1800ms var(--motion-standard) infinite;
+  }
+  .workflow-run-step.completed .workflow-run-step-number svg path {
+    stroke-dasharray: 32;
+    animation: aperture-check var(--motion-medium) var(--motion-standard);
+  }
   .studio-status-icon.completed,
   .workflow-run-state-icon.complete { animation: aperture-complete var(--motion-enter) var(--motion-emphasized); }
   :is(.studio-status-icon.completed, .workflow-run-state-icon.complete) svg path {
@@ -190,6 +259,7 @@
     animation: aperture-spin 1200ms linear infinite;
   }
   .console-running-dot { animation: aperture-working 1600ms ease-in-out infinite; }
+  .console-studio-sentinel,
   .studio-receipt,
   .studio-quote,
   .studio-notice,
@@ -201,10 +271,19 @@
   .workflow-run-results,
   .result-preview,
   .result-file-loading,
-  .result-file-notice { animation: aperture-feedback-in var(--motion-medium) var(--motion-emphasized); }
+  .result-file-notice,
+  .studio-source-recovery { animation: aperture-feedback-in var(--motion-medium) var(--motion-emphasized); }
   .studio-log-line { animation: aperture-log-in var(--motion-fast) var(--motion-standard); }
+  .studio-terminal-empty > span { animation: aperture-feedback-in var(--motion-medium) var(--motion-emphasized); }
+  .studio-terminal-empty > div { animation: aperture-feedback-in var(--motion-medium) var(--motion-standard) 40ms backwards; }
   .workflow-input-list > li,
   .studio-file-list > li { animation: aperture-feedback-in var(--motion-state) var(--motion-standard); }
+  .studio-review-findings > li:nth-child(-n+4) {
+    animation: aperture-feedback-in var(--motion-medium) var(--motion-standard) backwards;
+  }
+  .studio-review-findings > li:nth-child(2) { animation-delay: 40ms; }
+  .studio-review-findings > li:nth-child(3) { animation-delay: 80ms; }
+  .studio-review-findings > li:nth-child(4) { animation-delay: 120ms; }
   .storage-quota progress::-webkit-progress-value,
   .workflow-run-progress progress::-webkit-progress-value {
     transition: width var(--motion-enter) var(--motion-standard);
@@ -216,6 +295,12 @@
   :is(.console-command-heading, .studio-editor-heading) button[data-copied='true'] > svg { animation: aperture-complete var(--motion-medium) var(--motion-emphasized); }
 
   @media (hover: hover) and (pointer: fine) {
+    .console-dispatch-visual:hover .dispatch-center {
+      transform: translate(-50%, -50%) rotate(-4deg) scale(1.035);
+      box-shadow: 0 18px 42px color-mix(in srgb, var(--console-primary) 24%, transparent);
+    }
+    .console-dispatch-visual:hover .dispatch-ring-outer { transform: translate(-50%, -50%) rotate(-29deg); }
+    .console-dispatch-visual:hover .dispatch-ring-inner { transform: translate(-50%, -50%) rotate(-21deg); }
     :is(.console-button, .console-new):hover:not(:disabled):not([aria-disabled="true"]) {
       transform: translate3d(0, -1.5px, 0);
       box-shadow: 0 6px 16px -2px rgba(105, 80, 161, 0.22), 0 2px 4px -1px rgba(0, 0, 0, 0.05);
@@ -281,16 +366,12 @@
 
 @keyframes aperture-page-glide {
   0% {
-    opacity: 0;
-    filter: blur(5px);
-    transform: translate3d(0, 10px, 0) scale(0.995);
-  }
-  60% {
-    filter: blur(0px);
+    /* Keep lazily mounted pages legible while the short entrance motion runs. */
+    opacity: 0.55;
+    transform: translate3d(0, 8px, 0) scale(0.998);
   }
   100% {
     opacity: 1;
-    filter: blur(0px);
     transform: translate3d(0, 0, 0) scale(1);
   }
 }
@@ -306,9 +387,33 @@
   from { opacity: 0.7; transform: translateY(5px) scale(0.98); }
   to { opacity: 1; transform: none; }
 }
+@keyframes aperture-workflow-mode-in {
+  from { opacity: 0.72; transform: translate3d(0, 6px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes aperture-flow-link {
+  from { opacity: 0.35; transform: scaleX(0); }
+  to { opacity: 1; transform: scaleX(1); }
+}
+@keyframes aperture-flow-link-vertical {
+  from { opacity: 0.35; transform: scaleY(0); }
+  to { opacity: 1; transform: scaleY(1); }
+}
 @keyframes aperture-awaken {
   from { transform: rotate(-12deg) scale(0.94); }
   to { transform: rotate(12deg) scale(1); }
+}
+@keyframes aperture-dispatch-ring-in {
+  from { opacity: 0; transform: translate(-50%, -50%) rotate(-31deg) scale(0.94); }
+  to { opacity: 1; transform: translate(-50%, -50%) rotate(-25deg) scale(1); }
+}
+@keyframes aperture-dispatch-center-in {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)) rotate(-4deg) scale(0.92); }
+  to { opacity: 1; transform: translate(-50%, -50%) rotate(-8deg) scale(1); }
+}
+@keyframes aperture-dispatch-label-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 @keyframes aperture-code-arrive {
   from { transform: translate(-6px, 5px) rotate(-9deg); }
@@ -333,6 +438,16 @@
   50% { transform: scale(1.08); }
   80% { transform: scale(0.98); }
   100% { transform: scale(1); }
+}
+@keyframes aperture-step-current {
+  from { transform: scale(0.88); }
+  72% { transform: scale(1.06); }
+  to { transform: scale(1); }
+}
+@keyframes aperture-step-live {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--console-primary) 0%, transparent); transform: scale(1); }
+  45% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--console-primary) 18%, transparent); transform: scale(1.04); }
+  75% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--console-primary) 0%, transparent); transform: scale(1); }
 }
 @keyframes aperture-check {
   from { stroke-dashoffset: 32; }

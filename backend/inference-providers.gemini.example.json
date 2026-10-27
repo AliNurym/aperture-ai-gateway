@@ -6,7 +6,6 @@
     "base_url": "https://generativelanguage.googleapis.com/v1beta",
     "protocol": "gemini_generate_content",
     "api_key_env": "GEMINI_API_KEY",
-    "rate_lamports_sec": 1000,
     "max_output_tokens": 2048
   }
 ]

@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { join, resolve, sep } from 'node:path';
 import { spawn } from 'node:child_process';
 import {
   Connection, Keypair, PublicKey,
@@ -89,12 +88,25 @@ const expectRejected = async (promise, label) => {
   );
 };
 
-const ledger = await mkdtemp(join(tmpdir(), 'aperture-v2-ledger-'));
+const tempBase = resolve(project, '.aperture');
+await mkdir(tempBase, { recursive: true });
+const tempRoot = await mkdtemp(join(tempBase, 'local-validator-'));
+const ledger = join(tempRoot, 'ledger');
+await mkdir(ledger);
+const cliConfig = join(tempRoot, 'cli-config.yml');
+await writeFile(cliConfig, [
+  'json_rpc_url: http://127.0.0.1:8899',
+  'websocket_url: ws://127.0.0.1:8900',
+  'keypair_path: ""',
+  '',
+].join('\n'), { flag: 'wx' });
 const validator = spawn('solana-test-validator', [
-  '--reset', '--quiet', '--ledger', ledger, '--rpc-port', '8899', '--bind-address', '127.0.0.1',
+  '--reset', '--log', '--config', cliConfig, '--ledger', ledger, '--rpc-port', '8899', '--bind-address', '127.0.0.1',
   '--bpf-program', programId.toBase58(), programSo,
 ], { stdio: ['ignore', 'pipe', 'pipe'] });
 let validatorOutput = '';
+let validatorSpawnError;
+validator.on('error', error => { validatorSpawnError = error; });
 validator.stdout.on('data', chunk => { validatorOutput = (validatorOutput + chunk.toString()).slice(-4000); });
 validator.stderr.on('data', chunk => { validatorOutput = (validatorOutput + chunk.toString()).slice(-4000); });
 let connection;
@@ -104,6 +116,7 @@ try {
   let ready = false;
   let lastRpcError;
   for (let attempt = 0; attempt < 90; attempt++) {
+    if (validatorSpawnError) throw new Error(`Cannot start local validator: ${validatorSpawnError.message}`);
     if (validator.exitCode !== null) throw new Error('Local validator exited: ' + validatorOutput);
     try {
       if (await connection.getSlot('processed') > 0) { ready = true; break; }
@@ -191,6 +204,9 @@ try {
     [destination, false, true], [passport, false, true], [receipt, false, true],
   ]);
   await expectRejected(send(stop(wrongWorker.publicKey), [authority]), 'worker payout redirection');
+  const channelBeforeSettlement = await connection.getAccountInfo(channel);
+  assert(channelBeforeSettlement);
+  const rentReserve = await connection.getMinimumBalanceForRentExemption(channelBeforeSettlement.data.length, 'processed');
   const workerBalanceBefore = await connection.getBalance(worker.publicKey, 'processed');
   await send(stop(worker.publicKey), [authority]);
   receiptAccount = await connection.getAccountInfo(receipt);
@@ -206,13 +222,20 @@ try {
   assert.equal(channelAccount.data.readBigUInt64LE(80), 0n);
   assert.equal(channelAccount.data.readBigUInt64LE(217), charged);
   assert.deepEqual(channelAccount.data.subarray(97, 129), worker.publicKey.toBuffer());
+  assert(channelAccount.lamports >= rentReserve, 'settlement preserves the channel rent-exempt reserve');
+  assert.equal(
+    BigInt(channelBeforeSettlement.lamports - channelAccount.lamports), charged,
+    'the channel funds exactly the settled worker charge while retaining rent reserve',
+  );
   assert.equal(passportAccount.data.readBigUInt64LE(140), 0n);
   assert.equal(passportAccount.data.readBigUInt64LE(132), charged);
 
   const balanceAfterSettlement = channelAccount.data.readBigUInt64LE(72);
+  const lamportsAfterSettlement = channelAccount.lamports;
   await send(stop(worker.publicKey), [authority]);
   channelAccount = await connection.getAccountInfo(channel);
   assert.equal(channelAccount.data.readBigUInt64LE(72), balanceAfterSettlement, 'duplicate settlement charged again');
+  assert.equal(channelAccount.lamports, lamportsAfterSettlement, 'duplicate settlement transferred no lamports');
   await expectRejected(send(ix('start_task', startData, startAccounts(authority.publicKey)), [authority]), 'task-hash replay');
 
   await send(ix('revoke_agent', [], [[passport, false, true], [owner.publicKey, true]]), [owner]);
@@ -252,15 +275,19 @@ try {
     program_id: programId.toBase58(), initialized_version: 2,
     delegated_task_charge_lamports: charged.toString(),
     checks: ['pinned config authority', 'register/open/start/stop', 'full charge paid to pinned worker',
-      'wrong worker payout rejected', 'treasury receives no task charge', 'wrong oracle rejection',
+      'wrong worker payout rejected', 'channel rent reserve preserved', 'treasury receives no task charge', 'wrong oracle rejection',
       'rate and passport caps', 'replay rejection', 'duplicate settlement', 'revocation admission',
       'owner close with persistent settled receipt'],
   }, null, 2));
 } finally {
-  validator.kill('SIGTERM');
-  await new Promise(resolve => {
-    if (validator.exitCode !== null) resolve();
-    else { validator.once('exit', resolve); setTimeout(() => { validator.kill('SIGKILL'); resolve(); }, 5000).unref(); }
-  });
-  await rm(ledger, { recursive: true, force: true });
+  if (!validatorSpawnError) {
+    validator.kill('SIGTERM');
+    await new Promise(resolve => {
+      if (validator.exitCode !== null) resolve();
+      else { validator.once('exit', resolve); setTimeout(() => { validator.kill('SIGKILL'); resolve(); }, 5000).unref(); }
+    });
+  }
+  const resolvedTempRoot = resolve(tempRoot);
+  if (!resolvedTempRoot.startsWith(tempBase + sep)) throw new Error('Temporary validator directory escaped the ignored project folder');
+  await rm(resolvedTempRoot, { recursive: true, force: true });
 }

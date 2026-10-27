@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from solders.keypair import Keypair
 
-from agent_identity import sha256_text, quote_message
+from agent_identity import sha256_text, quote_message, canonical_json
 from gateway import Gateway
 from state_store import StateStore
 from test_api_security import FakeSolana
@@ -33,6 +33,7 @@ class WorkerMarketTests(unittest.TestCase):
         for name, key in self.keys.items():
             self.store.put('workers', name, {'node_id': name, 'worker_pubkey': str(key.pubkey()),
                 'runtimes': ['python'], 'last_seen': time.time(), 'gpu_name': 'CPU worker',
+                'rate_lamports_sec': 1000 if name == 'worker-a' else 2000,
                 'source_policy': 'gateway_ast', 'execution_mode': 'docker'})
 
     def tearDown(self):
@@ -96,6 +97,26 @@ class WorkerMarketTests(unittest.TestCase):
         for private in (self.source, task['task_access_token'], str(self.owner.pubkey()), self.tokens['worker-a'], task['task_id']):
             self.assertNotIn(private, public)
 
+    def test_task_recovery_preserves_the_original_signed_automatic_worker_route(self):
+        quote = self.quote(target=False).json()
+        admitted = self.client.post('/execute', json=self.admission(quote))
+        self.assertEqual(admitted.status_code, 200, admitted.text)
+        task = admitted.json()
+        request = {'owner': str(self.owner.pubkey()), 'agent_pubkey': str(self.owner.pubkey()),
+                   'issued_at': int(time.time()), 'nonce': bytes(Keypair()).hex()[:32], 'task_id': task['task_id']}
+        message = 'Aperture agent task access v1\naudience:aperture-gateway\n' + canonical_json({
+            'action': 'resume', **request, 'limit': None, 'cursor': None,
+            'program_id': str(self.core.solana.program_id),
+            'gateway_pubkey': str(self.core.solana.ai_signer.pubkey()), 'network': 'off_chain'})
+        request['signature'] = list(bytes(self.owner.sign_message(message.encode())))
+        response = self.client.post('/agents/tasks/resume', json=request)
+        self.assertEqual(response.status_code, 200, response.text)
+        recovered = response.json()['quote']
+        self.assertEqual(recovered['worker_target'], quote['worker_target'])
+        self.assertEqual(recovered['message'], quote['message'])
+        self.assertEqual(quote_message(recovered), quote['message'])
+        self.assertEqual(response.json()['task_id'], task['task_id'])
+
     def test_worker_pin_cannot_be_changed_and_offline_or_incompatible_nodes_fail_closed(self):
         quote = self.quote().json()
         altered = {**quote, 'worker_target': self.target('worker-b')}
@@ -110,6 +131,32 @@ class WorkerMarketTests(unittest.TestCase):
                 self.assertEqual(self.client.post('/execute', json=self.admission(quote)).status_code, 409)
         self.store.put('workers', 'worker-a', node)
 
+    def test_automatic_route_pins_lowest_published_price_and_executor(self):
+        a = self.store.get('workers', 'worker-a')
+        a['rate_lamports_sec'] = 3000
+        self.store.put('workers', 'worker-a', a)
+        quote = self.quote(target=False).json()
+        self.assertEqual(quote['rate_lamports'], 2000)
+        self.assertEqual(quote['worker_target'], self.target('worker-b'))
+        self.assertEqual(json.loads(quote['message'].split('\n')[-1])['worker_target'], self.target('worker-b'))
+
+    def test_worker_operator_sets_and_publishes_rate(self):
+        response = self.client.post('/workers/me/rate', headers=self.headers(), json={'rate_lamports_sec': 4200})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['rate_lamports_sec'], 4200)
+        self.assertEqual(self.store.get('workers', 'worker-a')['rate_source'], 'worker_operator')
+        for value in (True, '4200', 0, 1_000_000_001):
+            with self.subTest(value=value):
+                self.assertEqual(self.client.post('/workers/me/rate', headers=self.headers(),
+                    json={'rate_lamports_sec': value}).status_code, 422)
+
+    def test_unpriced_worker_cannot_receive_a_signed_quote(self):
+        worker = self.store.get('workers', 'worker-a')
+        worker['rate_lamports_sec'] = None
+        self.store.put('workers', 'worker-a', worker)
+        response = self.quote()
+        self.assertEqual(response.status_code, 409)
+
     def test_drain_finishes_existing_lease_blocks_new_claims_and_resume_restores_them(self):
         quote = self.quote().json()
         admission = self.client.post('/execute', json=self.admission(quote))
@@ -122,10 +169,12 @@ class WorkerMarketTests(unittest.TestCase):
         self.complete(task)
         self.assertEqual(self.quote().status_code, 409)
         auto_quote = self.quote(target=False).json()
+        self.assertEqual(auto_quote['worker_target'], self.target('worker-b'))
         self.assertEqual(self.client.post('/execute', json=self.admission(auto_quote)).status_code, 200)
         self.assertIsNone(self.client.get('/get_task', headers=self.headers()).json()['task_id'])
+        self.assertIsNotNone(self.client.get('/get_task', headers=self.headers('worker-b')).json()['task_id'])
         self.assertEqual(self.mode(True).status_code, 200)
-        self.assertIsNotNone(self.client.get('/get_task', headers=self.headers()).json()['task_id'])
+        self.assertIsNone(self.client.get('/get_task', headers=self.headers()).json()['task_id'])
 
     def test_drain_between_quote_and_admission_rejects_without_creating_work(self):
         quote = self.quote().json()

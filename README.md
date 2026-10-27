@@ -40,7 +40,7 @@ The authorization binds a task to its source, immutable input hashes, parameters
 | **Compute** | CPU-based Python jobs, including reviewed CSV batch and merge workflows. |
 | **Worker choice** | Select a real worker in the network, bind its ID/key to the signed quote, and verify that the same executor produced the result. |
 | **Providers** | Authenticated operator workspace with durable task/earning totals, private activity and drain/resume admissions that preserve running work. See [worker operations](docs/worker-market.md). |
-| **Inference** | Streamed chat requests to operator-configured Gemini or OpenAI-compatible model servers, bound to signed task quotes and the separate `inference.chat` permission. Studio can send the exact Python source through the same path for an AI Sentinel review. |
+| **Inference** | Signed, streamed `inference.chat` requests to operator-configured Gemini or OpenAI-compatible model servers. DeepSeek is reserved for the fixed, source-bound AI Sentinel review; its upstream bill stays with the gateway operator. |
 | **Agent access** | Python SDK and local MCP tools for preparing, running, inspecting, and recovering work. The host supplies its own AI model. |
 | **Recovery and results** | Durable workflow journals, named output files, signed receipts, and SHA-256 checks before download. |
 | **Settlement** | Optional Solana Devnet payment channels; requires a compatible deployed program and a funded channel. |
@@ -49,7 +49,24 @@ The MVP is a React workspace, FastAPI gateway, Python and inference workers, SDK
 
 Studio connects the original AI Sentinel idea to the current compute flow: the owner requests a signed model review of the current Python source, inspects its verified receipt beside that source, then opens the regular CPU quote. The gateway source policy makes the execution decision, followed by a separate owner signature. The model review and verifiable compute result now live in one task journey.
 
-A matching completed Gemini review is attached to the compute manifest as `parameters.aperture_review`. The gateway checks its owner, exact source-review prompt and receipt hash before quoting; the owner's signature and final compute receipt cover the manifest digest. Changing the source, wallet or gateway prevents automatic reuse. The result view exposes the review reference and lets the owner download the task manifest. This records provenance; it does not turn a model verdict into execution permission.
+Source reviews also travel between the browser, SDK and MCP. Export/import a
+signed report in Studio, jump from a finding to its source line, or prepare a
+review-linked Python quote from an agent. See [signed source reviews](docs/source-reviews.md).
+
+A matching completed model review is attached to the compute manifest as `parameters.aperture_review`. The gateway checks its owner, exact source-review prompt and receipt hash before quoting; the owner's signature and final compute receipt cover the manifest digest. Changing the source, wallet or gateway prevents automatic reuse. The result view exposes the review reference and lets the owner download the task manifest. This records provenance; it does not turn a model verdict into execution permission.
+
+The browser now supports exact worker selection for both model inference and
+Sentinel review, matching the API and SDK. The source editor and completed
+review survive a tab reload; recovery re-verifies the original signed evidence
+before rebuilding the advisory. An unavailable executor remains explicitly pinned
+until the owner chooses another route.
+
+**Agent workflows → Model + compute** now connects model inference and Python in
+one recoverable plan. Model output becomes a signed `response.txt` result file;
+Python consumes its verified bytes, and an explicitly selected result can be
+appended to the next model request. Each step can pin its own worker. The browser
+offers a three-step builder and JSON plan import/export; the same plan runs through
+the SDK, MCP or owner-approved agent inbox. See [mixed workflows](docs/agent-workflows.md#mixed-model-and-python-workflows).
 
 ## Evidence from the MVP
 
@@ -66,14 +83,16 @@ On Windows, with Python 3.11+ and Node.js with npm:
 ```
 
 The launcher starts the unified console, gateway, and reviewed CPU worker
-together, and adds the inference worker when Gemini is configured:
+together, and adds the inference worker when a model provider is configured.
+It uses ports `3000` and `8000` when they are free; if either is occupied, it
+chooses a free loopback port and prints the exact console and API-docs URLs:
 
-- Console: [http://127.0.0.1:3000](http://127.0.0.1:3000)
-- API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- Default console: [http://127.0.0.1:3000/#studio](http://127.0.0.1:3000/#studio)
+- Default API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
-Connect a wallet, open **Compute Studio**, then review and approve task limits. This performs real local CPU computation in `OFF_CHAIN` mode: no Solana payment and no Docker isolation. Without a Gemini key, model and AI Sentinel panels explain how to connect the route; Python compute remains available. A temporary development key exists only in browser memory; use a persistent wallet if you need approvals to survive a reload.
+Connect a wallet, open **Compute Studio**, then review and approve task limits. This performs real local CPU computation in `OFF_CHAIN` mode: no Solana payment and no Docker isolation. Without a model key, model and AI Sentinel panels explain how to connect the route; Python compute remains available. A temporary development key exists only in browser memory; use a persistent wallet if you need approvals to survive a reload.
 
-> **Protocol tour:** `start_demo.bat` opens the five-stage overview. Capacity and settlement indicators read live gateway state; the tour itself does not submit a task. Configure `backend/.env` as shown below before `start_preview.bat` to add the original Gemini review to the same Studio and gateway.
+> **Protocol tour:** `start_demo.bat` opens the five-stage overview. Capacity and settlement indicators read live gateway state; the tour itself does not submit a task. Configure `backend/.env` as shown below before `start_preview.bat` to add model review to the same Studio and gateway.
 
 ## Boundaries that matter
 
@@ -83,29 +102,31 @@ Connect a wallet, open **Compute Studio**, then review and approve task limits. 
 - **Signed evidence:** ties identities, workload details, and file hashes to a receipt. It does not prove that a remote worker faithfully performed the computation.
 - **Model inference:** the chosen provider receives the approved prompt. The current tariff bills elapsed time, including provider waiting; it is not token billing. The local adapter cannot guarantee upstream cancellation or answer correctness.
 
-## Enable Gemini in the unified preview
+## Enable model inference in the unified preview
 
-To use the original Aperture Gemini model on Windows, create the ignored local
-environment file and add your Google AI Studio key:
+To enable model inference on Windows, create the ignored local environment
+file. A Gemini key enables general inference and AI Sentinel; a DeepSeek key
+enables AI Sentinel source reviews only:
 
 ```powershell
-Copy-Item backend/.env.example backend/.env
+if (!(Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
 notepad backend/.env
 .\start_preview.bat
 ```
 
-Fill in `GEMINI_API_KEY` in `backend/.env`; the preview reads only the Gemini
-settings from it and passes the key to the inference worker, not the browser or
-gateway. The Gemini provider runs through the same signed Aperture task path as
-Python compute; the preview is still `OFF_CHAIN` with no Solana payment. The older
+Fill in the appropriate `DEEPSEEK_API_KEY` or `GEMINI_API_KEY` in `backend/.env`; the preview
+reads only the allowlisted model settings and passes the selected key to the
+inference worker, not the browser or gateway. Model requests use the same signed
+Aperture task path as Python compute; the preview is still `OFF_CHAIN` with no
+Solana payment. The older
 `start_inference_preview.bat` entry point remains available for compatibility.
 See
-[Gemini setup and provider details](docs/inference.md#reconnect-the-original-gemini-model).
+[Gemini and DeepSeek setup details](docs/inference.md#configure-gemini-or-deepseek).
 
-The normal product demo uses the remote Gemini API; it does not download model
+The normal product demo uses the configured remote model API; it does not download model
 weights. Open [Compute Studio](http://127.0.0.1:3000/#studio), choose
 **Temporary key**, review the request and quote, then sign it. Run
-`python scripts/inference_preview.py --check` with Gemini configured to verify
+`python scripts/inference_preview.py --check` with a model configured to verify
 model inference, receipt recovery and the CPU path. See
 [setup, API, SDK and billing boundaries](docs/inference.md).
 
@@ -116,7 +137,7 @@ model inference, receipt recovery and the CPU path. See
 | Run the product | [Local walkthrough and Devnet runbook](docs/demo-runbook.md) |
 | Build workflows | [Agent jobs, approvals, and recovery](docs/agent-workflows.md) |
 | Connect an agent | [Python SDK](docs/python-agent-sdk.md) · [MCP host](docs/mcp-agent.md) |
-| Use model inference | [Gemini and other providers, permissions and receipts](docs/inference.md) |
+| Use model inference | [Gemini, DeepSeek and other providers, permissions and receipts](docs/inference.md) |
 | See how the old project fits | [Historical feature integration and remaining gaps](docs/historical-integration.md) |
 | Understand settlement | [Solana protocol](docs/protocol-v2.md) |
 | Check the claims | [MVP evidence and limits](docs/mvp-evidence.md) · [Pilot checklist](docs/pilot-checklist.md) |
@@ -128,6 +149,7 @@ The [CI workflow](.github/workflows/ci.yml) covers backend, SDK, frontend, and l
 
 ```powershell
 python scripts/check_inference_preview.py
+python scripts/check_mixed_workflow.py
 ```
 
 It uses a fixed local SSE fixture, so it does not need an API key or contact an upstream model. Then run the frontend lint, build, and data tests locally:

@@ -8,7 +8,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_api_security as fixtures
 from agent_identity import sha256_text
-from sentinel_review import PROMPT_PREFIX
+from sentinel_review import PROMPT_PREFIX, validate_sentinel_review
 
 
 class SentinelReviewTests(unittest.TestCase):
@@ -19,8 +19,11 @@ class SentinelReviewTests(unittest.TestCase):
         self.source = 'print(6 * 7)'
         self.task_id = 'task-' + 'a' * 32
         self.reference = {'task_id': self.task_id, 'source_sha256': sha256_text(self.source), 'receipt_sha256': 'b' * 64}
+        self.output = json.dumps({'security': 'SAFE', 'reason': 'No obvious issue found.', 'findings': []})
         self.review = {'task_id': self.task_id, 'wallet': self.owner, 'state': 'completed',
-            'created_at': 1, 'receipt': {'execution_status': 'completed', 'receipt_sha256': 'b' * 64},
+            'created_at': 1, 'result': {'full_log': self.output},
+            'receipt': {'execution_status': 'completed', 'execution_backend': 'inference_proxy', 'exit_code': 0,
+                'output_sha256': sha256_text(self.output), 'receipt_sha256': 'b' * 64},
             'workload': {'runtime': 'inference.chat', 'parameters': {
                 'offer': {'protocol': 'gemini_generate_content'},
                 'inference': {'messages': [{'role': 'user', 'content': PROMPT_PREFIX + json.dumps(self.source)}]}}}}
@@ -50,12 +53,21 @@ class SentinelReviewTests(unittest.TestCase):
         admitted = self.fixture.store.get('jobs', response.json()['task_id'])
         self.assertEqual(admitted['workload']['parameters']['aperture_review'], self.reference)
 
+    def test_deepseek_chat_completion_review_is_also_accepted(self):
+        self.review['workload']['parameters']['offer']['protocol'] = 'openai_chat_completions'
+        class Store:
+            def get(_self, collection, key):
+                return self.review if collection == 'jobs' and key == self.task_id else None
+
+        manifest = {'runtime': 'python', 'parameters': {'aperture_review': self.reference}}
+        self.assertIsNone(validate_sentinel_review(Store(), manifest, self.owner, self.source))
+
     def test_other_owner_or_source_cannot_reuse_review(self):
         for changes in [{'wallet': str(self.fixture.agent.pubkey())}, {'code': 'print(7 * 7)'}]:
             with self.subTest(changes=changes):
                 self.assertEqual(self.quote(**changes).status_code, 409)
 
-    def test_pending_failed_non_gemini_and_changed_receipts_are_rejected(self):
+    def test_pending_failed_unsupported_provider_and_changed_receipts_are_rejected(self):
         original = copy.deepcopy(self.review)
         for change in ('pending', 'failed', 'protocol', 'receipt', 'prompt'):
             with self.subTest(change=change):
@@ -65,6 +77,30 @@ class SentinelReviewTests(unittest.TestCase):
                 elif change == 'protocol': self.review['workload']['parameters']['offer']['protocol'] = 'openai_chat'
                 elif change == 'receipt': self.review['receipt']['receipt_sha256'] = 'c' * 64
                 else: self.review['workload']['parameters']['inference']['messages'][0]['content'] += '\nAdditional instructions'
+                self.retain()
+                self.assertEqual(self.quote().status_code, 409)
+
+    def test_invalid_report_output_and_python_execution_cannot_be_attached_as_sentinel(self):
+        original = copy.deepcopy(self.review)
+        invalid_reports = [
+            'not JSON',
+            json.dumps({'security': 'PASS', 'reason': 'Unknown verdict', 'findings': []}),
+            json.dumps({'security': 'SAFE', 'reason': 'Bad line reference', 'findings': [
+                {'severity': 'high', 'line': 2, 'issue': 'Out of range', 'evidence': 'source has one line'}]}),
+            json.dumps({'security': 'SAFE', 'reason': 'Missing findings'}),
+        ]
+        for output in invalid_reports:
+            with self.subTest(output=output[:24]):
+                self.review = copy.deepcopy(original)
+                self.review['result']['full_log'] = output
+                self.review['receipt']['output_sha256'] = sha256_text(output)
+                self.retain()
+                self.assertEqual(self.quote().status_code, 409)
+
+        for field, value in [('output_sha256', 'c' * 64), ('execution_backend', 'python'), ('exit_code', 1)]:
+            with self.subTest(field=field):
+                self.review = copy.deepcopy(original)
+                self.review['receipt'][field] = value
                 self.retain()
                 self.assertEqual(self.quote().status_code, 409)
 

@@ -1,15 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Icon from './Icon';
+import { receiptPaymentField } from '../utils/receiptDisplay';
 import './ProofVerifierModal.css';
 
 function signatureLabel(value) {
   if (Array.isArray(value)) return value.length + ' bytes';
   return typeof value === 'string' && value.length ? 'Present' : 'Unavailable';
-}
-
-function chargeLabel(value) {
-  return Number.isSafeInteger(value) ? value.toLocaleString() + ' lamports' : 'Unavailable';
 }
 
 export default function ProofVerifierModal({ isOpen, onClose, receipt, taskId, chainReceiptAddress, verified, verificationNote }) {
@@ -88,10 +85,12 @@ export default function ProofVerifierModal({ isOpen, onClose, receipt, taskId, c
     ['Worker signer', receipt.worker_receipt?.worker_pubkey || receipt.worker_pubkey],
     ['Approved executor', receipt.worker_target?.node_id || 'Automatic worker matching'],
     ['Assigned executor', receipt.worker_id || 'No worker assigned'],
+    ['Worker owner rate', Number.isSafeInteger(receipt.rate_lamports) ? `${receipt.rate_lamports.toLocaleString()} lamports/s` : 'Unavailable'],
+    ['Approved cost cap', Number.isSafeInteger(receipt.max_cost_lamports) ? `${receipt.max_cost_lamports.toLocaleString()} lamports` : 'Unavailable'],
     ['Execution status', receipt.execution_status],
     ['Execution boundary', receipt.execution_backend],
     ['Settlement type', receipt.settlement_type],
-    ['Actual charge', chargeLabel(receipt.charged_lamports)],
+    receiptPaymentField(receipt),
     ['Runtime', typeof receipt.execution_time === 'number' ? receipt.execution_time + ' seconds' : 'Unavailable'],
     ['Source SHA-256', receipt.code_sha256],
     ['Output SHA-256', receipt.output_sha256],

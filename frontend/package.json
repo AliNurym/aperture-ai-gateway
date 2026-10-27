@@ -7,8 +7,8 @@
     "dev": "node scripts/vite.mjs",
     "build": "node scripts/vite.mjs build",
     "lint": "eslint .",
-    "test": "node --test tests/protocol.test.mjs tests/worker-route.test.mjs tests/inference.test.mjs tests/sourceReview.test.mjs tests/resultPreview.test.mjs tests/workflowPlan.test.mjs tests/csvSchema.test.mjs tests/motion.test.mjs",
-    "test:protocol": "node --test tests/protocol.test.mjs tests/worker-route.test.mjs tests/inference.test.mjs",
+    "test": "node --test tests/protocol.test.mjs tests/worker-route.test.mjs tests/inference.test.mjs tests/sourceReview.test.mjs tests/sourceReviewRecovery.test.mjs tests/resultPreview.test.mjs tests/workflowPlan.test.mjs tests/csvSchema.test.mjs tests/motion.test.mjs tests/studioProgress.test.mjs tests/workerAction.test.mjs tests/storageContext.test.mjs tests/gatewayStatus.test.mjs tests/executionBoundary.test.mjs tests/receiptDisplay.test.mjs tests/restoredSource.test.mjs tests/workflowPresentation.test.mjs",
+    "test:protocol": "node --test tests/protocol.test.mjs tests/worker-route.test.mjs tests/inference.test.mjs tests/sourceReview.test.mjs tests/sourceReviewRecovery.test.mjs tests/gatewayStatus.test.mjs",
     "test:data": "node --test tests/resultPreview.test.mjs tests/workflowPlan.test.mjs tests/csvSchema.test.mjs",
     "test:motion": "node --test tests/motion.test.mjs",
     "preview": "node scripts/vite.mjs preview"

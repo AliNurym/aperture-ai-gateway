@@ -1,4 +1,4 @@
-"""Durable owner-approved CSV work delivered to a dedicated agent host."""
+"""Durable owner-approved work delivered to a dedicated agent host."""
 import json
 import math
 import re
@@ -37,12 +37,16 @@ class PublishWorkflow(FlowControl):
 
 
 def validate_plan(core, plan, owner, agent):
-    """Inbox v1 accepts the reviewed report profile; generic jobs remain separate."""
+    """Keep the CSV profile compatible; validate mixed task plans explicitly."""
     if (set(plan) != {"version", "max_cost_lamports", "steps"} or plan.get("version") != 1
             or type(plan.get("max_cost_lamports")) is not int or not 0 < plan["max_cost_lamports"] <= 100_000_000_000
             or not isinstance(plan.get("steps"), list) or not 1 <= len(plan["steps"]) <= 256
             or len(canonical_json(plan).encode()) > 2_000_000):
         raise ValueError("Choose a bounded version-1 CSV report plan, up to 2 MB.")
+    if any(isinstance(step, dict) and (step.get('worker_target') is not None
+            or step.get('source') not in (SOURCES['batch'], SOURCES['merge'])) for step in plan['steps']):
+        from workflow_steps import validate_general_plan
+        return validate_general_plan(core, plan, owner, agent)
     by_id, dependencies = {}, {}
     cost = 0
     from gateway import QuoteRequest
@@ -139,11 +143,18 @@ def validate_bound_step(core, quote, source):
         raise HTTPException(409, "Workflow is stopped, unclaimed or needs its original host to resume.")
     step = next((item for item in flow["plan"]["steps"] if item["id"] == binding["step_id"]), None)
     manifest = quote.get("workload") or {}
-    if (not step or step["source"] != source or step["parameters"] != manifest.get("parameters")
+    from workflow_steps import resolve_step
+    try:
+        expected_source, expected_parameters = resolve_step(core, flow, step) if step else (None, None)
+    except (ValueError, PermissionError, UnicodeError) as error:
+        raise HTTPException(409, str(error)) from None
+    if (not step or expected_source != source or expected_parameters != manifest.get("parameters")
+            or (step.get("worker_target") is not None and step.get("worker_target") != quote.get("worker_target"))
+            or not quote.get("worker_target")
             or step["max_cost_lamports"] != quote["max_cost_lamports"] or step["max_runtime_seconds"] != quote["max_runtime_seconds"]):
         raise HTTPException(403, "This task differs from the owner's approved workflow step.")
     inputs = []
-    for reference in step["inputs"]:
+    for reference in step.get("inputs", []):
         if "from_step" in reference:
             parent = core.store.get("jobs", flow["tasks"].get(reference["from_step"], ""))
             item = next((item for item in ((parent or {}).get("receipt") or {}).get("artifacts", []) if item["name"] == reference["artifact"]), None)
@@ -182,9 +193,11 @@ def mount_workflow_inbox(core):
                 validate_plan(core, req.plan, req.owner, req.agent_pubkey)
             except (ValueError, TypeError, KeyError, PermissionError) as error:
                 raise HTTPException(422, str(error)) from None
-            policy = await core.passport(req.owner, req.agent_pubkey,
-                max(step["max_cost_lamports"] for step in req.plan["steps"]),
-                max(step["max_runtime_seconds"] for step in req.plan["steps"]))
+            for capability in {'inference.chat' if step['source'].startswith('# Aperture inference request v1\n')
+                               else 'python.execute' for step in req.plan['steps']}:
+                policy = await core.passport(req.owner, req.agent_pubkey,
+                    max(step['max_cost_lamports'] for step in req.plan['steps']),
+                    max(step['max_runtime_seconds'] for step in req.plan['steps']), capability)
             allowance = await core.passport_allowance_summary(policy)
             if allowance.get("remaining_lamports") is None or allowance["remaining_lamports"] < req.plan["max_cost_lamports"]:
                 raise HTTPException(403, "The approved total cap exceeds this agent's available lifetime allowance. Update its passport or lower the plan cap.")
@@ -267,14 +280,21 @@ def mount_workflow_inbox(core):
             jobs = {}
             for identifier, task_id in tasks.items():
                 job, step = core.store.get("jobs", task_id), by_id[identifier]
+                from workflow_steps import resolve_step
+                try:
+                    expected_source, expected_parameters = resolve_step(core, {**value, 'tasks': tasks}, step)
+                except (ValueError, PermissionError, UnicodeError) as error:
+                    raise HTTPException(422, str(error)) from None
                 if (not job or (job.get("wallet"), job.get("agent_pubkey")) != (req.owner, req.agent_pubkey)
-                        or job["code_sha256"] != sha256_text(step["source"])
+                        or job["code_sha256"] != sha256_text(expected_source)
+                        or (step.get('worker_target') is not None and job.get('worker_target') != step.get('worker_target'))
+                        or not job.get('worker_target')
                         or job["max_cost_lamports"] != step["max_cost_lamports"]
                         or job["max_runtime_seconds"] != step["max_runtime_seconds"]
-                        or (job.get("workload") or {}).get("parameters") != step["parameters"]):
+                        or (job.get("workload") or {}).get("parameters") != expected_parameters):
                     raise HTTPException(422, "A reported task differs from the owner-approved step.")
                 inputs = []
-                for reference in step["inputs"]:
+                for reference in step.get("inputs", []):
                     if "from_step" in reference:
                         parent = core.store.get("jobs", tasks.get(reference["from_step"], ""))
                         artifact = next((item for item in ((parent or {}).get("receipt") or {}).get("artifacts", []) if item["name"] == reference["artifact"]), None)

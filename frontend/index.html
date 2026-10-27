@@ -6,6 +6,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Aperture — Compute Workspace</title>
     <meta name="description" content="A focused workspace for Python workloads. Explore a browser demo or connect an authenticated Solana Devnet compute gateway." />
+    <script>
+      (() => {
+        let theme = 'dark';
+        try {
+          const saved = localStorage.getItem('aperture-theme-v3') || localStorage.getItem('aperture-theme');
+          if (saved === 'light' || saved === 'dark') theme = saved;
+        } catch {}
+        document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.classList.toggle('dark-theme', theme === 'dark');
+      })();
+    </script>
     <link rel="preload" href="/Roboto-Variable.ttf" as="font" type="font/ttf" crossorigin>
   </head>
   <body>

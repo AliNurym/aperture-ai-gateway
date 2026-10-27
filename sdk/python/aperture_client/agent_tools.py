@@ -6,7 +6,7 @@ import base64
 import time
 from collections import OrderedDict
 
-from .client import MAX_SOURCE_BYTES, ApertureClient, Task, validate_source
+from .client import MAX_SOURCE_BYTES, ApertureClient, Task, validate_source, sha256
 from .jobs import workload_manifest
 
 
@@ -89,6 +89,8 @@ class ApertureAgentTools:
             **({"worker_target": quote["worker_target"]} if quote.get("worker_target") else {}),
             **({"workload_sha256": quote["workload_sha256"],
                 "inputs": quote["workload"]["inputs"]} if "workload" in quote else {}),
+            **({"source_review": quote['workload']['parameters']['aperture_review']}
+               if quote.get('workload', {}).get('parameters', {}).get('aperture_review') else {}),
         }
 
     def _expire_quotes(self) -> None:
@@ -144,7 +146,51 @@ class ApertureAgentTools:
         return {"providers": self.client.inference_providers(), "discovery": "operator_configured"}
 
     def list_workers(self) -> dict:
-        return {"workers": self.client.workers(), "routing": "optional_signed_worker_target"}
+        return {"workers": self.client.workers(), "routing": "signed_priced_executor"}
+
+    def list_sentinel_providers(self) -> dict:
+        return {'providers': self.client.sentinel_providers(), 'purpose': 'source_review_only'}
+
+    def quote_source_review(self, provider_id: str, source: str, max_tokens: int = 1024,
+                            max_cost_lamports: int | None = None, max_runtime_seconds: int | None = None,
+                            worker_target: dict | None = None) -> dict:
+        cost = self._requested_limit(max_cost_lamports, self.max_cost_lamports, 'max_cost_lamports')
+        runtime = self._requested_limit(max_runtime_seconds, self.max_runtime_seconds, 'max_runtime_seconds')
+        with self._lock:
+            self._expire_quotes()
+            if len(self._quotes) >= self.max_pending_quotes:
+                raise RuntimeError('Too many unused Aperture quotes are pending.')
+            quote = self.client.quote_source_review(provider_id, source, max_tokens=max_tokens,
+                max_cost_lamports=cost, max_runtime_seconds=runtime, max_rate_lamports=self.max_rate_lamports,
+                worker_target=worker_target)
+            from .jobs import inference_source
+            self._quotes[quote['quote_id']] = (inference_source(quote['workload']['parameters']), quote)
+            return {**self._quote_summary(quote), 'source_sha256': sha256(source),
+                    'offer': quote['workload']['parameters']['offer'], 'advisory': True,
+                    'next_step': 'Approve this quote with start_inference_task, then get_source_review.'}
+
+    def get_source_review(self, task_id: str, source: str) -> dict:
+        with self._lock:
+            try:
+                review = self.client.source_review(task_id, source)
+            except TimeoutError:
+                return {'task_id': task_id, 'ready': False, 'status': 'pending', 'retry_after_seconds': 1}
+            return {key: value for key, value in {**review, 'ready': True}.items() if key != 'bundle'}
+
+    def quote_reviewed_job(self, source: str, review_task_id: str, inputs: list[dict] | None = None,
+                           parameters: dict | None = None, max_cost_lamports: int | None = None,
+                           max_runtime_seconds: int | None = None, worker_target: dict | None = None) -> dict:
+        cost = self._requested_limit(max_cost_lamports, self.max_cost_lamports, 'max_cost_lamports')
+        runtime = self._requested_limit(max_runtime_seconds, self.max_runtime_seconds, 'max_runtime_seconds')
+        with self._lock:
+            self._expire_quotes()
+            if len(self._quotes) >= self.max_pending_quotes:
+                raise RuntimeError('Too many unused Aperture quotes are pending.')
+            quote = self.client.quote_reviewed_job(source, review_task_id, inputs=inputs, parameters=parameters,
+                max_cost_lamports=cost, max_runtime_seconds=runtime, max_rate_lamports=self.max_rate_lamports,
+                worker_target=worker_target)
+            self._quotes[quote['quote_id']] = (source, quote)
+            return self._quote_summary(quote)
 
     def quote_inference(self, provider_id: str, messages: list[dict], max_tokens: int = 256,
                         max_cost_lamports: int | None = None, max_runtime_seconds: int | None = None,

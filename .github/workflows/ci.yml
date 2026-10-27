@@ -35,6 +35,7 @@ jobs:
           node-version: "20"
       - run: pip install -r backend/requirements.txt -e "sdk[mcp]"
       - run: python scripts/check_inference_preview.py
+      - run: python scripts/check_mixed_workflow.py
       - run: python scripts/demo_workflow.py --rows 1000 --output .aperture/ci/workflow
       - run: python scripts/demo_workflow.py --rows 17000 --owner-handoff --regional-csv --console-workflow --compare-local --output .aperture/ci/assigned-workflow
       - run: python scripts/check_workflow_cancel.py --output .aperture/ci/cancellation
@@ -83,3 +84,5 @@ jobs:
           APERTURE_CONFIG_AUTHORITY: GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB
       - name: Exercise instructions on a local Solana validator
         run: node frontend/tests/onchain-v2.local-validator.mjs
+      - name: Exercise pre-pinning treasury recovery on a local Solana validator
+        run: node frontend/tests/onchain-legacy-recovery.local-validator.mjs

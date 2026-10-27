@@ -58,12 +58,13 @@ Python version and platform, and independently checks the exact decimal total.
 It runs direct local Python without enforcing Docker resource limits; its
 measurement is a sizing aid, not a guaranteed capacity certificate.
 
-The CSV price is an operator-set tariff (`APERTURE_CSV_RATE_LAMPORTS_SEC`, default
-1,000). It is not inferred from hardware performance or SOL market value. The
-quote binds rate, budget and affordable runtime. Custom/legacy sources retain
-their explicitly labeled AST heuristic. OFF_CHAIN receipts make no payment;
-the comparison reports an equivalent tariff estimate separately. No USD cost,
-provider margin or claim of being cheaper than cloud compute is established.
+CSV and general Python quotes use the selected worker owner's published rate;
+the gateway no longer calculates task prices from AST complexity or a CSV
+profile. Each quote pins the worker, rate, budget and affordable runtime. The
+17,000-row measurement below used the earlier 1,000 lamports/second operator
+tariff, so its 859-lamport equivalent is historical and is not the current
+worker price. OFF_CHAIN receipts make no payment. No USD cost, provider margin
+or claim of being cheaper than cloud compute is established.
 
 A same-host run on 4 October 2026, Python 3.13.14/Windows 11, measured 17,000
 rows in 0.86 seconds for direct Python and 7.83 seconds for the gateway path.

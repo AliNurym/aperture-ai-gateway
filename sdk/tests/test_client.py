@@ -35,8 +35,9 @@ class ClientEvidenceTests(unittest.TestCase):
             "program_id": base58.b58encode(bytes(SigningKey.generate().verify_key)).decode(),
             "network": "devnet", "gateway_pubkey": self.gateway_pubkey,
             "treasury": base58.b58encode(bytes(SigningKey.generate().verify_key)).decode(),
+            "worker_target": {"node_id": "worker-a", "worker_pubkey": self.worker_pubkey},
         }
-        self.quote["message"] = "Aperture execution authorization v2\naudience:aperture-gateway\naction:execute\n" + canonical({key: self.quote[key] for key in QUOTE_KEYS})
+        self.quote["message"] = canonical_quote_message(self.quote)
 
     def verify(self, quote=None, code=None):
         quote = self.quote if quote is None else quote
@@ -48,13 +49,16 @@ class ClientEvidenceTests(unittest.TestCase):
     def test_valid_quote_is_bound_to_one_source_and_deployment(self):
         self.assertEqual(self.verify(), self.quote["message"])
 
-    def test_worker_pin_requires_caller_consent_and_matching_signed_receipt(self):
+    def test_automatic_worker_route_is_accepted_and_explicit_selection_is_enforced(self):
         target = {"node_id": "worker-a", "worker_pubkey": self.worker_pubkey}
-        self.quote["worker_target"] = target
-        self.quote["message"] = canonical_quote_message(self.quote)
         self.assertTrue(self.quote["message"].startswith("Aperture execution authorization v5\n"))
+        self.assertEqual(self.verify(), self.quote["message"], "automatic routing accepts the worker pinned by the gateway")
         with self.assertRaisesRegex(IntegrityError, "selected worker"):
-            self.verify()
+            verify_quote(self.quote, owner=self.owner, agent=self.agent, code=self.code,
+                max_cost_lamports=50_000, max_runtime_seconds=20, max_rate_lamports=25_000,
+                program_id=self.quote["program_id"], gateway_pubkey=self.gateway_pubkey,
+                network="devnet", treasury=self.quote["treasury"], now=self.now,
+                worker_target={"node_id": "worker-b", "worker_pubkey": self.worker_pubkey})
         verify_quote(self.quote, owner=self.owner, agent=self.agent, code=self.code,
             max_cost_lamports=50_000, max_runtime_seconds=20, max_rate_lamports=25_000,
             program_id=self.quote["program_id"], gateway_pubkey=self.gateway_pubkey,
@@ -173,6 +177,7 @@ class ClientEvidenceTests(unittest.TestCase):
             "owner_wallet": self.owner, "agent_pubkey": self.agent, "passport_version": 3,
             "code_sha256": self.quote["code_sha256"], "output_sha256": sha256(full_log),
             "source_hash": self.quote["code_sha256"], "output_hash": sha256(full_log), "worker_id": "worker-a",
+            "worker_pubkey": self.worker_pubkey, "worker_target": self.quote["worker_target"],
             "lease_id": "lease-abc", "execution_status": "completed", "exit_code": 0,
             "execution_time": 1.234, "execution_backend": "docker", "execution_mode": "docker", "isolation": "docker",
             "rate_lamports": 1500, "max_cost_lamports": 50_000, "max_runtime_seconds": 20,

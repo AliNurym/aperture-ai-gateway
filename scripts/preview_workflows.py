@@ -71,7 +71,10 @@ def keep_children_in_launcher_job():
 
 
 def wait_for_health(url, process, expected_key, *, ready=False):
-    for _ in range(100):
+    attempts = 200 if ready else 100
+    last_status = None
+    last_workers = []
+    for _ in range(attempts):
         if process.poll() is not None:
             raise RuntimeError("A preview service stopped. Inspect its log in the state directory.")
         try:
@@ -80,12 +83,30 @@ def wait_for_health(url, process, expected_key, *, ready=False):
             health = response.json()
             if health.get("gateway_pubkey") != expected_key or health.get("demo_mode") is not True:
                 raise RuntimeError("The listening gateway differs from this off-chain preview.")
-            if not ready or health.get("status") == "ready":
+            last_status = health.get("status")
+            if not ready:
+                return health
+            if health.get("status") != "ready":
+                continue
+            directory = requests.get(url + "/workers", timeout=1)
+            directory.raise_for_status()
+            workers = directory.json().get("workers", [])
+            last_workers = [{key: worker.get(key) for key in
+                             ("node_id", "online", "accepting_tasks", "rate_lamports_sec", "runtimes")}
+                            for worker in workers]
+            if any(worker.get("online") and worker.get("accepting_tasks", True)
+                   and "python" in worker.get("runtimes", [])
+                   and type(worker.get("rate_lamports_sec")) is int
+                   and 1 <= worker["rate_lamports_sec"] <= 1_000_000_000
+                   for worker in workers):
                 return health
         except (requests.RequestException, ValueError):
             pass
         time.sleep(0.2)
-    raise TimeoutError("Preview " + ("worker did not register" if ready else "gateway did not start"))
+    if ready:
+        raise TimeoutError("Preview did not register an online priced Python worker within 40 seconds "
+                           + json.dumps({"gateway_status": last_status, "workers": last_workers}))
+    raise TimeoutError("Preview gateway did not start within 20 seconds")
 
 
 def main():
@@ -148,6 +169,7 @@ def main():
         "APERTURE_STATE_DB": str(args.database.resolve()), "APERTURE_WORKER_CREDENTIALS": "",
         "APERTURE_OBJECT_STORE": str(args.database.resolve().with_name(args.database.stem + "-objects")),
         "BACKEND_PRIVATE_KEY": json.dumps(list(bytes(oracle))), "APERTURE_WORKER_TOKEN": worker_secret,
+        "APERTURE_WORKER_RATE_LAMPORTS_SEC": "1000",
         "APERTURE_NODE_ID": "NODE-INTERACTIVE-PREVIEW", "GATEWAY_API_URL": f"http://127.0.0.1:{args.port}",
         "CORS_ORIGINS": f"http://127.0.0.1:{args.frontend_port},http://localhost:{args.frontend_port}",
         "APERTURE_TRUSTED_SOURCE_DIRECTORY": str(approved), "APERTURE_ALLOW_UNSAFE_LOCAL_EXECUTION": "true",

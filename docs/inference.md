@@ -5,68 +5,77 @@ workloads and `inference.chat` requests to operator-configured model servers.
 This reconnects the original compute-gateway direction with task-level agent
 permissions, bounded spending and attributable results.
 
-## Reconnect the original Gemini model
+## Configure Gemini or DeepSeek
 
-The earlier Aperture used Gemini 2.0 Flash for its AI Sentinel code review.
-That model shut down on June 1, 2026, so the gateway now offers the current
-Gemini Generate Content streaming API and defaults to `gemini-3.8-flash`.
-The model appears in the provider selector and runs through the same owner
-quote, wallet signature, capability check, worker and receipt flow as the rest
-of Aperture. The gateway's AST/source policy remains the enforcement check;
-Gemini output is an inference result, never a security verdict.
-AI Sentinel filters the provider list to the native Gemini route. It does not
-fall back to the local fixture or another OpenAI-compatible model; without a
- Gemini offer, the review panel explains how to configure the preview and sends
-no source to a model.
+The earlier Aperture used Gemini 2.0 Flash for its AI Sentinel code review. That
+model shut down on June 1, 2026. The unified preview now supports the current
+Gemini streaming API and DeepSeek's OpenAI-compatible chat-completions API. The
+DeepSeek model defaults to `deepseek-flash`. Its dedicated Sentinel
+adapter sends `thinking: {"type": "disabled"}` and requests
+`response_format: {"type": "json_object"}` so the bounded output-token
+allowance applies to a machine-readable report. Aperture still validates the
+verdict, findings and source line references; malformed or truncated output
+is rejected by the worker before it can become a successful inference artifact.
+The signed task still records its failure for inspection, and the UI leaves the
+review at manual review. A timeout or upstream HTTP error is not automatically
+retried. See the [DeepSeek
+chat-completions API](https://api-docs.deepseek.com/api/create-chat-completion/).
 
-In Compute Studio, **Request AI Sentinel code review** opens a review panel beside
-the Python editor. The source stays visible while the owner reviews the selected
-model, prompt and price, then signs the quote. The result is an advisory report;
-it does not replace the gateway's AST/source policy, approve execution, or prove
-that code is safe. The full prompt and result are covered by the existing
-inference receipt. The report stays attached to its source and is marked stale
-if that source changes. For a matching report, **Review compute price & limits**
-continues into the existing Python quote and execution flow. The report never
-skips the gateway policy, quote, or separate owner signature for code execution.
+AI Sentinel can use either configured provider. DeepSeek is reserved for the
+fixed, source-bound Sentinel prompt; generic DeepSeek chat requests are rejected
+by the gateway. The owner reviews the provider and worker-published rate, then
+signs the bounded request. The model result is advisory, not an execution
+approval. The gateway's AST/source policy and a separate owner signature still
+control compute. The completed review is attached to its source;
+recovery verifies the original gateway and worker signatures, output hash,
+manifest, and exact prompt before rebuilding the advisory. A changed source,
+gateway, wallet, or invalid receipt cannot silently reuse it.
 
-For the local preview, copy the example environment file and add your key:
+Model requests and Sentinel reviews pin a serving worker. The selected worker's
+published rate, node ID and signing key are covered by authorization v5. When
+the buyer selects automatic routing, the gateway chooses the lowest-priced
+compatible worker and pins that exact route into the quote. The UI checks the
+worker and rate before signing. The upstream model API bill remains a separate
+gateway-operator expense; it is not hidden in the worker tariff.
+
+For the local preview, add one provider key to the ignored `backend/.env` file
+(the tracked `backend/.env.example` lists all supported settings), then run:
 
 ```powershell
-Copy-Item backend/.env.example backend/.env
+if (!(Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
 notepad backend/.env
 .\start_preview.bat
 ```
 
-Fill in `GEMINI_API_KEY` in `backend/.env`. This file is ignored by Git. The
-unified launcher reads only `GEMINI_API_KEY`, `APERTURE_GEMINI_MODEL`, and
-`APERTURE_GEMINI_RATE_LAMPORTS_SEC` from it. It starts the authenticated
-inference worker alongside the reviewed CPU worker. The API key is passed to
-that worker; it is not sent to the browser or gateway and is not written to
-provider configuration or task receipts. Without a key, the same workspace
-still starts and explains how to connect Gemini. There is no local-model
-fallback. Selecting Gemini and signing a request sends that prompt to Google's
-API and may incur Google's separate API charges.
+Set `DEEPSEEK_API_KEY` for DeepSeek, or `GEMINI_API_KEY` for Gemini. The launcher
+reads only the allowlisted inference settings. Each provider key is passed only
+to the authenticated inference worker that needs it; it is not sent to the
+browser or gateway and is not written to provider configuration or task
+receipts. Without a model key, the same workspace still starts with reviewed
+CPU execution and explains how to connect a provider. Selecting a model and
+signing sends the prompt to that provider; its separate API billing may apply.
 
-To use a different current model or displayed Aperture time tariff, change
-`APERTURE_GEMINI_MODEL` and `APERTURE_GEMINI_RATE_LAMPORTS_SEC` in
-`backend/.env` before starting.
-The default tariff is a demo value of 1,000 lamports per elapsed second. It does
-not pay Google's token invoice, and the preview remains `OFF_CHAIN` with no
-Solana payment.
+DeepSeek defaults to model `deepseek-flash` and is exposed only inside the
+source-review flow. It does not set task prices or approve execution. The
+preview's local worker starts with a 1,000 lamports/second rate by default;
+change `APERTURE_WORKER_RATE_LAMPORTS_SEC` or publish a different rate in
+**Provide compute**. The operator pays DeepSeek separately. The preview remains
+`OFF_CHAIN` and makes no Solana payment.
 
-For a separate deployment, copy
-`backend/inference-providers.gemini.example.json` into the operator's provider
-configuration. Set `APERTURE_INFERENCE_CONFIG` for the gateway and the
-inference-only worker, and expose `GEMINI_API_KEY` only to the worker. Keep the
-provider protocol as `gemini_generate_content`; it uses Google's native SSE API
-and `x-goog-api-key` header instead of the OpenAI chat-completions format.
+For a separate DeepSeek deployment, start from
+`backend/inference-providers.deepseek.example.json`. Set the same absolute
+`APERTURE_INFERENCE_CONFIG` path for the gateway and inference-only worker, and
+expose `DEEPSEEK_API_KEY` only to that worker. The configuration pins DeepSeek
+credentials to `api.deepseek.com`. For Gemini, use
+`backend/inference-providers.gemini.example.json`; its native API uses the
+`x-goog-api-key` header.
 
-Ctrl+C stops only the services created by this launcher. State and logs remain
-in `.aperture/inference-preview`. Another launcher cannot use the same state
-directory concurrently. The temporary wallet's private key disappears when its
-tab reloads; a retained task token still permits result recovery in that tab.
+Ctrl+C stops only the services created by the preview launcher. State and logs
+remain in `.aperture/inference-preview`. Another launcher cannot use the same
+state directory concurrently. A temporary wallet key disappears when its tab
+reloads; a retained task token still permits result recovery in that tab.
 
-To verify model execution, repeated admission, fresh-client recovery, passport
+To verify request execution, repeated admission, fresh-client recovery, passport
 revocation, and the retained CPU path without opening the UI:
 
 ```powershell
@@ -74,9 +83,8 @@ python scripts/inference_preview.py --check
 ```
 
 This exits after the check and retains `evidence.json`, the quote, raw model
-output and signed receipt in the preview state directory. It requires Gemini or
-an operator-approved hosted endpoint and never claims Devnet settlement or model
-quality from an off-chain run.
+output, and signed receipt. It requires a configured model key or an operator-
+approved endpoint and does not establish Devnet settlement or model quality.
 
 ## Use an operator-hosted model endpoint
 
@@ -117,7 +125,10 @@ rejected before dispatch. On-chain policies bind the capabilities through the
 owner-approved metadata hash; the gateway interprets capability names.
 
 An inference quote binds provider ID, model, endpoint digest, published tariff,
-messages, output-token request, task budget, runtime, owner and agent. A source
+messages, output-token request, task budget, runtime, owner and agent. Requesting
+the quote sends the messages to the configured gateway, where its operator can
+read them. The wallet signature authorizes the subsequent model request; the
+model does not receive the prompt until the signed task is submitted. A source
 commitment includes the canonical request digest, so the existing Solana task
 source hash also commits to the inference request. The frontend and SDK rebuild
 the request before signing. Changing the prompt, provider or token limit needs a

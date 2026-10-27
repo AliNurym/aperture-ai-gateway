@@ -180,6 +180,39 @@ def create_mcp_server(tools: ApertureAgentTools):
         """
         return tools.quote_inference(provider_id, messages, max_tokens, max_cost_lamports, max_runtime_seconds, worker_target)
 
+    @server.tool(name='list_sentinel_providers', title='List AI Sentinel review models')
+    def list_sentinel_providers() -> dict:
+        """Find source-review models, including DeepSeek's dedicated Sentinel route."""
+        return tools.list_sentinel_providers()
+
+    @server.tool(name='quote_source_review', title='Review the price for an AI Sentinel source check')
+    def quote_source_review(provider_id: str, source: str, max_tokens: int = 1024,
+                            max_cost_lamports: int | None = None, max_runtime_seconds: int | None = None,
+                            worker_target: dict | None = None) -> dict:
+        """Build a fixed review prompt. Quoting does not send source to the model.
+
+        Use start_inference_task to approve this exact quote. The model checks
+        source risks; its advisory neither sets worker prices nor permits execution.
+        """
+        return tools.quote_source_review(provider_id, source, max_tokens, max_cost_lamports, max_runtime_seconds, worker_target)
+
+    @server.tool(name='get_source_review', title='Verify a completed source review')
+    def get_source_review(task_id: str, source: str) -> dict:
+        """Recover and verify the exact source, output and signatures. Never starts another review."""
+        return tools.get_source_review(task_id, source)
+
+    @server.tool(name='quote_reviewed_job', title='Prepare Python compute linked to a verified source review')
+    def quote_reviewed_job(source: str, review_task_id: str, inputs: list[dict] | None = None,
+                           parameters: dict | None = None, max_cost_lamports: int | None = None,
+                           max_runtime_seconds: int | None = None, worker_target: dict | None = None) -> dict:
+        """Verify a completed review and quote the same source with its signed review reference.
+
+        This is a separate compute approval. Use start_compute_job to run it;
+        source policy, delegation and worker-published rates remain in force.
+        """
+        return tools.quote_reviewed_job(source, review_task_id, inputs, parameters,
+                                        max_cost_lamports, max_runtime_seconds, worker_target)
+
     @server.tool(name="start_inference_task", title="Start the exact quoted inference request")
     def start_inference_task(quote_id: str) -> dict:
         """Use the configured agent key and its inference.chat delegation.
@@ -254,6 +287,9 @@ def create_mcp_server(tools: ApertureAgentTools):
         Steps contain id, source, inputs, parameters, optional depends_on, and
         max_cost_lamports/max_runtime_seconds. Inputs may reference an immutable
         object or use from_step and artifact to consume a preceding result.
+        Inference sources bind their exact offer/messages. message_inputs can
+        append a named verified result file to a selected user message, up to
+        16,000 UTF-8 bytes per file. worker_target pins a step's executor.
         """
         return workflow_tools().prepare(steps, max_cost_lamports)
 

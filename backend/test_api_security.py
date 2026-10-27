@@ -53,7 +53,8 @@ class GatewayApiSecurityTests(unittest.TestCase):
         self.agent = Keypair()
         self.worker = Keypair()
         self.headers = {'X-Aperture-Worker-Token': TOKEN, 'X-Aperture-Worker-Id': 'test-worker'}
-        self.store.put('workers', 'test-worker', {'worker_pubkey': str(self.worker.pubkey())})
+        self.store.put('workers', 'test-worker', {'node_id': 'test-worker', 'worker_pubkey': str(self.worker.pubkey()),
+            'rate_lamports_sec': 1000, 'runtimes': ['python'], 'last_seen': time.time(), 'accepting_tasks': True})
         self.price_patch = patch('ai_engine.get_sol_price_from_pyth', return_value=185.0)
         self.price_patch.start()
 

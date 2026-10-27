@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, StrictInt, field_validator
 from agent_identity import (CAPABILITIES, canonical_json, passport_message,
                             quote_message, receipt_message, sha256_text,
                             valid_public_key, verify_ed25519)
-from ai_engine import MAX_SOURCE_BYTES, analyze_code_ast, calculate_ast_quote_rate
+from ai_engine import MAX_SOURCE_BYTES, analyze_code_ast
 from state_store import ACTIVE_STATES, StateStore
 from worker_identity import receipt_bytes
 from security_config import worker_auth_is_configured, worker_id_is_valid, worker_token_is_configured
@@ -237,8 +237,6 @@ def effective_runtime_limit(task):
 
 class Gateway:
     def __init__(self, solana, demo_mode, worker_token, store=None, worker_credentials=None):
-        from compute_profiles import csv_rate
-        self.csv_tariff = csv_rate()
         self.inference_providers = load_providers()
         self.solana = solana
         self.demo_mode = demo_mode
@@ -402,10 +400,9 @@ class Gateway:
         manifest = self.job_manifest(req)
         from sentinel_review import validate_sentinel_review
         validate_sentinel_review(self.store, manifest, req.wallet, req.code)
-        target = req.worker_target.model_dump() if req.worker_target else None
-        from worker_market import require_worker_target
-        if target:
-            require_worker_target(self, target, manifest)
+        requested_target = req.worker_target.model_dump() if req.worker_target else None
+        from worker_market import published_worker_rate, require_worker_target, select_worker_target
+        target, worker = select_worker_target(self, requested_target, manifest)
         inference = manifest is not None and manifest["runtime"] == INFERENCE_CAPABILITY
         capability = INFERENCE_CAPABILITY if inference else "python.execute"
         passport = await self.passport(req.wallet, agent, req.max_cost_lamports, req.max_runtime_seconds, capability)
@@ -415,20 +412,16 @@ class Gateway:
         complexity = audit.get('cpu', 20) + audit.get('ram', 15)
         from compute_profiles import source_profile
         profile = source_profile(req.code)
-        rate = self.csv_tariff if profile else max(1, int(round(calculate_ast_quote_rate(complexity) * 1_000_000_000)))
-        if inference:
-            rate = manifest["parameters"]["offer"]["rate_lamports_sec"]
+        rate = published_worker_rate(worker)
         analysis = {'security': 'SAFE', 'status': 'success', 'complexity_score': complexity,
                     'predicted_sec': None if profile else audit.get('predicted_sec', 3), 'scores': audit,
-                    'calculated_rate_sol_sec': rate / 1e9, 'calculated_rate_lamports_sec': rate,
-                    'sol_market_price': None, 'reason': audit.get('reason'),
-                    'pricing': 'published_cpu_tariff_v1' if profile else 'deterministic_ast_lamports_v1',
-                    'compute_profile': profile}
+                    'published_rate_lamports_sec': rate, 'price_set_by': worker['node_id'],
+                    'sol_market_price': None, 'reason': 'The selected worker owner publishes this rate; source analysis does not set task price.',
+                    'pricing': 'provider_published_worker_rate_v1', 'compute_profile': profile}
         if inference:
-            analysis.update(pricing="published_inference_time_tariff_v1", compute_profile=INFERENCE_CAPABILITY,
+            analysis.update(pricing="provider_published_worker_rate_v1", compute_profile=INFERENCE_CAPABILITY,
                             predicted_sec=None, complexity_score=None,
-                            calculated_rate_sol_sec=rate / 1e9, calculated_rate_lamports_sec=rate,
-                            reason="Operator-set elapsed-time inference tariff, not AST or token pricing.")
+                            reason="The selected inference worker owner publishes this execution rate. The upstream model API bill is separate.")
         if req.max_cost_lamports < rate:
             raise HTTPException(422, "Budget must cover at least one second at the quoted rate.")
         config = None
@@ -452,12 +445,12 @@ class Gateway:
         if manifest is not None:
             manifest_text = canonical_json(manifest)
             quote.update(workload=manifest, workload_sha256=sha256_text(manifest_text), workload_canonical=manifest_text)
+        if target:
+            quote["worker_target"] = target
         if req.workflow is not None:
             quote["workflow"] = req.workflow.model_dump()
             from workflow_inbox import validate_bound_step
             validate_bound_step(self, quote, req.code)
-        if target:
-            quote["worker_target"] = target
         quote["message"] = quote_message(quote)
         async with self.lock:
             # RPC and passport checks can yield. Recheck retained input bytes while
@@ -738,17 +731,34 @@ class Gateway:
     def _mount(self):
         router = self.router
 
-        @router.get("/inference/providers")
-        async def inference_providers():
+        def provider_directory(*, sentinel=False):
             workers = self.store.list("workers")
-            return {"providers": [{**provider.offer(), "available_workers": sum(
-                1 for worker in workers if time.time() - worker.get("last_seen", 0) < 45
-                and worker.get("accepting_tasks", True)
-                and provider.offer() in worker.get("inference_offers", []))}
-                for provider in self.inference_providers.values() if not provider.is_development_only],
+            from worker_market import published_worker_rate
+            from inference import offers_match
+            offers = []
+            for provider in self.inference_providers.values():
+                if (provider.is_development_only
+                        or provider.id == "aperture-deepseek" and not sentinel):
+                    continue
+                matching = [worker for worker in workers if time.time() - worker.get("last_seen", 0) < 45
+                            and worker.get("accepting_tasks", True)
+                            and any(offers_match(provider.offer(), offer) for offer in worker.get("inference_offers", []))
+                            and published_worker_rate(worker) is not None]
+                rates = [published_worker_rate(worker) for worker in matching]
+                offers.append({**provider.offer(), "available_workers": len(matching),
+                               "lowest_worker_rate_lamports_sec": min(rates) if rates else None})
+            return {"providers": offers,
                 "discovery": "operator_configured", "worker_settlement_share_pct": 100,
                 "automatic_worker_payouts": "full_charge_on_confirmed_devnet_settlement",
                 "upstream_provider_payouts": False}
+
+        @router.get("/inference/providers")
+        async def inference_providers():
+            return provider_directory()
+
+        @router.get("/sentinel/providers")
+        async def sentinel_providers():
+            return provider_directory(sentinel=True)
 
         @router.post("/inference/quotes")
         async def inference_quote(req: InferenceQuoteRequest):
@@ -928,6 +938,8 @@ class Gateway:
                     quote["workload_canonical"] = job["workload_canonical"]
             if "workflow" in job:
                 quote["workflow"] = job["workflow"]
+            if "worker_target" in job:
+                quote["worker_target"] = job["worker_target"]
             return {
                 **self.recovery_task_summary(job),
                 "task_access_token": job["access_token"],
@@ -971,8 +983,11 @@ class Gateway:
                     inference = job.get("workload", {}).get("runtime") == INFERENCE_CAPABILITY
                     worker = self.store.get("workers", worker_id)
                     if inference:
+                        if INFERENCE_CAPABILITY not in worker.get("runtimes", []):
+                            continue
                         offer = job["workload"]["parameters"]["offer"]
-                        if offer not in worker.get("inference_offers", []):
+                        from inference import offers_match
+                        if not any(offers_match(offer, advertised) for advertised in worker.get("inference_offers", [])):
                             continue
                     elif "python" not in worker.get("runtimes", ["python"]):
                         continue

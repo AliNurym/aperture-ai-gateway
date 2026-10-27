@@ -5,12 +5,14 @@ import Icon from './components/Icon';
 import CommandBlock from './components/CommandBlock';
 import WorkflowRun from './WorkflowRun';
 import AgentWorkspace from './AgentWorkspace';
+import MixedWorkflowBuilder from './MixedWorkflowBuilder';
 import useBrowserWorkflow from './hooks/useBrowserWorkflow';
 import { createBatchPlan, parseStepCost } from './utils/workflowPlan';
 import { DEFAULT_CSV_MAPPING, inspectCsv, validateCsvMapping } from './utils/csvSchema';
 import { MAX_INPUT_BYTES, uploadInput, validateObject } from './utils/jobs';
 import { canonicalJson, isPortableFilename } from './utils/protocol';
 import { storageContext } from './utils/storage';
+import { storageContextErrorMessage } from './utils/storageContextMessage.js';
 import { requestErrorMessage } from './utils/requestError';
 import { saveFile } from './utils/downloadFile';
 import { revealContent } from './utils/motion';
@@ -80,7 +82,7 @@ const BLUEPRINTS = [
   }
 ];
 
-export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, externalBusy = false, onBusyChange, onRecord, releasedObject, onOpenStudio, onOpenFunding }) {
+export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, externalBusy = false, onBusyChange, onRecord, releasedObject, onOpenStudio, onOpenFunding, onOpenSetup }) {
   const { publicKey, signMessage, wallet, connect, connecting } = useWallet();
   const { connection } = useConnection();
   const { setVisible } = useWalletModal();
@@ -94,6 +96,9 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
   const setReferences = text => setDraft({ scope, text });
   const [cost, setCost] = useState('0.0001');
   const [runtime, setRuntime] = useState('60');
+  const [workflowKind, setWorkflowKind] = useState('csv');
+  const [workflowModeRevision, setWorkflowModeRevision] = useState(0);
+  const [modelPlan, setModelPlan] = useState(null);
   const [notice, setNotice] = useState('');
   const [importing, setImporting] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -117,6 +122,12 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
   try { if (gatewayOnline) context = storageContext(apiUrl, gatewayHealth); }
   catch (error) { contextError = error.message; }
   const editsBlocked = uploading || delegating || externalBusy || controller.busy || Boolean(controller.run);
+  const mixedMode = workflowKind === 'mixed' || Boolean(controller.run?.plan.steps.some(step => step.source.startsWith('# Aperture inference request v1\n')));
+  const selectWorkflowKind = kind => {
+    if (kind === workflowKind) return;
+    setWorkflowKind(kind);
+    setWorkflowModeRevision(revision => revision + 1);
+  };
   useLayoutEffect(() => {
     currentScope.current = scope;
     importSequence.current += 1;
@@ -180,6 +191,7 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
     plan = createBatchPlan(JSON.parse(references), parseStepCost(cost), Number(runtime), mapping);
   }
   catch (error) { problem = error.message; }
+  if (mixedMode) plan = modelPlan;
   const mergeSteps = plan?.steps.filter(step => !step.id.startsWith('batch_')) || [];
   const inputBytes = selectedInputs.reduce((sum, item) => sum + item.size_bytes, 0);
   const executionCommand = 'python examples/run_workflow.py aperture-workflow.json --workflow-budget-lamports ' + (plan?.max_cost_lamports || 2000000) + ' --output .aperture-runs/results';
@@ -302,7 +314,10 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
   return <div className={'workflows' + (controller.run ? ' has-run' : '')}>
     {notice && <div className="studio-notice" role="status"><Icon name="book" size={18} /><p>{notice}</p></div>}
     {onOpenFunding && !gatewayHealth?.demo_mode && <button className="console-text-button" disabled={editsBlocked} onClick={onOpenFunding}>Manage the shared Devnet payment channel<Icon name="arrow" size={15} /></button>}
-    <details className="workflow-configuration" open={!controller.run}><summary>{controller.run ? 'Saved plan · ' + controller.run.total_steps + ' steps · ' + formatSol(controller.run.plan.max_cost_lamports) + ' SOL maximum' : 'Workflow setup'}</summary><section className="workflow-builder console-panel">
+    <div className="console-studio-switcher" role="group" aria-label="Workflow type"><button className={!mixedMode ? 'selected' : ''} aria-pressed={!mixedMode} disabled={editsBlocked} onClick={() => selectWorkflowKind('csv')}>CSV report</button><button className={mixedMode ? 'selected' : ''} aria-pressed={mixedMode} disabled={editsBlocked} onClick={() => selectWorkflowKind('mixed')}>Model + compute</button></div>
+    <div key={workflowModeRevision} className="workflow-mode-content" data-mode={mixedMode ? 'mixed' : 'csv'} data-motion-enter={workflowModeRevision > 0 ? 'true' : undefined}>
+    {mixedMode && <MixedWorkflowBuilder apiUrl={apiUrl} disabled={editsBlocked} onPlan={setModelPlan} onOpenSetup={onOpenSetup} />}
+    {!mixedMode && <details className="workflow-configuration" open={!controller.run}><summary>{controller.run ? 'Saved plan · ' + controller.run.total_steps + ' steps · ' + formatSol(controller.run.plan.max_cost_lamports) + ' SOL maximum' : 'Workflow setup'}</summary><section className="workflow-builder console-panel">
       <div className="console-section-heading"><div><span className="console-eyebrow">CSV BATCH → REPORT</span><h2 id="workflow-builder-heading" tabIndex={-1}>Prepare your workflow</h2></div><button className="console-text-button" onClick={downloadSample}><Icon name="download" size={17} />Sample CSV</button></div>
       <p className="workflow-description">Use your own CSV exports. Choose a grouping column and numeric amount; get exact totals, averages, minimums and maximums, plus a report explaining excluded records.</p>
       <details className="workflow-starters"><summary>Start from a pattern</summary><div className="workflow-starter-list">{BLUEPRINTS.map(bp => <button key={bp.id} className="workflow-starter" disabled={editsBlocked} onClick={() => applyBlueprint(bp)}><span><strong>{bp.title}</strong><small>{bp.subtitle}</small></span><span>{bp.cost} SOL / step<small>{bp.runtime}s maximum</small></span><Icon name="arrow" size={16} /></button>)}</div></details>
@@ -316,7 +331,10 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
             {!selectedInputs.length && owner && <button className="console-text-button workflow-example-button" disabled={editsBlocked || !signMessage || !context} onClick={useExampleData}><Icon name="spark" size={16} />Use example data</button>}
             {!selectedInputs.length && owner && <small>Two small CSV batches. Real uploads, quotes and worker execution.</small>}
             <input ref={csvInput} type="file" accept=".csv,text/csv" multiple hidden onChange={uploadBatches} />
-            {contextError && <small role="alert">{contextError}</small>}
+            {contextError && <div className="workflow-context-error" role="alert">
+              <small>{storageContextErrorMessage(contextError, gatewayHealth?.demo_mode)}</small>
+              {onOpenSetup && <button type="button" className="console-text-button" onClick={onOpenSetup}>Open gateway setup</button>}
+            </div>}
           </div>
           {selectedInputs.length > 0 && <ul className="workflow-input-list" aria-label="Selected CSV batches">{selectedInputs.map(item => <li key={item.object_id}><Icon name="book" size={17} /><span><strong>{item.name}</strong><small>{formatBytes(item.size_bytes)} · hash-bound input</small></span><button className="console-text-button" disabled={editsBlocked} aria-label={'Remove ' + item.name + ' from plan'} onClick={() => removeReference(item.object_id)}>Remove</button></li>)}</ul>}
           <details className="workflow-reference-editor"><summary>Use existing input references</summary>
@@ -350,17 +368,19 @@ export default function Workflows({ apiUrl, gatewayHealth, gatewayOnline, extern
         </li>)}</ol></details>
         <p className="workflow-description">These are planned steps. No computation or payment starts when you import or export.</p>
       </div>}
-    </section></details>
+    </section></details>}
+    {mixedMode && plan && <div className="mixed-workflow-export"><span>Total maximum · {formatSol(plan.max_cost_lamports)} SOL</span><button className="console-button secondary" disabled={editsBlocked} onClick={exportPlan}><Icon name="download" size={17} />Export agent plan</button></div>}
+    </div>
     <WorkflowRun controller={controller} plan={plan} connected={Boolean(owner && (!controller.run || owner === controller.run.owner))} onConnect={connectWallet}
       gatewayOnline={gatewayOnline} gatewayReady={gatewayOnline && gatewayHealth?.status === 'ready'} externalBusy={externalBusy || uploading} />
     <AgentWorkspace context={context} owner={owner} signMessage={signMessage} plan={plan}
       disabled={uploading || externalBusy || controller.busy || Boolean(controller.run)} onBusyChange={setDelegating} />
-    {computeProfile && <section className="console-panel workflow-compute-profile"><span className="console-eyebrow">CSV COMPUTE</span><h2>Size the job before you approve it.</h2><p>Start with about 5,000 rows per batch and at most 10,000 groups across the report. More columns and longer values increase work; the quote's affordable runtime can be shorter than your requested limit.</p><p>{formatSol(computeProfile.pricing.rate_lamports_sec)} SOL per execution second · operator tariff · {context?.network === 'off_chain' ? 'no payment in this workspace' : 'settled within your approved cap'}. Each step supports 64 MiB of inputs and at most 180 seconds. Configured Docker workers use 1 CPU and 512 MiB; the local preview runs trusted Python on this host.</p><details><summary>Check your worker's batch size</summary><p>The benchmark runs the same CSV sources and records time and peak process memory. Its result applies to that host and dataset; it does not guarantee Docker or remote-provider performance.</p><CommandBlock label="Measure a CSV profile" command="python scripts/benchmark_csv_profile.py --rows 50000 --groups 4 --output .aperture-runs/cpu-profile.json" /></details></section>}
+    {computeProfile && !mixedMode && <section className="console-panel workflow-compute-profile"><span className="console-eyebrow">CSV COMPUTE</span><h2>Size the job before you approve it.</h2><p>Start with about 5,000 rows per batch and at most 10,000 groups across the report. More columns and longer values increase work; the quote's affordable runtime can be shorter than your requested limit.</p><p>The selected worker owner sets the rate per execution second · {context?.network === 'off_chain' ? 'no payment in this workspace' : 'settled within your approved cap'}. Each step supports 64 MiB of inputs and at most 180 seconds. Configured Docker workers use 1 CPU and 512 MiB; the local preview runs trusted Python on this host.</p><details><summary>Check your worker's batch size</summary><p>The benchmark runs the same CSV sources and records time and peak process memory. Its result applies to that host and dataset; it does not guarantee Docker or remote-provider performance.</p><CommandBlock label="Measure a CSV profile" command="python scripts/benchmark_csv_profile.py --rows 50000 --groups 4 --output .aperture-runs/cpu-profile.json" /></details></section>}
 
     <section className="workflow-how console-panel">
-      <div><span className="console-eyebrow">FROM DATA TO RESULTS</span><h2>A useful pipeline in one command.</h2><p>Start from a CSV. The SDK splits it into batches, stages files, runs summaries and merges a report. Rerun with the same journal to recover progress.</p></div>
-      <CommandBlock label="Batch processing" command="python examples/batch_data_workflow.py records.csv --batch-rows 5000 --workflow-budget-lamports 2000000" />
-      <button className="console-text-button" disabled={editsBlocked} onClick={() => onOpenStudio(WORKLOADS.find(item => item.id === 'dataset'))}>Open a single data job in Studio<Icon name="arrow" size={16} /></button>
+      <div><span className="console-eyebrow">FROM DATA TO RESULTS</span><h2>{mixedMode ? 'One plan across browser, SDK and MCP.' : 'A useful pipeline in one command.'}</h2><p>{mixedMode ? 'Export the exact plan to your agent host, or approve each step here. Both routes verify the signed result files used by later steps. A delegated agent needs Python and model-inference permissions.' : 'Start from a CSV. The SDK splits it into batches, stages files, runs summaries and merges a report. Rerun with the same journal to recover progress.'}</p></div>
+      {!mixedMode && <CommandBlock label="Batch processing" command="python examples/batch_data_workflow.py records.csv --batch-rows 5000 --workflow-budget-lamports 2000000" />}
+      {!mixedMode && <button className="console-text-button" disabled={editsBlocked} onClick={() => onOpenStudio(WORKLOADS.find(item => item.id === 'dataset'))}>Open a single data job in Studio<Icon name="arrow" size={16} /></button>}
       <details open={Boolean(plan)}><summary>Run your exported plan</summary><p>Save aperture-workflow.json in the project directory. Configure the same agent identity that uploaded its inputs, then run this command. The journal records each accepted task and verified result; final files are saved under the output directory.</p><CommandBlock label="Execute an exported plan" command={executionCommand} /><p>For an MCP agent, pass the exported JSON to prepare_compute_workflow, review its workflow ID and budget, then call start_compute_workflow. Use get_compute_workflow for progress and read_compute_artifact for verified files.</p></details>
       <details><summary>Agent setup and execution limits</summary><p>Configure the gateway, a dedicated agent key and an owner-issued passport. Set the workflow directory and total spending ceiling in your MCP host. Steps execute serially on one payment channel. Each job supports up to 64 MiB of input and 180 seconds; outputs are bounded to 16 MiB total. Docker and Devnet execution require the corresponding deployment configuration.</p><CommandBlock label="MCP workflow settings · PowerShell" command={'$env:APERTURE_MCP_WORKFLOW_DIRECTORY = "C:\\aperture-agent\\workflows"\n$env:APERTURE_MCP_MAX_WORKFLOW_COST_LAMPORTS = "2000000"'} /></details>
     </section>

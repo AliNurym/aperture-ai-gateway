@@ -217,7 +217,9 @@ def verify_quote(quote, *, owner, agent, code, max_cost_lamports, max_runtime_se
         require(quote.get(key) == value, f"Quote changed {key}")
     require(quote.get("workload") == workload, "Quote changed job inputs or parameters")
     require(quote.get("workflow") == workflow, "Quote changed its assigned workflow step")
-    require(quote.get("worker_target") == worker_target, "Quote changed the selected worker")
+    routed_target = quote.get("worker_target")
+    require(isinstance(routed_target, dict) and (worker_target is None or routed_target == worker_target),
+            "Quote changed the selected worker or omitted its priced executor")
     require(type(quote.get("expires_at")) is int and now < quote["expires_at"] <= now + 120, "Quote expired or expiry is implausible")
     require(type(quote.get("rate_lamports")) is int and 0 < quote["rate_lamports"] <= max_rate_lamports, "Quote rate exceeds caller policy")
     require(type(quote.get("passport_version")) is int and quote["passport_version"] >= 0, "Missing delegation version")
@@ -367,13 +369,68 @@ class ApertureClient:
         """Operator-configured model offers; no decentralized discovery claim."""
         return self.request("GET", "/inference/providers").json()["providers"]
 
+    def sentinel_providers(self):
+        """Source-review models, including Sentinel-only DeepSeek offers."""
+        return self.request("GET", "/sentinel/providers").json()["providers"]
+
+    def quote_source_review(self, provider_id, source, *, max_tokens=1024,
+                            max_cost_lamports=100_000, max_runtime_seconds=30,
+                            max_rate_lamports=25_000, worker_target=None):
+        """Quote the fixed Sentinel prompt; source is sent upstream only on execute."""
+        from .sentinel import build_source_review_prompt, model_offer
+        prompt = build_source_review_prompt(source)
+        providers = [item for item in self.sentinel_providers() if item.get('id') == provider_id]
+        require(len(providers) == 1, 'AI Sentinel provider is not configured')
+        offer = model_offer(providers[0])
+        require(offer.get('protocol') in {'openai_chat_completions', 'gemini_generate_content'},
+                'Provider does not support AI Sentinel')
+        require(type(max_tokens) is int and 1 <= max_tokens <= offer['max_output_tokens'], 'Invalid output token limit')
+        parameters = {'inference': {'provider_id': provider_id, 'messages': [{'role': 'user', 'content': prompt}],
+                                    'max_tokens': max_tokens}, 'offer': offer}
+        return self.quote_job(inference_source(parameters), parameters=parameters,
+            max_cost_lamports=max_cost_lamports, max_runtime_seconds=max_runtime_seconds,
+            max_rate_lamports=max_rate_lamports, worker_target=worker_target)
+
+    def source_review(self, task_id, source, *, timeout_seconds=1):
+        """Recover a completed review and return portable, independently verifiable evidence."""
+        from .sentinel import build_source_review_prompt, verify_source_review_bundle
+        prompt = build_source_review_prompt(source)
+        task = self.resume_task(task_id)
+        spec = task.quote.get('workload') or {}
+        require(spec.get('runtime') == 'inference.chat'
+                and spec.get('parameters', {}).get('inference', {}).get('messages') == [{'role': 'user', 'content': prompt}],
+                'Source review is not bound to this exact source and fixed prompt')
+        result = self.wait(task, timeout_seconds=timeout_seconds, cancel_on_timeout=False)
+        public_quote = {key: task.quote[key] for key in (*QUOTE_KEYS, 'effective_runtime_seconds', 'workload',
+            'workload_sha256', 'workload_canonical', 'worker_target', 'workflow', 'message') if key in task.quote}
+        bundle = {'version': 1, 'source': source,
+                  'evidence': {'quote': public_quote, 'receipt': result['receipt'], 'output': result['full_log']}}
+        verified = verify_source_review_bundle(bundle, owner=self.owner, program_id=self.program_id,
+            gateway_pubkey=self.gateway_pubkey, network=self.network, treasury=self.treasury)
+        return {**verified, 'bundle': bundle}
+
+    def quote_reviewed_job(self, source, review_task_id, *, inputs=None, parameters=None,
+                           max_cost_lamports=100_000, max_runtime_seconds=30,
+                           max_rate_lamports=25_000, worker_target=None):
+        """Prepare a separate Python quote that binds the verified source-review reference."""
+        review = self.source_review(review_task_id, source)
+        require(parameters is None or isinstance(parameters, dict), 'Job parameters must be an object')
+        parameters = dict(parameters or {})
+        reference = review['review_reference']
+        require('aperture_review' not in parameters or parameters['aperture_review'] == reference,
+                'Job parameters contain a conflicting source review')
+        parameters['aperture_review'] = reference
+        return self.quote_job(source, inputs=inputs or (), parameters=parameters,
+            max_cost_lamports=max_cost_lamports, max_runtime_seconds=max_runtime_seconds,
+            max_rate_lamports=max_rate_lamports, worker_target=worker_target)
+
     def quote_inference(self, provider_id, messages, *, max_tokens=256,
                         max_cost_lamports=100_000, max_runtime_seconds=30, max_rate_lamports=25_000, worker_target=None):
         offers = [item for item in self.inference_providers() if item.get("id") == provider_id]
         require(len(offers) == 1, "Inference provider is not configured")
-        offer = {key: value for key, value in offers[0].items() if key != "available_workers"}
+        offer = {key: value for key, value in offers[0].items()
+                 if key not in {"available_workers", "lowest_worker_rate_lamports_sec", "rate_lamports_sec"}}
         require(type(max_tokens) is int and 1 <= max_tokens <= offer["max_output_tokens"], "Invalid output token limit")
-        require(0 < offer["rate_lamports_sec"] <= max_rate_lamports, "Provider rate exceeds caller policy")
         parameters = {"inference": {"provider_id": provider_id, "messages": messages, "max_tokens": max_tokens}, "offer": offer}
         code = inference_source(parameters)
         return self.quote_job(code, parameters=parameters, max_cost_lamports=max_cost_lamports,

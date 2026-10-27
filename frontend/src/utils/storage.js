@@ -1,18 +1,18 @@
 import axios from 'axios';
 import { PublicKey } from '@solana/web3.js';
-import { APERTURE_PROGRAM_ID, GATEWAY_PUBKEY_PIN, canonicalJson } from './protocol';
-import { validateObject } from './jobs';
+import { APERTURE_PROGRAM_ID, GATEWAY_PUBKEY_PIN, canonicalJson } from './protocol.js';
+import { validateObject } from './jobs.js';
 
 const MAX_STORAGE_BYTES = 256 * 1024 * 1024;
 const MAX_STORAGE_OBJECTS = 512;
 const STATES = new Set(['authorized', 'uploading', 'ready', 'deleting']);
 const REFERENCE_KEYS = ['object_id', 'name', 'sha256', 'size_bytes'];
 
-export function storageContext(apiUrl, health) {
+export function storageContext(apiUrl, health, signerPin = GATEWAY_PUBKEY_PIN) {
   if (!apiUrl || typeof health?.demo_mode !== 'boolean' || !health.gateway_pubkey || !health.program_id) throw new Error('Connect a configured gateway before opening private storage.');
   if (health.program_id !== APERTURE_PROGRAM_ID) throw new Error('The gateway program differs from this console deployment.');
-  if (GATEWAY_PUBKEY_PIN && health.gateway_pubkey !== GATEWAY_PUBKEY_PIN) throw new Error('The gateway signer differs from this console deployment.');
-  if (!health.demo_mode && !GATEWAY_PUBKEY_PIN) throw new Error('Configure the gateway signing key in this console before accessing Devnet storage.');
+  if (!health.demo_mode && signerPin && health.gateway_pubkey !== signerPin) throw new Error('The gateway signer differs from this console deployment.');
+  if (!health.demo_mode && !signerPin) throw new Error('Configure the gateway signing key in this console before accessing Devnet storage.');
   try { new PublicKey(health.gateway_pubkey); }
   catch { throw new Error('The gateway has an invalid signing identity.'); }
   return {

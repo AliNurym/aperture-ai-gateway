@@ -29,6 +29,12 @@ class SentinelSecurityTests(unittest.TestCase):
         result = analyze_code_ast("__import__('os').system('whoami')")
         self.assertEqual(result["security"], "DANGEROUS")
 
+    def test_static_rejection_is_not_misattributed_to_model_or_sandbox(self):
+        reason = analyze_code_ast("import os")["reason"]
+        self.assertIn("Static source policy blocked this workload", reason)
+        self.assertNotIn("AI Sentinel", reason)
+        self.assertNotIn("Sandbox", reason)
+
     def test_blocks_unapproved_module(self):
         result = analyze_code_ast("import pathlib")
         self.assertEqual(result["security"], "DANGEROUS")

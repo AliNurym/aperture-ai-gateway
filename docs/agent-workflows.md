@@ -3,7 +3,68 @@
 Aperture accepts immutable input files, job parameters and named result files.
 An agent can batch a dataset, run dependent steps, join verified results and
 resume the same workflow journal. Data passes through private object references
-instead of being copied into the model's context.
+instead of being copied into the model's context automatically. Mixed plans can
+explicitly select a small verified result file for a later model request.
+
+## Mixed model and Python workflows
+
+In **Agent workflows → Model + compute**, choose a configured model, a model
+executor and a Python executor. The built-in chain generates text, measures the
+exact response in Python and asks the model to interpret the measured statistics.
+The measurement describes the text; it does not evaluate answer quality. You can
+also import/export a version-1 JSON workflow plan with other supported steps.
+
+Model steps use the same source/parameters manifest as standalone inference.
+Their exact offer and messages are bound to the inference source hash. A successful
+non-empty response is published as `response.txt` in the worker/gateway signed
+artifact list. A downstream Python step can consume it through an ordinary input:
+
+```json
+{"from_step": "generate", "artifact": "response.txt"}
+```
+
+An inference step has no implicit file inputs. To send a previous result to a
+model, add an explicit binding to that step:
+
+```json
+{"message_inputs": [{"from_step": "analyze", "artifact": "analysis.json", "message_index": 0}]}
+```
+
+Only `user` messages accept these bindings. The runner verifies the completed
+parent receipt and file size/hash, reads strict UTF-8 and appends the exact bytes
+under `[Aperture input analyze/analysis.json]`. It then derives the resolved source
+hash and manifest before quoting. Each file must contain 1–16,000 bytes; there are
+at most eight context bindings per step. The resolved message and all parameters
+must also fit the existing model/request limits. Oversized context is rejected,
+never silently truncated. These bindings add DAG dependencies and cannot form a
+cycle. Python treats a model answer as input data; it never executes model text.
+
+Every step may additionally specify `worker_target: {node_id, worker_pubkey}`.
+Its quote, retry, journal recovery, dispatch and signed result must retain that
+executor. No fallback silently changes the selected key. Legacy CSV plans keep
+their normalized shape and journal fingerprints.
+
+The browser requests an owner signature for each step and saves private tab
+checkpoints before admission. Use a persistent wallet to continue signing after
+a reload; Temporary key is intentionally lost on reload. Completed results can
+still be verified from the retained task capabilities. SDK/MCP runners use durable
+SQLite journals. A delegated agent needs every capability present in the plan:
+`python.execute`, `inference.chat`, or both. The owner inbox checks the approved
+base prompt, resolved context, exact worker, dependencies and spending limits
+again when quoting and publishing progress.
+
+Reproduce the combined transport check with:
+
+```powershell
+backend\venv\Scripts\python.exe scripts\check_mixed_workflow.py
+```
+
+It runs real gateway/worker processes, actual Python, an SDK interruption/recovery,
+MCP and an owner-approved mixed plan. The HTTP model response is a synthetic UTF-8
+fixture including Kazakh text. Model requests, signed files and replay are checked;
+this makes no upstream model request or Solana payment. The default check needs
+Node.js for the reviewed source catalog, but does not start Vite or require its
+dependencies. `--serve` adds an isolated browser QA workspace.
 
 ## Useful first workflow
 
@@ -400,11 +461,13 @@ Instead of the polling receiver, an MCP host can call `get_assigned_workflows`,
 `start_assigned_workflow(workflow_id)` and `get_assigned_workflow_progress`.
 The full signed plan stays inside the host; list/progress responses contain
 compact metadata. The operator must enable execution and configure a durable
-workflow directory. The console inbox currently accepts only the reviewed CSV
-report preset. Use the generic SDK/MCP workflow tools for other bounded Python
-plans.
+workflow directory. The console inbox supports reviewed CSV report plans and
+bounded mixed model/Python plans, including explicit context-file dependencies.
+Use the generic SDK/MCP tools for other plans within the same runtime and budget
+limits. Dedicated Sentinel operations are described in [signed source reviews](source-reviews.md).
 
 Reproduce the assigned path with the comparison command in
-[MVP evidence](mvp-evidence.md). The current tariff, CPU bounds and source hashes
-are published in `/health` under `compute_profiles`. The CSV tariff is fixed for
-each issued quote; changing operator configuration does not rewrite old quotes.
+[MVP evidence](mvp-evidence.md). Runtime profiles and source hashes are published
+in `/health` under `compute_profiles`. Worker owners publish prices through
+`/workers`; each quote pins an executor and its rate. Later price updates do not
+rewrite an issued quote.

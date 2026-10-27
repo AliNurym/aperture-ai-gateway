@@ -132,7 +132,7 @@ class OwnerWorkspaceApiTests(unittest.TestCase):
             "job_version": 1, "inputs": step["inputs"], "parameters": step["parameters"],
             "max_cost_lamports": 100000, "max_runtime_seconds": 10, "workflow": {"workflow_id": identifier, "step_id": "batch"}})
         self.assertEqual(quote.status_code, 200, quote.text)
-        self.assertTrue(quote.json()["message"].startswith("Aperture execution authorization v4\n"))
+        self.assertTrue(quote.json()["message"].startswith("Aperture execution authorization v5\n"))
         stop = self.client.post("/owners/workflows/stop", json=self.control("stop-assigned-workflow",
             body={"workflow_id": identifier}, task_id=identifier))
         self.assertEqual(stop.status_code, 200, stop.text)

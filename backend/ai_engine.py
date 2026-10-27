@@ -54,39 +54,6 @@ def get_sol_price_from_pyth() -> float | None:
     return None
 
 
-def sigmoid(x: float) -> float:
-    """Sigmoid function for the Aperture Penalty Scale (APS)."""
-    try:
-        return 1.0 / (1.0 + math.exp(-15.0 * (x - 0.4)))
-    except OverflowError:
-        return 0.0 if x < 0.4 else 1.0
-
-
-def calculate_ast_quote_rate(complexity_sum: float, hw_power: float = 2.5, telemetry_delta: float = 0.0) -> float:
-    """Return a bounded per-second SOL rate from configured complexity inputs.
-
-    This deterministic heuristic is not a worker benchmark or a live market price.
-    """
-    # Base rate in SOL per second (converted to lamports by the caller).
-    base_rate_sol = 0.00000150
-
-    if complexity_sum <= 0:
-        return 0.00000050  # Eco standby minimum (500 lamports/sec)
-
-    # Scale according to algorithmic workload
-    complexity_factor = max(0.2, complexity_sum / 30.0)
-
-    rate_per_sec = (base_rate_sol * complexity_factor) / max(0.5, hw_power)
-
-    # Aperture Penalty Scale (APS) for hardware pressure
-    aps_multiplier = 1.0 + (2.0 * sigmoid(telemetry_delta))
-
-    final_rate = round(rate_per_sec * aps_multiplier, 8)
-
-    # Bounded safely between 0.00000050 SOL/sec (500 lamports) and 0.00002500 SOL/sec (25,000 lamports)
-    return max(0.00000050, min(final_rate, 0.00002500))
-
-
 class CodeComplexityVisitor(ast.NodeVisitor):
     """
     Python AST source-policy and workload-complexity analyzer.
@@ -261,7 +228,7 @@ def analyze_code_ast(code_snippet: str) -> dict:
             "predicted_sec": 0,
             "cpu": 100,
             "ram": 10,
-            "reason": f"AI Sentinel Sandbox Alert: {visitor.security_violations[0]}"
+            "reason": f"Static source policy blocked this workload: {visitor.security_violations[0]}"
         }
 
     # 2. Check for infinite loops or heavy constructs
@@ -347,7 +314,6 @@ def analyze_code_complexity(code_snippet: str) -> dict:
     Submitted source is never sent to a third-party model provider.
     """
     ast_audit = analyze_code_ast(code_snippet)
-    sol_price = get_sol_price_from_pyth()
     if ast_audit.get("security") != "SAFE":
         return {
             "status": "blocked",
@@ -355,22 +321,15 @@ def analyze_code_complexity(code_snippet: str) -> dict:
             "predicted_sec": 0,
             "complexity_score": 100,
             "scores": ast_audit,
-            "calculated_rate_sol_sec": 0.0,
-            "sol_market_price": sol_price,
             "reason": ast_audit.get("reason", "Malicious code detected.")
         }
 
     total_complexity = ast_audit["cpu"] + ast_audit["ram"]
-    price_per_sec = calculate_ast_quote_rate(total_complexity, hw_power=2.5, telemetry_delta=0.0)
-
     return {
         "status": "success",
         "security": "SAFE",
         "predicted_sec": ast_audit["predicted_sec"],
         "complexity_score": total_complexity,
-        "complexity_sum": total_complexity,
         "scores": ast_audit,
-        "calculated_rate_sol_sec": price_per_sec,
-        "calculated_rate_lamports_sec": int(price_per_sec * 1_000_000_000),
-        "sol_market_price": sol_price
+        "reason": ast_audit.get("reason"),
     }
